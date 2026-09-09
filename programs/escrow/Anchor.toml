@@ -1,0 +1,19 @@
+skip_local_validator = true
+
+[toolchain]
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.devnet]
+escrow = "6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS"
+
+[provider]
+cluster = "devnet"
+wallet = "/Users/umairakram/bountycam-keys/upgrade-authority.json"
+
+[scripts]
+test = "cargo test"
+
+[hooks]
