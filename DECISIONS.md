@@ -214,7 +214,10 @@ implementations must reject the same inputs but need not match codes. No code ex
 for duplicate keys, because this package cannot receive them and a code that can never
 be thrown misleads — the same reasoning as the unreachable `Cancelled` variant. Check
 order is normative: cycle check before depth check at every container. For multi-fault
-inputs the thrown code is unspecified, and tests must not pin one.
+inputs the thrown code is unspecified, and tests must not pin one. The plainness check
+precedes property checks, and NON_INTEGER_NUMBER applies to finite numbers only. This
+removes the two overlaps the conformance tests pin; other overlaps remain unspecified
+under §6.3.
 
 **D35 — Value model: accept only values that map exactly onto the JSON data model;
 reject anything the implementation would otherwise drop or guess about.** Plain objects
