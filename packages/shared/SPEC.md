@@ -470,7 +470,7 @@ reject exactly the same inputs, but need not reproduce the codes.
 | Code | Rejected input |
 |---|---|
 | `NON_FINITE_NUMBER` | NaN, positive or negative Infinity |
-| `NON_INTEGER_NUMBER` | any number that is not an integer |
+| `NON_INTEGER_NUMBER` | any finite number that is not an integer |
 | `UNSAFE_INTEGER` | integers beyond the safe range (§1.3) |
 | `BIGINT` | BigInt values |
 | `UNDEFINED` | undefined, anywhere it appears |
@@ -521,7 +521,14 @@ Consequences of the order:
   non-cyclic ancestors, re-entry is at depth `P + n + 1`, so `P + n ≤ 64` throws
   `CYCLIC` and `P + n ≥ 65` throws `DEPTH_LIMIT`.
 
+For every value, the plainness check — prototype, and `Array.isArray` for arrays (§1.1) —
+runs before any own-property check. A non-plain value throws `NON_PLAIN_OBJECT` whatever
+its properties; without this order, `RegExp` (own `lastIndex`) and boxed `String` (own
+`length`) would also match `NON_ENUMERABLE_PROPERTY`. This order, like cycle-before-depth,
+is normative.
+
 For an input with several independent faults, or one fault matching more than one code,
 which single code is thrown is **unspecified**; that a `SpecError` is thrown is the only
 normative requirement. Test suites must not pin a specific code for such inputs. The
-cycle-versus-depth order above is the one exception: it is normative.
+cycle-versus-depth and plainness-first orders above are the exceptions: they are
+normative.
