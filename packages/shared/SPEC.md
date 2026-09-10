@@ -1,6 +1,8 @@
 # `@hackathon/shared` — Canonicalisation and Hashing Specification
 
 **Status:** normative. Written before implementation (Session 5).
+**Amended:** Session 5 part 2 — error model (§6), object and array shape rules
+(§1.1, §1.7), byte-input rules (§2, §3.2). Amended before implementation.
 **Scope:** `canonicalise`, `sha256`, `merkleRoot` as exported from
 `packages/shared/src/index.ts`.
 
@@ -41,6 +43,24 @@ Only these types are accepted, at any nesting depth:
 No whitespace is ever emitted outside string contents (RFC 8785 §3.2.1).
 *Why:* whitespace freedom is the most common source of hash divergence;
 forbidding it entirely removes the freedom.
+
+A **plain object** is accepted only if its prototype is `Object.prototype` or `null` and
+every own property is a string-keyed, enumerable data property. An object with any
+symbol-keyed property, any accessor (getter or setter) property, or any non-enumerable own
+property is rejected (§1.7). Boxed primitives (`String`, `Number`, `Boolean` objects) are
+non-plain and rejected.
+*Why:* each excluded shape is either invisible to JSON or can yield a different value on a
+different read, so accepting it would let two callers hash different structures silently.
+
+An **array** is accepted only if `Array.isArray` is true, its prototype is
+`Array.prototype`, and it is dense and carries nothing extra: every index from `0` to
+`length - 1` is an own, enumerable data property, and no other own property exists
+besides `length`. Any other array-like value — including `Array` subclass instances and
+arrays with a `null` or otherwise altered prototype — is non-plain and rejected with
+`NON_PLAIN_OBJECT` (§6.1). Holes and extra properties (named or symbol-keyed) are
+rejected (§1.7).
+*Why:* a hole is absent to some serialisers and a value to others, and extra properties
+are invisible to JSON — both are silent-divergence hazards.
 
 ### 1.2 Key ordering
 
@@ -183,19 +203,40 @@ across composed forms must normalise before calling `canonicalise`.
 | `undefined` | silent-drop divergence (§1.6) |
 | functions, symbols | not data |
 | non-plain objects (note 1 below) | several plausible serialisations each |
-| cyclic structures | cannot terminate |
+| objects with symbol-keyed properties | invisible to JSON; silent omission (§1.1) |
+| objects or arrays with accessor properties | a getter may differ per read (§1.1) |
+| objects with non-enumerable own properties | skipped by enumeration; silent omission (§1.1) |
+| arrays with non-enumerable indices | skipped by enumeration; silent omission (§1.1) |
+| sparse arrays (holes) | a hole is absent to some serialisers, a value to others (§1.1) |
+| arrays with extra own properties | invisible to JSON; silent omission (§1.1) |
+| cyclic structures (note 3 below) | cannot terminate |
 | lone surrogates in any string or key | no valid UTF-8 encoding (§1.4) |
 | duplicate keys (when input is parsed JSON text) | parser-dependent survivor (§1.2) |
 | nesting depth > 64 (note 2 below) | divergent stack-overflow behaviour |
 
-Note 1 — "non-plain objects" are `Date`, `Map`, `Set`, `RegExp`, typed
-arrays, and class instances. Each has multiple plausible serialisations;
-forcing callers to convert to plain data makes the choice explicit.
+For the TypeScript package, the thrown error class and per-row codes are defined in §6.
+
+Note 1 — an object is **plain** only if its prototype is `Object.prototype` or `null`
+(§1.1). `Date`, `Map`, `Set`, `RegExp`, typed arrays, class instances, and boxed
+primitives (`String`, `Number`, `Boolean` objects) are all non-plain. An array is plain
+only if `Array.isArray` is true and its prototype is `Array.prototype`; `Array` subclass
+instances and null-prototype arrays are non-plain (§1.1). Each non-plain shape has
+multiple plausible serialisations; forcing callers to convert to plain data makes the
+choice explicit.
 
 Note 2 — depth is counted as the number of nested containers: a top-level
 scalar is depth 0, `{"a":[1]}` has depth 2. Depth exactly 64 is accepted.
 The limit exists because one implementation must not overflow its stack
 where another succeeds — agreement on failure is part of the spec.
+
+Note 3 — a **cycle** is a container that is its own ancestor on the current traversal
+path. Shared references that are not ancestors — the same container reached more than
+once along different paths — are not cycles; they are accepted and serialised in full
+at each occurrence.
+
+Note 4 — stated limit: `Proxy` objects cannot be detected portably from inside
+JavaScript. Canonicalising a `Proxy` is a caller error; neither the output nor the
+error behaviour for a `Proxy` input is covered by this spec.
 
 ### 1.8 Recursion
 
@@ -211,6 +252,13 @@ divergence in exactly the code paths tested least.
 SHA-256 as specified in **FIPS 180-4**, no variations. Input is a byte
 array; output is the raw 32-byte digest.
 
+- **Input must be a `Uint8Array` instance.** Subclasses such as Node's `Buffer` are
+  accepted. Exactly the bytes in the view are hashed: `length` bytes starting at
+  `byteOffset` in the underlying buffer. Everything else is rejected — `ArrayBuffer`,
+  `DataView`, `Uint8ClampedArray` and all other typed arrays, strings, and arrays of
+  numbers.
+  *Why:* near-miss byte types invite silent coercion or hash the wrong bytes; a
+  `Uint8Array` view carries exactly the intended bytes and needs no interpretation.
 - **String inputs must be UTF-8 encoded by the caller before hashing.** The
   encoder must not add a byte-order mark. A leading U+FEFF already present in
   a string is content: it is encoded (`EF BB BF`) and hashed, never stripped.
@@ -253,10 +301,12 @@ with any node of the tree.
 
 ### 3.2 Tree construction
 
-1. Every input must be exactly 32 bytes; otherwise **reject**.
-   *Why:* a wrong-length input is always a caller bug (an unhashed payload or
-   a hex string), and concatenating it would silently produce a valid-looking
-   root.
+1. The input must be an array. Every element must be a `Uint8Array` instance
+   (subclasses such as `Buffer` accepted; bytes-in-view rule per §2) whose view is
+   exactly 32 bytes; otherwise **reject**.
+   *Why:* a wrong-length or wrong-type input is always a caller bug (an unhashed
+   payload or a hex string), and concatenating it would silently produce a
+   valid-looking root.
 2. Map inputs, in the order given, to leaf nodes via `L`. Order is
    significant and is never sorted by this function.
    *Why:* evidence order is meaningful to the policy; sorting here would hide
@@ -400,4 +450,78 @@ An implementation of this spec must:
 2. reject every input class in §1.7, §2 (wrong types), §3.2 step 1, and
    §3.3 (empty list) with an error — not a default, not a warning;
 3. contain no configuration options affecting output. One input, one output,
-   in every language, forever.
+   in every language, forever;
+4. (TypeScript package only) throw `SpecError` carrying the §6 code for every
+   rejection.
+
+---
+
+## 6. Error model (TypeScript package)
+
+The TypeScript package exports one error class, `SpecError`, which extends `Error` and
+carries a readonly `code` field naming the violated rule. Every rejection in this spec
+throws `SpecError`. Codes are uppercase (project decision D20).
+
+Codes are **normative for the TypeScript package only**. Any other implementation must
+reject exactly the same inputs, but need not reproduce the codes.
+
+### 6.1 canonicalise codes
+
+| Code | Rejected input |
+|---|---|
+| `NON_FINITE_NUMBER` | NaN, positive or negative Infinity |
+| `NON_INTEGER_NUMBER` | any number that is not an integer |
+| `UNSAFE_INTEGER` | integers beyond the safe range (§1.3) |
+| `BIGINT` | BigInt values |
+| `UNDEFINED` | undefined, anywhere it appears |
+| `FUNCTION_OR_SYMBOL` | function or symbol values |
+| `NON_PLAIN_OBJECT` | non-plain objects, including boxed primitives (§1.7 note 1) |
+| `SYMBOL_KEY` | an object with a symbol-keyed own property |
+| `ACCESSOR_PROPERTY` | an accessor property on an object or array |
+| `NON_ENUMERABLE_PROPERTY` | a non-enumerable own property or array index; `length` exempt |
+| `ARRAY_HOLE` | a sparse array |
+| `ARRAY_EXTRA_PROPERTY` | an array own property besides indices and `length` |
+| `CYCLIC` | cyclic structures |
+| `LONE_SURROGATE` | a lone surrogate in any string or key |
+| `DEPTH_LIMIT` | nesting depth greater than 64 |
+
+The duplicate-keys row of §1.7 has no code: it applies only to parsed JSON text (§1.2),
+which this package cannot receive. A code that can never be thrown would only mislead.
+
+### 6.2 sha256 and merkleRoot codes
+
+| Code | Function | Rejected input |
+|---|---|---|
+| `NOT_BYTES` | `sha256` | input is not a `Uint8Array` instance (§2) |
+| `NOT_AN_ARRAY` | `merkleRoot` | input is not an array |
+| `EMPTY_LIST` | `merkleRoot` | the input array is empty (§3.3) |
+| `ELEMENT_NOT_BYTES` | `merkleRoot` | an element is not a `Uint8Array` instance |
+| `ELEMENT_NOT_32_BYTES` | `merkleRoot` | an element whose view is not exactly 32 bytes |
+
+### 6.3 Check order
+
+Traversal is depth-first. On entering any container, two checks run in a fixed,
+normative order: the **cycle check first**, then the **depth check**. The cycle check
+compares the entered container against the containers on the current traversal path
+(note 3 of §1.7). The depth check throws `DEPTH_LIMIT` if the entered container is at
+depth 65 or deeper (note 2 of §1.7: depth exactly 64 is accepted).
+
+Consequences of the order:
+
+- The deepest container entry at which any check runs is depth 65: the depth check
+  throws there, so no container at depth 66 is ever entered.
+- A cycle whose ancestor is re-entered at depth 65 or shallower throws `CYCLIC` — the
+  cycle check runs before the depth check even at depth 65.
+- A cycle whose ancestor would first be re-entered at depth 66 or deeper never closes:
+  the traversal throws `DEPTH_LIMIT` at depth 65 first.
+- Boundary, counted from the top level: a cycle through `n` distinct containers
+  re-enters its ancestor at depth `n + 1`, so `n ≤ 64` throws `CYCLIC` and `n ≥ 65`
+  throws `DEPTH_LIMIT`. A self-containing object (`n = 1`) re-enters at depth 2.
+- General form: for a cycle of `n` containers whose first container sits below `P`
+  non-cyclic ancestors, re-entry is at depth `P + n + 1`, so `P + n ≤ 64` throws
+  `CYCLIC` and `P + n ≥ 65` throws `DEPTH_LIMIT`.
+
+For an input with several independent faults, or one fault matching more than one code,
+which single code is thrown is **unspecified**; that a `SpecError` is thrown is the only
+normative requirement. Test suites must not pin a specific code for such inputs. The
+cycle-versus-depth order above is the one exception: it is normative.
