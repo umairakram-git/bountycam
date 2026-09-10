@@ -1,10 +1,12 @@
 use anchor_lang::prelude::*;
 
 #[constant]
-pub const COUNTER_SEED: &[u8] = b"counter";
+pub const BOUNTY_SEED: &[u8] = b"bounty";
 
+/// Platform fee in basis points, charged on top of the reward.
 #[constant]
-pub const HELLO_WORLD_LAMPORTS: u64 = 1;
+pub const PLATFORM_FEE_BPS: u64 = 0;
 
+/// Highest assurance level a policy may require.
 #[constant]
-pub const MAX_COUNT: u64 = 10;
+pub const MAX_ASSURANCE_LEVEL: u8 = 4;

@@ -10,7 +10,7 @@ skip-lint = false
 escrow = "6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS"
 
 [provider]
-cluster = "devnet"
+cluster = "localnet"
 wallet = "/Users/umairakram/bountycam-keys/upgrade-authority.json"
 
 [scripts]
