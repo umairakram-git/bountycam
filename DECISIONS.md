@@ -150,3 +150,48 @@ was not in the specification.
 **D25 — The program builds under Rust 1.89.0** via the Anchor template's
 `rust-toolchain.toml`, independent of the shell default of 1.98.1. Leave it —
 a per-directory pin is correct for reproducible program builds.
+
+---
+
+## Canonicalisation and hashing (SPEC.md, Session 5)
+
+**D26 — `canonicalise` accepts only safe integers; every other number is
+rejected.** RFC 8785 is the baseline, but its ECMAScript float serialisation
+is a cross-language hazard and D5 already bans floats. Fractional quantities
+travel as strings under fixed profiles: GPS at exactly 7 decimal places,
+token amounts as base-unit integer strings.
+
+**D27 — No unicode normalisation in `canonicalise`.** Matches RFC 8785.
+Normalisation tables vary by Unicode version and platform library, which
+would make the hash depend on the runtime. Differently-composed strings are
+different strings; producers normalise before calling if they need equality.
+
+**D28 — Key ordering is UTF-16 code unit order, per RFC 8785 §3.2.3.**
+Chosen over UTF-8 byte order so off-the-shelf JCS libraries agree. The two
+orders differ for keys containing characters outside the BMP; SPEC.md
+carries an explicit warning for UTF-8-native implementations (Rust).
+
+**D29 — Merkle construction: RFC 6962-style domain separation; odd nodes
+promoted.** Leaf nodes re-hash the input under a one-byte leaf prefix and
+internal nodes use a distinct one-byte prefix — without the separation an
+internal node can be presented as a leaf, which is unfixable after launch.
+Odd node counts promote the last node unchanged; Bitcoin's duplicate-last
+lets two distinct lists share a root (CVE-2012-2459). Empty list rejected;
+single-element root is the leaf node.
+
+**D30 — Nesting depth limit 64; agreement on failure is normative.** An
+input accepted by one implementation and rejected by another is a spec
+violation, so stack-overflow behaviour cannot be left to differ.
+
+**D31 — Spec documents describe escape sequences in words, never as literal
+text, and keep every line ≤ 100 characters.** Literal escapes were
+interpreted in transit twice during Session 5, and over-long table rows
+displayed truncated during review — in a normative document, display
+corruption is indistinguishable from a defective rule.
+
+**D32 — Memory files under ~/.claude/ are written without an approval
+prompt.** This happened twice in Session 5, including once after the rule
+requiring approval for files outside the repository was added. The
+approval gate appears not to cover those writes. Treat those files as
+able to change without review, and inspect them periodically rather than
+relying on the rule.

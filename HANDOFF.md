@@ -1,8 +1,8 @@
 # BountyCam — Handoff
 
 **Date:** 10 September 2026
-**Sessions complete:** 1–4
-**Next session:** 5 — shared package specification
+**Sessions complete:** 1–4, and 5 part 1 (specification)
+**Next session:** 5 part 2 — shared package implementation, then 6
 **Deadline:** 8 October 2026 (28 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/developer/hackathon202609`
@@ -63,12 +63,12 @@ hackathon202609/
 │   ├── api/          Fastify + TS, node-pg-migrate, 2 migrations
 │   └── mobile/       Expo + TS skeleton, android/ kept, ios/ deleted
 ├── packages/
-│   └── shared/       canonicalise / sha256 / merkleRoot — STUBS ONLY
+│   └── shared/       SPEC.md (normative) + stubs — implementation pending
 └── programs/
     └── escrow/       Anchor 1.1.2, SPEC.md, 10 passing tests
 ```
 
-Six commits on `main`, all pushed. Working tree clean.
+Eight commits on `main`, all pushed. Working tree clean.
 
 ---
 
@@ -128,28 +128,46 @@ Deployed to devnet and confirmed working.
 
 ---
 
-## Next: Session 5 — shared package specification
+## Session 5 (part 1) — shared package specification
 
-Write `packages/shared/SPEC.md` first. No implementation.
+`packages/shared/SPEC.md` written before any implementation, and committed.
+Normative for `canonicalise`, `sha256`, `merkleRoot`. Key choices (recorded
+as D26–D30):
 
-Three functions get computed independently by the phone, the server, and a
-standalone verifier. If any two disagree by a single byte, payment fails on
-valid evidence and the failure presents as a bug in whichever component is
-being debugged at the time.
+- RFC 8785 baseline with stated deviations: only safe integers accepted as
+  numbers, everything else rejected; fractional quantities travel as strings
+  under fixed profiles (GPS at exactly 7 decimal places, token amounts in
+  base units)
+- No unicode normalisation; key order is UTF-16 code unit order, with an
+  explicit warning for UTF-8-native implementations
+- Merkle: RFC 6962-style domain separation (one-byte leaf and internal
+  prefixes), left-to-right pairing, odd node promoted not duplicated,
+  empty list rejected, single element is its leaf node
+- Rejection rules are normative — agreement on failure is part of the spec
+  (depth limit 64, undefined rejected, lone surrogates rejected)
 
-The spec must define:
+Five worked test vectors computed from raw terminal output. Merkle roots
+re-verified by recomputing from the intermediate digests published in the
+spec itself — all three checks pass.
 
-- `canonicalise` — key ordering and collation, number representation as
-  strings, string escaping, unicode normalisation, treatment of null and
-  empty containers, what is rejected outright
-- `sha256` — input encoding, BOM handling, hex convention
-- `merkleRoot` — leaf hashing, domain separation, concatenation order, odd-node
-  handling, empty and single-element roots
+Process incident worth keeping: escape sequences written literally as
+examples were interpreted in transit twice, and the spec's longest table
+rows displayed truncated during review, reading as corrupted normative
+text. The spec now describes escape forms in words, in tables, and no line
+exceeds 100 characters (verified with awk). Recorded as D31.
 
-Reference RFC 8785 and state explicitly where it deviates and why.
+---
 
-**Five worked test vectors are the deliverable that matters.** They are what
-lets a Rust verifier and a TypeScript client prove agreement.
+## Next: Session 6 — API auth
+
+First, close out Session 5 part 2: implement the three functions in
+`packages/shared` exactly to SPEC.md, with the five vectors as the test
+suite. Where implementation and spec disagree, the spec wins. The stub
+JSDoc in `src/index.ts` says all numbers serialise as strings — that
+contradicts SPEC.md §1.3; fix the comment, not the spec.
+
+Session 6 proper (BACKLOG week 1): SIWS challenge/verify, JWT issuance
+(7-day, per D6), user records keyed by wallet address.
 
 ---
 

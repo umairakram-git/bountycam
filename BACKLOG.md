@@ -47,6 +47,23 @@ it — template-supplied agent settings can carry permissions that were not chos
 
 ---
 
+## Outstanding from Session 5 part 1
+
+- Implement the three functions to SPEC.md; the five vectors are the test
+  suite, and the spec wins over any implementation on disagreement.
+- Stub JSDoc in `packages/shared/src/index.ts` claims all numbers serialise
+  as strings — contradicts SPEC.md §1.3. Fix during implementation.
+- The GPS 7-decimal-place profile is normative for producers but unenforced
+  by `canonicalise`. Decide where the check lives when policy creation is
+  built (Session 7).
+- Any Rust implementation (Session 17 standalone verifier) must sort keys
+  by UTF-16 code units, not bytes. Flagged in SPEC.md; easy to miss.
+- Canonical-file drift: HANDOFF/DECISIONS/BACKLOG exist both in the repo
+  and in Claude project knowledge. The repo is the single source; project
+  knowledge is uploaded from the repo at session close, never the reverse.
+
+---
+
 ## Notes owed to `solana-dev-notes`
 
 - Unknown keys in `Anchor.toml` are silently ignored, not rejected.
@@ -64,13 +81,13 @@ it — template-supplied agent settings can carry permissions that were not chos
 ## Remaining plan
 
 Revised from the original four-week plan after the D10 positioning change.
-Sessions 1–4 complete.
+Sessions 1–4 and 5 part 1 complete.
 
 ### Week 1 remainder
 
 | # | Scope |
 |---|---|
-| 5 | `packages/shared` — spec first, then `canonicalise` / `sha256` / `merkleRoot` with test vectors |
+| 5 | Part 1 (SPEC.md, five vectors) **done 10 Sep**. Part 2: implement to spec |
 | 6 | API — SIWS challenge/verify, JWT, user records |
 | 7 | API — policy creation, canonical JSON, policy hash, bounty CRUD |
 
