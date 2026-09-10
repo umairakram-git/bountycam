@@ -23,6 +23,8 @@ it can stall a submission but cannot move USDC. Only `approve` (requester) or
 **D5 — Hashing: sorted-key JSON, numbers as strings, SHA-256, Merkle root.**
 No floats anywhere — GPS coordinates are strings. Float serialisation differs
 across languages and would break cross-implementation agreement.
+*Reversal note:* superseded in part by D26. Safe integers serialise as JSON numbers;
+floats remain banned; fractional quantities travel as strings under fixed profiles.
 
 **D6 — Identity: wallet address is the primary key; SIWS issues a 7-day JWT.**
 
@@ -195,3 +197,29 @@ requiring approval for files outside the repository was added. The
 approval gate appears not to cover those writes. Treat those files as
 able to change without review, and inspect them periodically rather than
 relying on the rule.
+
+---
+
+## Shared package implementation (Session 5 part 2)
+
+**D33 — SHA-256 backend: `@noble/hashes`, exact-pinned at 2.4.0.** It is synchronous,
+pure JS, and runs identically in Node and React Native. Rejected: `node:crypto` (absent
+in React Native; would force a backend swap at Session 10) and a hand-rolled
+implementation (conformance would rest on our tests alone). The test suite cross-checks
+it against `node:crypto` as a test-only oracle.
+
+**D34 — Error model: one exported class, `SpecError`, with a readonly uppercase `code`
+(SPEC.md §6).** Codes are normative for the TypeScript package only; other
+implementations must reject the same inputs but need not match codes. No code exists
+for duplicate keys, because this package cannot receive them and a code that can never
+be thrown misleads — the same reasoning as the unreachable `Cancelled` variant. Check
+order is normative: cycle check before depth check at every container. For multi-fault
+inputs the thrown code is unspecified, and tests must not pin one.
+
+**D35 — Value model: accept only values that map exactly onto the JSON data model;
+reject anything the implementation would otherwise drop or guess about.** Plain objects
+have prototype `Object.prototype` or `null`. Arrays have prototype `Array.prototype`,
+are dense, and carry no extra properties. Symbol keys, accessors, non-enumerable
+properties and boxed primitives are rejected. Proxies cannot be detected portably and
+are a stated caller error. `sha256` and `merkleRoot` accept any `Uint8Array`, including
+`Buffer`, hashing exactly the bytes in view; all other byte-like types are rejected.
