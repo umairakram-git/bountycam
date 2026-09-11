@@ -226,3 +226,9 @@ are dense, and carry no extra properties. Symbol keys, accessors, non-enumerable
 properties and boxed primitives are rejected. Proxies cannot be detected portably and
 are a stated caller error. `sha256` and `merkleRoot` accept any `Uint8Array`, including
 `Buffer`, hashing exactly the bytes in view; all other byte-like types are rejected.
+
+**D36 — Test scripts name test files explicitly.** On Node 22.22.2, `node --test dist`
+executed no test files and reported one trivial pass (tests 1, pass 1, fail 0), so every
+earlier pass in packages/shared ran nothing. The script now runs dist/index.test.js; a
+missing file exits 1. A test run is only evidence if its summary shows the expected test
+count.
