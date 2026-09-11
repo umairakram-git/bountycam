@@ -45,14 +45,24 @@ before it is removed.
 **`apps/mobile/.claude/settings.json`** arrived from the Expo template. Review
 it — template-supplied agent settings can carry permissions that were not chosen.
 
+**`apps/api` test script uses an unquoted glob** — `node --test test/*.test.ts`.
+Verify in Session 6, from raw output, what it does when zero files match, before
+trusting any pass from it (see D36 for the false-pass class this guards against).
+
+**`typescript` and `@types/node` use caret ranges** in `packages/shared`
+devDependencies. Exact-pin them — the D19 pattern: caret semantics silently
+resolved `anchor-lang` to a version the CLI did not match.
+
 ---
 
 ## Outstanding from Session 5 part 1
 
-- Implement the three functions to SPEC.md; the five vectors are the test
-  suite, and the spec wins over any implementation on disagreement.
-- Stub JSDoc in `packages/shared/src/index.ts` claims all numbers serialise
-  as strings — contradicts SPEC.md §1.3. Fix during implementation.
+- ~~Implement the three functions to SPEC.md; the five vectors are the test
+  suite, and the spec wins over any implementation on disagreement.~~
+  Done 11 September (Session 5 part 2) — 66 conformance tests passing.
+- ~~Stub JSDoc in `packages/shared/src/index.ts` claims all numbers serialise
+  as strings — contradicts SPEC.md §1.3. Fix during implementation.~~
+  Done 11 September (Session 5 part 2).
 - The GPS 7-decimal-place profile is normative for producers but unenforced
   by `canonicalise`. Decide where the check lives when policy creation is
   built (Session 7).
@@ -75,6 +85,9 @@ it — template-supplied agent settings can carry permissions that were not chos
   Fix: `solana program extend <program-id> 10240 --url devnet` first.
 - Failed deploys strand buffer accounts holding real rent. One cost 1.06 SOL.
   Check `solana program show --buffers` after every failure.
+- `node --test <directory>` on Node 22 runs no files and reports a pass
+  (tests 1, pass 1, fail 0). Name test files explicitly and check that the
+  summary shows the expected test count.
 
 ---
 
