@@ -68,7 +68,7 @@ hackathon202609/
     └── escrow/       Anchor 1.1.2, SPEC.md, 10 passing tests
 ```
 
-Eight commits on `main`, all pushed. Working tree clean.
+All work committed and pushed to `main`. History: `git log`.
 
 ---
 

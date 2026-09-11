@@ -1,12 +1,14 @@
 # BountyCam — Backlog
 
-**As at:** 10 September 2026 · 28 days to deadline
+**As at:** 11 September 2026 · 27 days to deadline
 
 ---
 
 ## Blocking
 
-**Second Android device.** Needed by Session 6. The demo is a two-party
+**Second Android device.** Needed by Session 11 at the latest (assignment
+race gate requires two physical devices). Verify the second device's wallet
+before then. The demo is a two-party
 transaction between two phones and there is currently one. The requester side
 is light — wallet, funding transaction, review screen. No camera, GPS or
 attestation. Options:
@@ -94,13 +96,13 @@ resolved `anchor-lang` to a version the CLI did not match.
 ## Remaining plan
 
 Revised from the original four-week plan after the D10 positioning change.
-Sessions 1–4 and 5 part 1 complete.
+Sessions 1–5 complete.
 
 ### Week 1 remainder
 
 | # | Scope |
 |---|---|
-| 5 | Part 1 (SPEC.md, five vectors) **done 10 Sep**. Part 2: implement to spec |
+| 5 | Part 1 (SPEC.md, five vectors) **done 10 Sep**. Part 2: implement to spec **done 11 Sep** |
 | 6 | API — SIWS challenge/verify, JWT, user records |
 | 7 | API — policy creation, canonical JSON, policy hash, bounty CRUD |
 
