@@ -364,17 +364,19 @@ Canonical string:
 
 ### V2 — escaping, non-ASCII keys and values, key ordering, empty object
 
-Input:
+Input (JS literal; `NL` stands for the single character U+000A — per D31 the
+escape form is not written literally here):
 
 ```js
-{ z: null, "émoji": "🦘", note: "line1\nline2", a: [true, false, {}], _: "" }
+{ z: null, "émoji": "🦘", note: "line1" + NL + "line2", a: [true, false, {}], _: "" }
 ```
 
-Canonical string (75 bytes as UTF-8; `é` and `🦘` are literal, `\n` is the
-two-character escape; `é` U+00E9 sorts after `z` U+007A):
+Canonical string (75 bytes as UTF-8 with `BSN` replaced; `é` and `🦘` are
+literal; `BSN` stands for the two characters U+005C U+006E — the newline's
+two-character escape per §1.4; `é` U+00E9 sorts after `z` U+007A):
 
 ```
-{"_":"","a":[true,false,{}],"note":"line1\nline2","z":null,"émoji":"🦘"}
+{"_":"","a":[true,false,{}],"note":"line1BSNline2","z":null,"émoji":"🦘"}
 ```
 
 - `sha256(utf8(canonical))`:
