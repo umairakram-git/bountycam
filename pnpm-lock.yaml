@@ -65,10 +65,10 @@ importers:
         version: 2.4.0
     devDependencies:
       '@types/node':
-        specifier: ^22.10.0
+        specifier: 22.20.1
         version: 22.20.1
       typescript:
-        specifier: ^5.7.0
+        specifier: 5.9.3
         version: 5.9.3
 
 packages:
