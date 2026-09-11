@@ -1,11 +1,11 @@
 # BountyCam — Handoff
 
-**Date:** 10 September 2026
-**Sessions complete:** 1–4, and 5 part 1 (specification)
-**Next session:** 5 part 2 — shared package implementation, then 6
-**Deadline:** 8 October 2026 (28 days remaining)
+**Date:** 11 September 2026
+**Sessions complete:** 1–4, and 5 (both parts)
+**Next session:** 6 — API auth
+**Deadline:** 8 October 2026 (27 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
-**Local path:** `/Users/umairakram/developer/hackathon202609`
+**Local path:** `/Users/umairakram/Developer/hackathon202609`
 
 ---
 
@@ -158,16 +158,37 @@ exceeds 100 characters (verified with awk). Recorded as D31.
 
 ---
 
+## Session 5 (part 2) — shared package implementation
+
+SPEC.md was amended **before** implementation: error model (§6, one exported
+class `SpecError` with a readonly uppercase code), value model (plain-object
+and array shape rules, §1.1/§1.7), byte-input rules (§2, §3.2), and two
+normative check orders — cycle before depth, and plainness before any
+own-property check (§6.3). Recorded as D33–D35.
+
+- SHA-256 backend: `@noble/hashes`, exact-pinned 2.4.0 (D33), cross-checked
+  in tests against `node:crypto` as a test-only oracle.
+- 66 conformance tests, all passing; the five spec vectors reproduced
+  byte-for-byte from the amended spec.
+- `node --test dist` on Node 22.22.2 executed no test files and reported one
+  trivial pass — every earlier green run in this package had run nothing.
+  Found from raw output, fixed by naming `dist/index.test.js` explicitly
+  (D36); a missing file now exits 1.
+- An accessor property with `get` and `set` both undefined was serialised as
+  its (absent) value instead of rejected. Found test-first: the two new tests
+  failed red reporting UNDEFINED before the one-line fix in each of
+  `serialiseArray` and `serialiseObject`.
+
+---
+
 ## Next: Session 6 — API auth
 
-First, close out Session 5 part 2: implement the three functions in
-`packages/shared` exactly to SPEC.md, with the five vectors as the test
-suite. Where implementation and spec disagree, the spec wins. The stub
-JSDoc in `src/index.ts` says all numbers serialise as strings — that
-contradicts SPEC.md §1.3; fix the comment, not the spec.
+SIWS challenge/verify, JWT issuance (7-day, per D6), user records keyed by
+wallet address (BACKLOG week 1).
 
-Session 6 proper (BACKLOG week 1): SIWS challenge/verify, JWT issuance
-(7-day, per D6), user records keyed by wallet address.
+Also: verify from raw output what `apps/api`'s unquoted test-script glob
+(`node --test test/*.test.ts`) does when zero files match, before trusting
+any pass from it (BACKLOG; the false-pass class is D36).
 
 ---
 
@@ -184,3 +205,7 @@ Session 6 proper (BACKLOG week 1): SIWS challenge/verify, JWT issuance
   constant as though it were intended.
 - Start a fresh Claude Code session per numbered session. Compaction loses
   spec detail.
+- Approve a write only after seeing it.
+- A test pass counts only if the summary shows the expected test count. A
+  green run that executed nothing looks identical from the exit banner alone
+  (D36).
