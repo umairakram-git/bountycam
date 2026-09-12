@@ -142,6 +142,27 @@ find the parent; decide whether it matters (Session 7).
 - `node --test <directory>` on Node 22 runs no files and reports a pass
   (tests 1, pass 1, fail 0). Name test files explicitly and check that the
   summary shows the expected test count.
+- pnpm 11 hard-errors (`ERR_PNPM_IGNORED_BUILDS`) on unapproved dependency build
+  scripts, and its pre-run deps check blocks every `pnpm run`, not just install.
+  `@solana/web3.js` pulls `rpc-websockets@9.3.9`, which declares `bufferutil`
+  and `utf-8-validate` as real optionalDependencies. Main is unaffected today
+  only because those packages appear as optional-peer metadata under `ws` with
+  no lockfile entries. Session 10 inherits the failure the moment web3.js lands
+  in `apps/mobile` for real; `allowBuilds: false` for both is the correct
+  deliberate answer then — optional C accelerators for ws with a pure-JS
+  fallback, nothing needs them compiled.
+- Workaround without touching workspace config: call binaries directly
+  (`./node_modules/.bin/tsc`, `./node_modules/.bin/expo`) — pnpm's runner, and
+  with it the build-approval gate, never engages.
+- The two `minimumReleaseAgeExclude` entries in `pnpm-workspace.yaml` were
+  written by pnpm, not chosen. Confirm later whether that was deliberate — a
+  release-age guard that packages can edit themselves is not much of a guard.
+  Note only; nothing acted on.
+- The MWA spike harness (authorize / signMessages / signAndSendTransactions
+  with raw-vs-decoded address logging) lives unmerged on branch `spike/mwa`;
+  the matching ed25519 verifier is `/tmp/verify_mwa.mjs` (noble 2.4.0,
+  self-tested). Type-checks clean; dev-client APK builds in 6m30s via local
+  Gradle; no question ever ran on a device.
 
 ---
 
