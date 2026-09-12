@@ -478,8 +478,8 @@ ed25519 is deterministic, so 6b must reproduce the signature **byte-for-byte** w
 
 ## 13. Session 6b test list
 
-**Expected count: 37.** Per D36, a run is evidence only if the summary reports exactly
-37 tests; the test script names its files explicitly. Tests inject the controlled clock
+**Expected count: 38.** Per D36, a run is evidence only if the summary reports exactly
+38 tests; the test script names its files explicitly. Tests inject the controlled clock
 (section 8); no test sleeps to reach expiry. The vector key signs in tests only.
 
 Challenge endpoint:
@@ -535,6 +535,13 @@ Token and `GET /auth/me`:
 35. Token with wrong `aud` — 401 `TOKEN_INVALID` (wrong aud).
 36. Token with wrong `iss` — 401 `TOKEN_INVALID`.
 37. Token with a tampered payload — 401 `TOKEN_INVALID`.
+
+Concurrency:
+
+38. Two concurrent verifies with the same valid nonce, submitted with `Promise.all`:
+    exactly one responds 200; the other responds 401 `NONCE_CONSUMED`. Required by
+    SECURITY.md section 4 — two concurrent verifies with the same nonce yield exactly
+    one success; the section 6 step 5 atomic update is the mechanism under test.
 
 Non-test gates for 6b (verified from raw output, not part of the count): migrations up,
 down, up cleanly against a scratch database; `pnpm why @noble/curves` shows exactly the
