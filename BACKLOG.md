@@ -160,9 +160,9 @@ find the parent; decide whether it matters (Session 7).
   Note only; nothing acted on.
 - The MWA spike harness (authorize / signMessages / signAndSendTransactions
   with raw-vs-decoded address logging) lives unmerged on branch `spike/mwa`;
-  the matching ed25519 verifier is `/tmp/verify_mwa.mjs` (noble 2.4.0,
-  self-tested). Type-checks clean; dev-client APK builds in 6m30s via local
-  Gradle; no question ever ran on a device.
+  the matching ed25519 verifier is `apps/mobile/verify_mwa.mjs` on the same
+  branch (noble 2.4.0, self-tested). Type-checks clean; dev-client APK builds
+  in 6m30s via local Gradle; no question ever ran on a device.
 
 ---
 
