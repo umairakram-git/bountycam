@@ -162,7 +162,37 @@ find the parent; decide whether it matters (Session 7).
   with raw-vs-decoded address logging) lives unmerged on branch `spike/mwa`;
   the matching ed25519 verifier is `apps/mobile/verify_mwa.mjs` on the same
   branch (noble 2.4.0, self-tested). Type-checks clean; dev-client APK builds
-  in 6m30s via local Gradle; no question ever ran on a device.
+  in 6m30s via local Gradle; run on device 12 September — results below.
+- MWA spike results (12 September): all three questions pass on Seeker with
+  Seed Vault Wallet — Q1 authorize, Q2 signMessage verified independently
+  against `@noble/curves` 2.4.0, Q3 signAndSendTransactions confirmed
+  Finalized on devnet. Q1 and Q3 pass on Samsung A30 (SM_A305F, API 30) with
+  Solflare; Q2 was not run on the A30 — the requester path needs authorize and
+  transaction signing only.
+- `authorize(chain)` does not set the wallet's active network. Seed Vault
+  Wallet enforces its own network setting at transaction time and refuses with
+  a "Network mismatch" dialog when the wallet is on mainnet and the transaction
+  is devnet. Session 10 must detect the mismatch and say so plainly; a Scout
+  hitting this in the field sees a refusal followed by an opaque app-side
+  error.
+- The MWA response can be lost while the wallet dialog is open. Reproduced on
+  both wallets with different errors — TimeoutException on Seed Vault Wallet,
+  CancellationException on Solflare. In both cases the wallet submitted
+  successfully and the chain finalised the transaction while the app reported
+  failure. No double submission occurred in either case: the abandoned
+  attempts never reached the chain. This is the concrete case Session 15's
+  reconciliation exists for — state must come from confirmations, never from
+  the client result.
+- Both wallets return addresses base64-encoded, decoding correctly to the
+  expected base58 (checked against the wallet's own displayed address on the
+  A30). `wallet_uri` is undefined on both. signMessages on Seed Vault Wallet
+  returns a bare 64-byte signature, no payload wrapper.
+- An app identity with no `uri` triggers an unrecognised-domain warning and a
+  "trust this site" toggle in Seed Vault Wallet. Session 10 should supply a
+  real identity — the same question as AUTH.md section 14.2's domain value.
+- Mobile pulls `@noble/hashes` 1.8.0 while `apps/api` and `packages/shared`
+  pin 2.4.0. Not a spike problem, but `packages/shared` is the only place
+  hashing logic may live and mobile depends on it. Reconcile in Session 10.
 
 ---
 
@@ -220,8 +250,9 @@ Sessions 1–5 complete.
 **If Session 8 or 9 slips past day 14** — drop to a three-instruction escrow
 (fund / release / refund) and move dispute entirely off-chain.
 
-**If MWA misbehaves in Session 10** — stop everything. It blocks the whole
-mobile path.
+~~**If MWA misbehaves in Session 10** — stop everything. It blocks the whole
+mobile path.~~ Answered 12 September (MWA spike): all three MWA questions pass
+on device — see the spike results in the `solana-dev-notes` section above.
 
 **If c2pa-android proves unworkable in Session 12** — fall back to A0–A1 plus
 device attestation only, and reframe C2PA as designed-not-demonstrated. Weaker,
