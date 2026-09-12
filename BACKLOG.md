@@ -97,9 +97,12 @@ find the parent; decide whether it matters (Session 7).
   see the Session 7a open items below.
 - Any Rust implementation (Session 17 standalone verifier) must sort keys
   by UTF-16 code units, not bytes. Flagged in SPEC.md; easy to miss.
-- Canonical-file drift: HANDOFF/DECISIONS/BACKLOG exist both in the repo
-  and in Claude project knowledge. The repo is the single source; project
-  knowledge is uploaded from the repo at session close, never the reverse.
+- Canonical files: HANDOFF, DECISIONS and BACKLOG live in the repo and are
+  maintained there by Claude Code during each session. Project knowledge is
+  not kept in sync mid-session. At the start of a new chat session, Umair
+  uploads the current files from the repo as that session's snapshot. The
+  repo is always the source; project knowledge is never edited and never
+  uploaded back.
 
 ---
 
