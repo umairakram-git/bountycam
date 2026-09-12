@@ -194,6 +194,7 @@ any pass from it (BACKLOG; the false-pass class is D36).
 
 ## Working rules
 
+- Read SECURITY.md before touching the escrow, auth, verifier, or any key (D50).
 - Per-edit approval. Never blanket "allow all".
 - No autonomous commits or pushes. Umair pushes.
 - Single-purpose commits.

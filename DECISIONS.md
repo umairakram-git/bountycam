@@ -307,3 +307,18 @@ traffic.
 
 **D48 — Seeker SGT verification deferred to Session 10.** Sign-in proves key possession
 only; Seeker-gating belongs to the mobile session that can read the device.
+
+---
+
+## Security documents (12 September)
+
+**D49 — Acceptance moves on-chain; `cancel` fails after it.** D1 kept acceptance
+off-chain as a database row lock. That cannot enforce "the requester cannot withdraw
+after acceptance" against a requester who calls `cancel` directly. Session 8 adds an
+`accept` instruction that moves zero USDC and records the Scout; `cancel` is rejected
+from ACCEPTED onward. The database row lock remains as the race arbiter for who gets
+to accept first; the chain records the outcome. Supersedes the second half of D1.
+
+**D50 — `SECURITY.md` binds every session; `SECURITY-PRODUCTION.md` binds mainnet
+planning.** Changes to either need a D-entry. Read SECURITY.md before touching the
+escrow, auth, verifier, canonical serialisation, evidence storage or any key.
