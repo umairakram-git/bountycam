@@ -1,8 +1,8 @@
 # BountyCam — Handoff
 
 **Date:** 12 September 2026
-**Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2)
-**Next session:** 7 — policy creation, policy hash, bounty CRUD
+**Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a
+**Next session:** 7b — implement POLICY.md: migrations 5 and 6, policy creation, bounty CRUD
 **Deadline:** 8 October 2026 (26 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
@@ -235,14 +235,70 @@ Four single-purpose commits, each verified from raw output:
   22.20.1; tsconfig gained `rewriteRelativeImportExtensions`; the test
   script names both test files explicitly (D36).
 
-## Next: Session 7 — policies and bounties
+## Session 7a — policy and bounty specification
 
-Per BACKLOG: policy creation using canonical JSON and the policy hash from
-`packages/shared`, bounty CRUD behind the new auth middleware (`GET
-/auth/me`'s verification becomes the protected-route middleware). Open
-items riding along: `reward_amount` numeric scale (BACKLOG, Session 7);
-AUTH.md section 14.2 domain value and the fallback signing path both
-validate on device in Session 10.
+`apps/api/POLICY.md` written before implementation and committed (1328 lines, no
+line over 100, D53–D62): policy object v1, canonical form and hash, immutability,
+GPS profile, reward amount, bounty resource and states, five endpoints with
+numbered check orders, location approximation, idempotency, migrations 5 and 6 in
+prose, a 75-test list, worked vectors, open questions.
+
+Four rulings shaped the final document:
+
+1. **The salt is field sixteen** — the substantive one. Server-assigned, 64
+   lowercase hex, 32 bytes from `node:crypto` `randomBytes` via an injectable
+   randomness module, source tested. It exists because of the section 9.4 finding:
+   the policy hash is public on-chain after funding, and with everything else
+   disclosed the exact coordinates have about 2^33 candidates per snapped
+   0.01-degree cell — GPU-trivial, SECURITY.md section 11's warning realised.
+   Blinding must not be a side effect of a field that exists to identify
+   requirements — a future log line or error exposing a requirement id would
+   silently destroy the property — so the salt carries location privacy and the
+   requirement ids' pre-acceptance non-disclosure remains as defence in depth only.
+2. Session 11's race test seeds an `AVAILABLE` bounty by direct SQL — recorded as
+   decided, not a scheduling conflict; the `FUNDED` flip arrives with Session 15.
+3. Idempotency keys never expire in the MVP — recorded as a production retention
+   item (POLICY.md section 14, SECURITY-PRODUCTION.md section 5).
+4. Section 9 states the accepted disclosure: two bounties in one cell reveal
+   co-location to within roughly a kilometre.
+
+A late fix worth keeping: the first draft named Session 11 as owner of the GPS
+profile lift into `packages/shared`. Session 11 only consumes bounties, so the
+lift now has **no owner** — the gap is named in POLICY.md sections 5 and 14 and
+in D61, to be assigned when a session gains a client-side create flow.
+
+Two vectors published and verified by three routes each (`packages/shared`,
+`node:crypto`, `shasum -a 256`), all raw output:
+
+- V1 policy hash, 624 bytes:
+  `60b987301f7731a32c6de0ec871fae6e2e6f30dc99e2d1b202ca267d408591ea`
+- V2 request digest, 567 bytes:
+  `2dec8d20e7e49d2a4be1c3c67d6866a6cd77bcf8cf8b682847bc5a57e55d8a60`
+
+Process note for the record: while adding the salt, an error was found in text
+already reviewed and approved — section 8.2 said `policy_public` had "twelve
+top-level fields" where the arithmetic gives thirteen. The re-derivation forced by
+the salt edit caught it; this is the working rules producing exactly what they
+exist to produce, and a reason to keep re-deriving counts rather than trusting
+approved prose.
+
+## Next: Session 7b — two facts that must survive compaction
+
+Implement POLICY.md: migrations 5 and 6, policy creation, bounty CRUD behind the
+auth middleware. Two numbers Session 7b must carry in from the spec:
+
+- **The test count gate is exactly 75.** The suite passes only if the summary
+  reads `tests 75, pass 75, fail 0`; the migration scratch test reads
+  `tests 1, pass 1, fail 0`. Any other count is a failure, whatever the banner
+  says (D36).
+- **The migration 5 and 6 rollbacks are valid only while the tables are empty.**
+  Both re-add NOT NULL columns without defaults (POLICY.md section 11.3). Once 7b's
+  endpoints write the first row, the shipped rollbacks are documentation of the
+  reverse shape, not runnable escape hatches; rolling back after that requires a
+  data-preserving down migration written at that time.
+
+Riding along from earlier sessions: AUTH.md section 14.2 domain value and the
+fallback signing path both validate on device in Session 10.
 
 ---
 

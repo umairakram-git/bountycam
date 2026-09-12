@@ -4,23 +4,14 @@
 
 ---
 
-## Blocking
+## Second device — resolved 12 September
 
-**Second Android device.** Needed by Session 11 at the latest (assignment
-race gate requires two physical devices). Verify the second device's wallet
-before then. The demo is a two-party
-transaction between two phones and there is currently one. The requester side
-is light — wallet, funding transaction, review screen. No camera, GPS or
-attestation. Options:
+Samsung A30, API 30; devnet wallet funded and verified from the chain. Nothing
+blocking remains for the Session 11 two-device race gate.
 
-1. Any second physical Android at API 28+ — cleanest, a cheap handset suffices
-2. Emulator for the requester only — viable since no sensors are needed, but
-   wallet apps in emulators are historically unreliable. Test early.
-3. Web requester via wallet adapter — removes the problem entirely, but weakens
-   the two-phone story
-
-Recommendation: 1 if obtainable, 3 if not. Option 2 is the one that quietly
-consumes a session in week three.
+Worth not rediscovering: **Solflare is the working wallet on that handset.**
+Phantom's devnet balance display is unreliable there — use Solflare for the
+requester side.
 
 ---
 
@@ -57,9 +48,11 @@ output; the script now names both test files explicitly.
 devDependencies. Exact-pin them — the D19 pattern: caret semantics silently
 resolved `anchor-lang` to a version the CLI did not match.
 
-**`bounties.reward_amount` is `numeric` with no scale.** Decide precision
+~~**`bounties.reward_amount` is `numeric` with no scale.** Decide precision
 and scale (USDC base units per D26 vs decimal column) when bounty creation
-is built (Session 7).
+is built (Session 7).~~ Decided 12 September (Session 7a): `numeric(20, 0)`
+with a CHECK for the u64 bounds; base-unit integer string on the wire
+(POLICY.md section 6, D57). Migration lands in Session 7b.
 
 **DB `bounty_state` vs program state enums to reconcile.** The database
 enum and the on-chain state machine must not drift; reconcile when the
@@ -96,14 +89,42 @@ find the parent; decide whether it matters (Session 7).
 - ~~Stub JSDoc in `packages/shared/src/index.ts` claims all numbers serialise
   as strings — contradicts SPEC.md §1.3. Fix during implementation.~~
   Done 11 September (Session 5 part 2).
-- The GPS 7-decimal-place profile is normative for producers but unenforced
+- ~~The GPS 7-decimal-place profile is normative for producers but unenforced
   by `canonicalise`. Decide where the check lives when policy creation is
-  built (Session 7).
+  built (Session 7).~~ Decided 12 September (Session 7a): the check is request
+  validation in `apps/api`, the only producer (POLICY.md section 5, D61). The
+  lift into `packages/shared` when a second producer exists has no owner —
+  see the Session 7a open items below.
 - Any Rust implementation (Session 17 standalone verifier) must sort keys
   by UTF-16 code units, not bytes. Flagged in SPEC.md; easy to miss.
 - Canonical-file drift: HANDOFF/DECISIONS/BACKLOG exist both in the repo
   and in Claude project knowledge. The repo is the single source; project
   knowledge is uploaded from the repo at session close, never the reverse.
+
+---
+
+## Open items from Session 7a (POLICY.md section 14)
+
+- **The GPS profile lift has no owner.** The section 5 form rules lift into
+  `packages/shared` when a second producer of policy objects exists. No planned
+  session builds a mobile bounty-create flow — Session 11 is discovery, detail
+  and accept, all consumers — so the session that first gives a client a create
+  flow inherits the lift. Name it in POLICY.md sections 5 and 14 and in D61 when
+  it exists.
+- **Idempotency-key retention.** Consumed keys accumulate without bound; accepted
+  for the MVP. Production needs a retention decision under SECURITY-PRODUCTION.md
+  section 5 — when a key row may be pruned and what a replay after pruning
+  returns. Owed before any mainnet deployment, not before the hackathon.
+- **Program id deliberately not in the policy.** Binding is structural (the
+  funding transaction writes the hash into a program-owned account). Revisit if a
+  second deployment coexists with the first or a consumer must verify with no
+  chain access — either is a new policy version, never a seventeenth v1 field.
+- **Category taxonomy.** `category` is free text, 1 to 50 code units. Enum or
+  not is owed by the first session that builds category browsing UI (Session 11
+  per the current plan); tightening it later affects no hash.
+- **Provisional product bounds.** Windows, requirement count and prompt length,
+  capture radius, title and category lengths, query radius and pagination.
+  Amendable without touching any hash; review by Session 20's two-device runs.
 
 ---
 
