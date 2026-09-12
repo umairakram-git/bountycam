@@ -336,3 +336,83 @@ alphabet) decoding of wallet addresses to 32 public-key bytes but names no libra
 2026-08-28; version-aligned with the pinned `@noble/curves` 2.4.0 and `@noble/hashes`
 2.4.0. Gate after install: `pnpm why @scure/base` shows 2.4.0 as a direct dependency of
 `apps/api` only.
+
+---
+
+## Session 7a — policy and bounty specification (12 September)
+
+**D53 — The policy domain tag is a field, not a byte prefix.** `domain_tag`, value
+`BOUNTYCAM_POLICY_V1`, sits inside the hashed object. A prefix cannot coexist with the
+`canonical_json` storage rule (the stored value would be either invalid JSON or not the
+bytes hashed); a field round-trips through every consumer that parses and
+re-canonicalises; and the policy hash is an unsigned commitment, so placing the versioned
+tag inside extends SECURITY.md section 5's signed-object tag convention to commitments
+without weakening it.
+
+**D54 — Policy v1 has sixteen fields; a server-assigned salt carries the hash blinding.**
+`salt` is 64 lowercase hex characters — 32 bytes from `node:crypto` `randomBytes` through
+an injectable randomness module mirroring the clock pattern, source tested. The policy
+hash is public on-chain after funding, and with everything else disclosed the exact
+coordinates have about 2^33 candidates per snapped cell — GPU-trivial, exactly
+SECURITY.md section 11's warning. The salt, not the requirement ids, blinds that search:
+ids exist to identify requirements and identifiers get printed, so their non-disclosure
+before acceptance stays as defence in depth only, and a leaked id is an ordinary bug
+rather than a broken cryptographic property. The salt is never client-supplied, never in
+any public view, list item, error or log, and travels with the policy after acceptance.
+
+**D55 — One endpoint creates policy and bounty in a single transaction.** `POST
+/bounties` inserts the policy row, the requirement rows and the bounty row together and
+returns the full object beside its hash. Policies are write-once; one policy to exactly
+one bounty for the life of the database; no orphan-policy case exists to specify. Policy
+reuse, if it ever arrives, relaxes this by amendment.
+
+**D56 — Cancellation is a soft state change; `CANCELLED` means unfunded only.** Rows are
+never deleted; cancel is a conditional update from `DRAFT`, idempotent by state. A
+`CANCELLED` row has `program_account` null — no escrow ever existed for it. Funded
+cancellation, and the normative mapping of the remaining `bounty_state` values to their
+producing sessions, belong to Session 9's enum reconciliation; the enum is not narrowed.
+
+**D57 — `reward_amount` is a u64 base-unit string; `numeric(20, 0)` column; no doubles.**
+Wire form: ASCII digits only, no leading zeros, minimum 1, maximum 18446744073709551615.
+The column gains scale zero and a CHECK for the same bounds. No bound check may pass the
+value through an IEEE-754 double — above 2^53 a double rounds silently. The funding
+transaction's u64 is parsed from the client-verified policy object, never from the
+column.
+
+**D58 — Location privacy is a deterministic 0.01-degree grid snap.** Scaled-integer
+arithmetic (units of one ten-millionth of a degree), floor division into 0.01-degree
+cells, clamped extremes, cell centre returned — no floating point, no jitter, no
+server-computed distance in any response. Discovery filters and orders only on the
+snapped `location_public` column. Two bounties in one cell disclose co-location to
+within roughly a kilometre; accepted, and stated in the spec.
+
+**D59 — Idempotent create via a requester-scoped key and a canonical-form digest.**
+`idempotency_key` is a client uuid, unique per requester; `request_digest` is sha256
+over the canonical form of the whole request body, so transport re-serialisation still
+replays. Same key and digest: 201 replay of the stored bounty. Same key, different
+digest: 409. Failed validation never consumes the key. Keys never expire in the MVP —
+retention is a recorded production item (POLICY.md section 14, SECURITY-PRODUCTION.md
+section 5).
+
+**D60 — No derivable fields inside a hash.** The requirement object has no `sequence`:
+it would always equal the item's array position, and an always-derivable field inside a
+hash invites a later implementation to derive it differently — the D34 unreachable-code
+reasoning applied to data. Canonical array order is the commitment; the database
+`sequence` column is a derived read-model copy, never authoritative.
+
+**D61 — GPS profile validated at the producer boundary; the lift has no owner yet.** The
+seven-decimal form rules are request validation in `apps/api`, the only producer of
+policy objects. They lift into `packages/shared` when a second producer exists — a
+client that formats coordinates for a create request. No session in the current plan
+builds a mobile bounty-create flow (Session 11 is discovery, detail and accept, all
+consumers), so no session owns the lift; the gap is named in POLICY.md sections 5 and
+14, and the session that first gives a client a create flow inherits it. `canonicalise`
+is never changed for this.
+
+**D62 — Bounty columns follow the policy.** `deadline` and `review_window_seconds` are
+dropped: the policy carries durations, and an absolute deadline cannot exist before the
+transition that starts its window — a NOT NULL deadline at creation would force an
+invented value, the Session 4 fee-constant incident as a column. `title` and
+`instructions` collapse to one `prompt` column matching the hashed object. Both by the
+Session 7b migrations, whose rollbacks are valid only while the tables are empty
+(POLICY.md section 11.3).
