@@ -4,11 +4,15 @@
   "main": "index.ts",
   "dependencies": {
     "@hackathon/shared": "workspace:*",
+    "@solana-mobile/mobile-wallet-adapter-protocol-web3js": "^2.3.0",
+    "@solana/web3.js": "^1.99.0",
+    "buffer": "^6.0.3",
     "expo": "~57.0.21",
     "expo-dev-client": "~57.0.18",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
-    "react-native": "0.86.3"
+    "react-native": "0.86.3",
+    "react-native-get-random-values": "^2.0.0"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
