@@ -1,8 +1,8 @@
 # BountyCam — Handoff
 
 **Date:** 12 September 2026
-**Sessions complete:** 1–5, 6a, and 6b part 1
-**Next session:** 6b part 2 — auth implementation
+**Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2)
+**Next session:** 7 — policy creation, policy hash, bounty CRUD
 **Deadline:** 8 October 2026 (26 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
@@ -60,7 +60,7 @@ sufficient for truth.
 ```
 hackathon202609/
 ├── apps/
-│   ├── api/          Fastify + TS, node-pg-migrate, 2 migrations
+│   ├── api/          Fastify + TS, SIWS auth, 4 migrations
 │   └── mobile/       Expo + TS skeleton, android/ kept, ios/ deleted
 ├── packages/
 │   └── shared/       SPEC.md (normative) + stubs — implementation pending
@@ -206,20 +206,43 @@ Three single-purpose commits, each verified from raw output:
   applied and rolled back both (tests 1, pass 1); `\d` verified against
   `bountycam_dev`, which now has all four migrations applied.
 
-## Next: Session 6b (part 2) — auth implementation
+## Session 6b (part 2) — auth implementation
 
-Implement per AUTH.md (normative — if implementation and spec disagree, stop
-and report): challenge and verify endpoints, JWT issuance, `GET /auth/me`,
-the injectable clock, and the test list; first amend AUTH.md section 13 to
-add test 38 (two concurrent verifies with one nonce: exactly one succeeds,
-per SECURITY.md section 4) so the D36 count gate is exactly 38. The JWT
-secret exists at `~/bountycam-keys/jwt-secret.hex` (64 hex characters plus
-a trailing newline, mode 600). The loader strips whitespace before decoding
-to 32 bytes (AUTH.md section 9).
+Four single-purpose commits, each verified from raw output:
 
-The zero-match glob check was done: `node --test test/*.test.ts` with no
-matching file reports tests 0 and exits 0 (the D36 class). Fix in part 2:
-the test script names each test file explicitly (AUTH.md section 13).
+- AUTH.md amended first: test 38 — two concurrent verifies with one nonce,
+  exactly one 200, the other 401 `NONCE_CONSUMED` (SECURITY.md section 4).
+  The D36 count gate is now exactly 38.
+- `@scure/base` 2.4.0 added for base58 (D52): zero runtime dependencies,
+  @noble author, major 2.0.0 from 2025-08-25. The lockfile integrity hash
+  was matched against the registry entry before install.
+- Implementation: `src/config.ts` (section 9 env vars; JWT secret file read
+  once at startup, trimmed, must be exactly 64 lowercase hex or the process
+  exits non-zero), `src/clock.ts` (the one injectable clock), `src/auth/`
+  (section 4 chain table; jwt issue/verify pinned to HS256 with iss, aud and
+  60-second tolerance; routes with the section 6 check order verbatim). The
+  nonce is consumed by the single atomic `UPDATE ... RETURNING` with the app
+  clock as a bind parameter. `verifySignIn` is never imported anywhere
+  (verified by grep).
+- Tests: auth summary "tests 38, pass 38, fail 0"; migrations summary
+  "tests 1, pass 1, fail 0"; both against scratch databases. Test 9
+  reproduced the AUTH.md section 12 signature byte-for-byte with
+  `@noble/curves` 2.4.0; test 10 reproduced the 333 message bytes with the
+  pinned builder; test 38 raced two verifies via `Promise.all` against a
+  pool asserted to allow at least 2 connections.
+- Plumbing: `pg` moved to dependencies (runtime use in `src/index.ts`);
+  `@types/pg` 8.23.1 exact-pinned, `@types/node` stays single-version
+  22.20.1; tsconfig gained `rewriteRelativeImportExtensions`; the test
+  script names both test files explicitly (D36).
+
+## Next: Session 7 — policies and bounties
+
+Per BACKLOG: policy creation using canonical JSON and the policy hash from
+`packages/shared`, bounty CRUD behind the new auth middleware (`GET
+/auth/me`'s verification becomes the protected-route middleware). Open
+items riding along: `reward_amount` numeric scale (BACKLOG, Session 7);
+AUTH.md section 14.2 domain value and the fallback signing path both
+validate on device in Session 10.
 
 ---
 

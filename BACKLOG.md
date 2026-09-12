@@ -1,6 +1,6 @@
 # BountyCam — Backlog
 
-**As at:** 11 September 2026 · 27 days to deadline
+**As at:** 12 September 2026 · 26 days to deadline
 
 ---
 
@@ -47,13 +47,44 @@ before it is removed.
 **`apps/mobile/.claude/settings.json`** arrived from the Expo template. Review
 it — template-supplied agent settings can carry permissions that were not chosen.
 
-**`apps/api` test script uses an unquoted glob** — `node --test test/*.test.ts`.
+~~**`apps/api` test script uses an unquoted glob** — `node --test test/*.test.ts`.
 Verify in Session 6, from raw output, what it does when zero files match, before
-trusting any pass from it (see D36 for the false-pass class this guards against).
+trusting any pass from it (see D36 for the false-pass class this guards against).~~
+Done 12 September (Session 6b): verified the zero-match false pass from raw
+output; the script now names both test files explicitly.
 
 **`typescript` and `@types/node` use caret ranges** in `packages/shared`
 devDependencies. Exact-pin them — the D19 pattern: caret semantics silently
 resolved `anchor-lang` to a version the CLI did not match.
+
+**`bounties.reward_amount` is `numeric` with no scale.** Decide precision
+and scale (USDC base units per D26 vs decimal column) when bounty creation
+is built (Session 7).
+
+**DB `bounty_state` vs program state enums to reconcile.** The database
+enum and the on-chain state machine must not drift; reconcile when the
+escrow state instructions land (Session 9).
+
+**`apps/mobile/.claude` expo plugin decision.** Decide whether the
+template-supplied plugin configuration stays (Session 10).
+
+**TypeScript 5.9 vs 6.0 split.** `packages/shared` and `apps/api` pin
+5.9.3; the Expo template pulls its own TypeScript for `apps/mobile`.
+Decide alignment or an accepted split before Session 10.
+
+**pnpm is not pinned.** Consider `packageManager` in the root
+`package.json` so pnpm 11.22.0 is enforced per checkout.
+
+**`DATABASE_URL` is not checked at startup** in `apps/api/src/index.ts`; a
+missing value surfaces as a 500 on first query. Add a startup check like
+the JWT secret's (Session 7).
+
+**`apps/api` lint covers `src` only.** `test/*.test.ts` is not type-checked;
+a type error in a test surfaces only at run time. Decide whether to add a
+test tsconfig (Session 7).
+
+**`uuid@7.0.3` is a deprecated transitive dependency.** `pnpm why uuid` to
+find the parent; decide whether it matters (Session 7).
 
 ---
 
@@ -103,7 +134,7 @@ Sessions 1–5 complete.
 | # | Scope |
 |---|---|
 | 5 | Part 1 (SPEC.md, five vectors) **done 10 Sep**. Part 2: implement to spec **done 11 Sep** |
-| 6 | API — SIWS challenge/verify, JWT, user records |
+| 6 | API — SIWS challenge/verify, JWT, user records **done 12 Sep** |
 | 7 | API — policy creation, canonical JSON, policy hash, bounty CRUD |
 
 ### Week 2 — Mission engine
