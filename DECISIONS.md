@@ -322,3 +322,8 @@ to accept first; the chain records the outcome. Supersedes the second half of D1
 **D50 — `SECURITY.md` binds every session; `SECURITY-PRODUCTION.md` binds mainnet
 planning.** Changes to either need a D-entry. Read SECURITY.md before touching the
 escrow, auth, verifier, canonical serialisation, evidence storage or any key.
+
+**D51 — SIWS statement is "Sign in to BountyCam. This proves you control this wallet
+and moves no funds."** The statement is the one line the user reads in the wallet, so it
+states what the signature does and does not authorise (SECURITY.md section 4). Vector in
+AUTH.md section 12 regenerated; the key and address are unchanged.

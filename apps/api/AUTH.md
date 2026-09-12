@@ -182,7 +182,7 @@ encoded), stores the challenge row (section 11.1), then responds `200`:
 |---|---|
 | `domain` | configured `SIWS_DOMAIN` (open item, section 14.2) |
 | `address` | echoed request address |
-| `statement` | the constant `Sign in to BountyCam` |
+| `statement` | `Sign in to BountyCam. This proves you control this wallet and moves no funds.` |
 | `version` | the string `1` |
 | `chainId` | canonical chain (currently always `devnet`) |
 | `nonce` | 32 lowercase hex characters |
@@ -421,7 +421,8 @@ RFC 8032 TEST 1 signature:   MATCH
 | address (base58) | `FVen3X669xLzsi6N2V91DoiyzHzg1uAgqiT8jZ9nS96Z` |
 
 Input fields: `domain` `app.example.com` (placeholder — section 14.2), `statement`
-`Sign in to BountyCam`, `version` `1`, `chainId` `devnet`, `nonce`
+`Sign in to BountyCam. This proves you control this wallet and moves no funds.`,
+`version` `1`, `chainId` `devnet`, `nonce`
 `00112233445566778899aabbccddeeff`, `issuedAt` `2026-09-12T00:00:00.000Z`,
 `expirationTime` `2026-09-12T00:05:00.000Z`.
 
@@ -431,7 +432,7 @@ Message text (line breaks are single line feeds; no trailing line feed):
 app.example.com wants you to sign in with your Solana account:
 FVen3X669xLzsi6N2V91DoiyzHzg1uAgqiT8jZ9nS96Z
 
-Sign in to BountyCam
+Sign in to BountyCam. This proves you control this wallet and moves no funds.
 
 Version: 1
 Chain ID: devnet
@@ -440,14 +441,15 @@ Issued At: 2026-09-12T00:00:00.000Z
 Expiration Time: 2026-09-12T00:05:00.000Z
 ```
 
-Message length: **276 bytes** as UTF-8.
+Message length: **333 bytes** as UTF-8.
 
 Message (base64, wrapped at 76 characters — join the lines with nothing between):
 
 ```
 YXBwLmV4YW1wbGUuY29tIHdhbnRzIHlvdSB0byBzaWduIGluIHdpdGggeW91ciBTb2xhbmEgYWNj
 b3VudDoKRlZlbjNYNjY5eEx6c2k2TjJWOTFEb2l5ekh6ZzF1QWdxaVQ4alo5blM5NloKClNpZ24g
-aW4gdG8gQm91bnR5Q2FtCgpWZXJzaW9uOiAxCkNoYWluIElEOiBkZXZuZXQKTm9uY2U6IDAwMTEy
+aW4gdG8gQm91bnR5Q2FtLiBUaGlzIHByb3ZlcyB5b3UgY29udHJvbCB0aGlzIHdhbGxldCBhbmQg
+bW92ZXMgbm8gZnVuZHMuCgpWZXJzaW9uOiAxCkNoYWluIElEOiBkZXZuZXQKTm9uY2U6IDAwMTEy
 MjMzNDQ1NTY2Nzc4ODk5YWFiYmNjZGRlZWZmCklzc3VlZCBBdDogMjAyNi0wOS0xMlQwMDowMDow
 MC4wMDBaCkV4cGlyYXRpb24gVGltZTogMjAyNi0wOS0xMlQwMDowNTowMC4wMDBa
 ```
@@ -455,14 +457,14 @@ MC4wMDBaCkV4cGlyYXRpb24gVGltZTogMjAyNi0wOS0xMlQwMDowNTowMC4wMDBa
 Signature (hex, wrapped at 64 characters — join with nothing between):
 
 ```
-020539b321e5c4c2718da56aebbbe43fff89e99b8825be68a69aa757170dc7b4
-39fc4675cdd0da9a35bc6dbb1af86bda9e660e0783e72359e744889649cc920b
+4460a95adf3394e0da7b738f0dca6a0eac57607cb4d88dc9ce4348d10cee24fd
+e4d333ccb5bf192280d0aa57e88e5405b4ed20a5dec3eb122e6ad22efae26c09
 ```
 
 Signature (base64, one line):
 
 ```
-AgU5syHlxMJxjaVq67vkP/+J6ZuIJb5oppqnVxcNx7Q5/EZ1zdDamjW8bbsa+GvanmYOB4PnI1nnRIiWScySCw==
+RGCpWt8zlODae3OPDcpqDqxXYHy02I3JzkNI0QzuJP3k0zPMtb8ZIoDQqlfojlQFtO0gpd7D6xIuatIu+uJsCQ==
 ```
 
 Self-verify (sign then verify with the oracle): `true`.
@@ -498,7 +500,7 @@ Verify endpoint:
 9. Vector reproduction: `@noble/curves` 2.4.0 signature over the section 12 message
    equals the vector signature exactly.
 10. Builder equivalence: `createSignInMessageText` with the vector's inputs yields the
-    vector's 276 message bytes exactly.
+    vector's 333 message bytes exactly.
 11. One tampered byte in `signed_message` (signature unchanged) — 401
     `SIGNATURE_INVALID`.
 12. Signature from a different key over the same message — 401 `SIGNATURE_INVALID`.

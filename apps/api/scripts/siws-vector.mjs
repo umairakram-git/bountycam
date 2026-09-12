@@ -58,7 +58,7 @@ const address = b58(pubRaw);
 // @solana/wallet-standard-util 1.1.2 src/signIn.ts (== commit dbb6a98):
 // domain line, address, blank line + statement, blank line + fields.
 const domain = 'app.example.com'; // placeholder — item e OPEN (Session 10)
-const statement = 'Sign in to BountyCam';
+const statement = 'Sign in to BountyCam. This proves you control this wallet and moves no funds.';
 const nonce = '00112233445566778899aabbccddeeff';
 const issuedAt = '2026-09-12T00:00:00.000Z';
 const expirationTime = '2026-09-12T00:05:00.000Z';
