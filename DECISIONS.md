@@ -327,3 +327,12 @@ escrow, auth, verifier, canonical serialisation, evidence storage or any key.
 and moves no funds."** The statement is the one line the user reads in the wallet, so it
 states what the signature does and does not authorise (SECURITY.md section 4). Vector in
 AUTH.md section 12 regenerated; the key and address are unchanged.
+
+**D52 — base58 via `@scure/base`, exact-pinned 2.4.0.** AUTH.md requires base58 (Bitcoin
+alphabet) decoding of wallet addresses to 32 public-key bytes but names no library.
+`@scure/base` is by the @noble author (paulmillr, sole npm maintainer; repo
+`paulmillr/scure-base`), has zero runtime dependencies, and its major 2.0.0 dates from
+2025-08-25 — not a fresh major (SECURITY.md section 10 rule). Latest 2.4.0 published
+2026-08-28; version-aligned with the pinned `@noble/curves` 2.4.0 and `@noble/hashes`
+2.4.0. Gate after install: `pnpm why @scure/base` shows 2.4.0 as a direct dependency of
+`apps/api` only.
