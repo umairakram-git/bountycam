@@ -1,9 +1,9 @@
 # BountyCam — Handoff
 
-**Date:** 11 September 2026
-**Sessions complete:** 1–4, and 5 (both parts)
-**Next session:** 6 — API auth
-**Deadline:** 8 October 2026 (27 days remaining)
+**Date:** 12 September 2026
+**Sessions complete:** 1–5, 6a, and 6b part 1
+**Next session:** 6b part 2 — auth implementation
+**Deadline:** 8 October 2026 (26 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
 
@@ -181,14 +181,45 @@ own-property check (§6.3). Recorded as D33–D35.
 
 ---
 
-## Next: Session 6 — API auth
+## Session 6a — auth specification
 
-SIWS challenge/verify, JWT issuance (7-day, per D6), user records keyed by
-wallet address (BACKLOG week 1).
+`apps/api/AUTH.md` written before implementation and committed (D37–D48, D51).
+Normative: SIWS challenge/verify flow, exact-bytes verification (never rebuild
+the message from a template), numbered check order with one error code per
+failure, HS256 JWT via jose, two migrations in prose, a 37-test list, and a
+worked vector cross-checked against RFC 8032 section 7.1 TEST 1. SECURITY.md
+and SECURITY-PRODUCTION.md added in the same session block (D49–D50).
 
-Also: verify from raw output what `apps/api`'s unquoted test-script glob
-(`node --test test/*.test.ts`) does when zero files match, before trusting
-any pass from it (BACKLOG; the false-pass class is D36).
+## Session 6b (part 1) — pins, dependencies, migrations
+
+Three single-purpose commits, each verified from raw output:
+
+- `apps/api` registry deps pinned exactly: fastify 5.12.3, @types/node
+  22.20.1, node-pg-migrate 9.0.0, pg 8.23.0, typescript 5.9.3. The lockfile
+  diff changed specifier lines only; `@hackathon/shared` stays `workspace:*`.
+- Auth dependencies exact-pinned: jose 6.2.12, @noble/curves 2.4.0,
+  @solana/wallet-standard-util 1.1.2. AUTH.md section 3.2 gate passed from
+  `pnpm why`: curves 2.4.0 direct, 1.9.7 only under wallet-standard-util;
+  hashes 2.4.0 is the only backend outside that subtree.
+- Migrations 3 (`auth_challenges`) and 4 (`users.status` to `user_status`
+  enum, single value `ACTIVE`) per AUTH.md section 11. Scratch-database test
+  applied and rolled back both (tests 1, pass 1); `\d` verified against
+  `bountycam_dev`, which now has all four migrations applied.
+
+## Next: Session 6b (part 2) — auth implementation
+
+Implement per AUTH.md (normative — if implementation and spec disagree, stop
+and report): challenge and verify endpoints, JWT issuance, `GET /auth/me`,
+the injectable clock, and the test list; first amend AUTH.md section 13 to
+add test 38 (two concurrent verifies with one nonce: exactly one succeeds,
+per SECURITY.md section 4) so the D36 count gate is exactly 38. The JWT
+secret exists at `~/bountycam-keys/jwt-secret.hex` (64 hex characters plus
+a trailing newline, mode 600). The loader strips whitespace before decoding
+to 32 bytes (AUTH.md section 9).
+
+The zero-match glob check was done: `node --test test/*.test.ts` with no
+matching file reports tests 0 and exits 0 (the D36 class). Fix in part 2:
+the test script names each test file explicitly (AUTH.md section 13).
 
 ---
 
