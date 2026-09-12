@@ -232,3 +232,78 @@ executed no test files and reported one trivial pass (tests 1, pass 1, fail 0), 
 earlier pass in packages/shared ran nothing. The script now runs dist/index.test.js; a
 missing file exits 1. A test run is only evidence if its summary shows the expected test
 count.
+
+---
+
+## API auth (Session 6a)
+
+**D37 — Wallet address is the unique identity key; `users.id` (uuid) is the primary key.**
+*Reversal note on D6.* D6 said the wallet address is the primary key. The Session 3 schema
+keys every foreign key on `users.id` (uuid) with `wallet_address` unique and not null; that
+structure stands. Identity is established by proving control of the wallet key; the uuid is
+the join key and the JWT subject. D6's SIWS-and-7-day-JWT content is unchanged.
+
+**D38 — SIWS message format comes from the published standard, and the published package is
+the only parser and builder.** Grammar: `phantom/sign-in-with-solana` README at commit
+`6f085ace640e58e64e729ac4e8452abb7d3833bb`, quoted in `apps/api/AUTH.md`. Parser/builder:
+`@solana/wallet-standard-util` exact-pinned 1.1.2, whose `src/signIn.ts` was verified
+byte-identical to `anza-xyz/wallet-standard` commit `dbb6a9821c3d79affc05b2340310941e85d306cd`
+(tarball shasum `1e281178c04b52923ea530799c589ed64e5526bc`; empty diff — the registry has no
+gitHead, so the diff is the evidence). Only `parseSignInMessageText` and
+`createSignInMessageText` are used; `verifySignIn` is never called (it rebuilds the message
+from a template, which D39 forbids as the basis of verification).
+
+**D39 — The server verifies the signature over the exact signed bytes it receives, then
+parses those bytes and checks fields against the stored challenge. Never rebuild the message
+from a template.** Rebuilding assumes the wallet built exactly what we would build; any
+divergence would verify a message the user never saw or reject one they did. Works
+identically whether the app used wallet `signIn` or built the message itself for a
+`signMessage` fallback (fallback named by the MWA spec, commit `0e6d7e75`).
+
+**D40 — ed25519 verification via `@noble/curves`, exact-pinned 2.4.0.** Its sole dependency
+is `@noble/hashes` pinned exactly 2.4.0 — the same version as D33, so one hash backend.
+`@solana/wallet-standard-util` carries its own `@noble/curves` (caret 1.8.0 range, which
+excludes 2.4.0): two instances coexist and this is accepted — only 2.4.0 makes verification
+decisions; the 1.x copy just ships with the parser. Gate: `pnpm why @noble/curves` must show
+exactly the two expected versions.
+
+**D41 — `auth_challenges` table; single-use enforced by the database.** 128-bit random nonce
+(32 lowercase hex), 5-minute expiry, consumed by one atomic UPDATE that sets `consumed_at`
+to the app clock passed as a bind parameter — never the database's `now()` — where it is
+null and `expires_at` is later than that same parameter, RETURNING the row. One clock for
+issuance, expiry and tests. A failed field check after consumption burns the nonce
+deliberately: any failed attempt invalidates the challenge.
+
+**D42 — JWT: HS256 via `jose`, exact-pinned 6.2.12.** Published 2026-09-05; major 6.0.0 is
+from 2025-02-22, so not a fresh major. Algorithm pinned on verify — the accepted list is
+exactly HS256, so `none` and every other algorithm are rejected. Claims: `sub` = `users.id`,
+`wallet` = base58 address, `iss` and `aud` (checked on verify), `iat`, `exp` = `iat` + 7 days
+(D6). Clock-skew tolerance 60 seconds on time claims. Secret: 256 random bits as 64 lowercase
+hex characters in a mode-600 file under `~/bountycam-keys/`, path from `JWT_SECRET_PATH`.
+The HMAC key is the 32 bytes decoded from the hex, not the hex text. Generated in Session
+6b, never committed.
+
+**D43 — User rows are created lazily on first successful verify.** Upsert keyed on the
+unique `wallet_address`; no registration endpoint. Proving control of the key is the whole
+of registration.
+
+**D44 — `users.status` becomes enum `user_status` with the single value `ACTIVE`.** By new
+migration (D20 uppercase rule). The enum contains only values Session 6 code can produce —
+no unreachable variants, the same reasoning as D34 and the `Cancelled` finding. Sessions
+that introduce suspension or bans add values by migration when the code that sets them
+arrives.
+
+**D45 — Chain allowlist is configuration; devnet only for now.** Message forms `devnet` and
+`solana:devnet` both map to canonical `devnet`; every other form is rejected with
+`CHAIN_NOT_ALLOWED`. Mainnet later is a config change. There is deliberately no
+`CHAIN_MISMATCH` code: with a single-entry allowlist it could never be returned (D34).
+
+**D46 — No token revocation.** A 7-day token remains valid until expiry. Accepted limit,
+devnet only (D8); must be revisited before any mainnet plan.
+
+**D47 — No rate limiting on auth endpoints.** Accepted limit for devnet. The nonce is
+single-use and challenges expire in 5 minutes, which bounds replay but not brute-force
+traffic.
+
+**D48 — Seeker SGT verification deferred to Session 10.** Sign-in proves key possession
+only; Seeker-gating belongs to the mobile session that can read the device.
