@@ -161,8 +161,18 @@ export function bytesToHex(bytes: Uint8Array): string {
   return hex;
 }
 
+export interface BuiltRequirement {
+  id: string;
+  prompt: string;
+  required: boolean;
+  type: string;
+}
+
 export interface BuiltPolicy {
   policy: Record<string, unknown>;
+  // The same array object the policy holds, exposed typed so the
+  // evidence_requirements insert reads the assigned ids without a cast.
+  requirements: ReadonlyArray<BuiltRequirement>;
   canonicalJson: string;
   policyHashBytes: Uint8Array;
   policyHashHex: string;
@@ -215,6 +225,7 @@ export function buildPolicy(
   const policyHashBytes = sha256(new TextEncoder().encode(canonicalJson));
   return {
     policy,
+    requirements,
     canonicalJson,
     policyHashBytes,
     policyHashHex: bytesToHex(policyHashBytes),

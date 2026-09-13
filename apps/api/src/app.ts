@@ -2,13 +2,18 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { Clock } from "./clock.ts";
 import type { Config } from "./config.ts";
+import type { Randomness } from "./randomness.ts";
 import { registerAuthRoutes } from "./auth/routes.ts";
+import { registerBountyRoutes } from "./bounties/routes.ts";
 
 export interface AppDeps {
   config: Config;
   pool: Pool;
   clock: Clock;
-  logger?: boolean;
+  randomness: Randomness;
+  // A stream lets a test capture log output and scan it (POLICY.md test 10);
+  // Fastify passes the object to pino unchanged.
+  logger?: boolean | { level: string; stream: { write: (msg: string) => void } };
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -30,5 +35,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.get("/health", async () => ({ ok: true }));
 
   registerAuthRoutes(app, deps);
+  registerBountyRoutes(app, deps);
   return app;
 }
