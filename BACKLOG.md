@@ -75,6 +75,16 @@ the JWT secret's (Session 7).
 **`apps/api` lint covers `src` only.** `test/*.test.ts` is not type-checked;
 a type error in a test surfaces only at run time. Decide whether to add a
 test tsconfig (Session 7).
+First known instance (Session 7b, commit 4a): `auth.test.ts`'s `Config`
+literal is missing `cluster`, `settlementMint` and `attesterPubkeys` —
+invalid against the interface, invisible because tsconfig includes `src`
+only, passing at runtime because the auth flow reads none of them. Expect
+it in the commit 7 before-count; left unfixed deliberately so that count
+stays an unmanipulated measurement. Also recorded: the suite passed 38/38
+with a config object that cannot satisfy its own declared type — the suite
+would keep passing if `loadConfig` returned something the routes could not
+use. Session 8's attester work reads `attesterPubkeys` for real; the gap
+stops being theoretical there.
 
 **`uuid@7.0.3` is a deprecated transitive dependency.** `pnpm why uuid` to
 find the parent; decide whether it matters (Session 7).
