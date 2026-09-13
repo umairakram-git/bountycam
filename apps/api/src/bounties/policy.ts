@@ -2,7 +2,7 @@
 // build, canonical form and hash. Hashing is packages/shared and nothing else
 // (SECURITY.md section 5); this module never reimplements it.
 import { canonicalise, sha256 } from "@hackathon/shared";
-import { base58 } from "@scure/base";
+import { isBase58For32Bytes } from "../base58.ts";
 import type { Randomness } from "../randomness.ts";
 import { isValidLat, isValidLon } from "./gps.ts";
 
@@ -58,16 +58,6 @@ export type PolicyFieldError =
   | "INVALID_REQUIREMENTS"
   | "REQUIREMENT_TYPE_NOT_ALLOWED"
   | "INVALID_REQUIREMENT_PROMPT";
-
-function isBase58For32Bytes(value: string): boolean {
-  let bytes: Uint8Array;
-  try {
-    bytes = base58.decode(value);
-  } catch {
-    return false;
-  }
-  return bytes.length === 32;
-}
 
 // Section 6.1. String and BigInt operations only (D57): form regex, length
 // check before any parse — a 21-digit numeral is a form failure — then a
