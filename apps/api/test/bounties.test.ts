@@ -1533,6 +1533,170 @@ test("63 /me/bounties unknown query parameters are INVALID_REQUEST", async () =>
   await rejectsQuery("limit=5&offset=0&lat=10.0000000");
 });
 
+// --- cancel (POLICY.md section 12, tests 64 to 69) ---
+
+test("64 owner cancels a DRAFT: 200 CANCELLED; policy rows byte-identical", async () => {
+  const requester = await seedRequester();
+  const created = await createBounty(requester.token, validBody());
+  assert.equal(created.statusCode, 201);
+  const id = created.json().id;
+  const policyId = firstRow(
+    (
+      await pool.query<{ policy_id: string }>(
+        "SELECT policy_id FROM bounties WHERE id = $1",
+        [id],
+      )
+    ).rows,
+  ).policy_id;
+  // Whole rows, not chosen columns: any column a cancel touched would
+  // break the deepEqual, including canonical_json.
+  const snapshot = async () => {
+    const policy = await pool.query("SELECT * FROM policies WHERE id = $1", [
+      policyId,
+    ]);
+    const requirements = await pool.query(
+      `SELECT * FROM evidence_requirements
+       WHERE policy_id = $1 ORDER BY sequence`,
+      [policyId],
+    );
+    return { policy: policy.rows, requirements: requirements.rows };
+  };
+  const before = await snapshot();
+  const res = await app.inject({
+    method: "POST",
+    url: `/bounties/${id}/cancel`,
+    headers: { authorization: `Bearer ${requester.token}` },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().state, "CANCELLED");
+  // The stored state changed too — the response alone could say so
+  // without the row agreeing.
+  const stored = firstRow(
+    (
+      await pool.query<{ state: string }>(
+        "SELECT state FROM bounties WHERE id = $1",
+        [id],
+      )
+    ).rows,
+  );
+  assert.equal(stored.state, "CANCELLED");
+  const after = await snapshot();
+  assert.deepEqual(after, before);
+  // canonical_json named apart, per the numbered test text.
+  assert.equal(after.policy[0].canonical_json, before.policy[0].canonical_json);
+});
+
+test("65 cancel again: 200, same terminal state", async () => {
+  const requester = await seedRequester();
+  const created = await createBounty(requester.token, validBody());
+  assert.equal(created.statusCode, 201);
+  const id = created.json().id;
+  const cancel = () =>
+    app.inject({
+      method: "POST",
+      url: `/bounties/${id}/cancel`,
+      headers: { authorization: `Bearer ${requester.token}` },
+    });
+  const first = await cancel();
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.json().state, "CANCELLED");
+  const second = await cancel();
+  assert.equal(second.statusCode, 200);
+  assert.equal(second.json().state, "CANCELLED");
+  // A retry replays the same terminal state (10.4): the two bodies agree
+  // byte for byte, not merely in their state field.
+  assert.equal(second.body, first.body);
+});
+
+test("66 a non-owner cancels a DRAFT: 404 NOT_FOUND", async () => {
+  const requester = await seedRequester();
+  const other = await seedRequester();
+  const created = await createBounty(requester.token, validBody());
+  assert.equal(created.statusCode, 201);
+  const res = await app.inject({
+    method: "POST",
+    url: `/bounties/${created.json().id}/cancel`,
+    headers: { authorization: `Bearer ${other.token}` },
+  });
+  assert.equal(res.statusCode, 404);
+  assert.deepEqual(res.json(), { error: "NOT_FOUND" });
+});
+
+test("67 a non-owner cancels a seeded AVAILABLE: 403 FORBIDDEN", async () => {
+  const requester = await seedRequester();
+  const other = await seedRequester();
+  const created = await createBounty(requester.token, validBody());
+  assert.equal(created.statusCode, 201);
+  const id = created.json().id;
+  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+    id,
+  ]);
+  const res = await app.inject({
+    method: "POST",
+    url: `/bounties/${id}/cancel`,
+    headers: { authorization: `Bearer ${other.token}` },
+  });
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.json(), { error: "FORBIDDEN" });
+});
+
+test("68 owner cancels a seeded FUNDED: 409 BOUNTY_NOT_CANCELLABLE", async () => {
+  const requester = await seedRequester();
+  const created = await createBounty(requester.token, validBody());
+  assert.equal(created.statusCode, 201);
+  const id = created.json().id;
+  await pool.query("UPDATE bounties SET state = 'FUNDED' WHERE id = $1", [id]);
+  const res = await app.inject({
+    method: "POST",
+    url: `/bounties/${id}/cancel`,
+    headers: { authorization: `Bearer ${requester.token}` },
+  });
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.json(), { error: "BOUNTY_NOT_CANCELLABLE" });
+  // The conditional update never fired: the row is still FUNDED.
+  const stored = firstRow(
+    (
+      await pool.query<{ state: string }>(
+        "SELECT state FROM bounties WHERE id = $1",
+        [id],
+      )
+    ).rows,
+  );
+  assert.equal(stored.state, "FUNDED");
+});
+
+test("69 a non-empty body is INVALID_REQUEST, step 2 before the id form", async () => {
+  const requester = await seedRequester();
+  const withBody = async (id: string, payload: object): Promise<void> => {
+    const res = await app.inject({
+      method: "POST",
+      url: `/bounties/${id}/cancel`,
+      headers: { authorization: `Bearer ${requester.token}` },
+      payload,
+    });
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(res.json(), { error: "INVALID_REQUEST" });
+  };
+  // Step 2 runs before the id form check (D66): a malformed id beside a
+  // body reports the body, not NOT_FOUND.
+  await withBody("not-a-uuid", { note: "x" });
+  // An empty JSON object is a present body — two bytes on the wire.
+  await withBody("not-a-uuid", {});
+  const created = await createBounty(requester.token, validBody());
+  assert.equal(created.statusCode, 201);
+  const id = created.json().id;
+  await withBody(id, {});
+  // The failed attempts changed nothing: a bodyless cancel of the same
+  // bounty still succeeds — the call tests 64 and 65 stand on.
+  const res = await app.inject({
+    method: "POST",
+    url: `/bounties/${id}/cancel`,
+    headers: { authorization: `Bearer ${requester.token}` },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().state, "CANCELLED");
+});
+
 // --- configuration tests (POLICY.md section 12, tests 70 to 72) ---
 
 // 70 and 71 spawn the real entrypoint: section 8.1 requires a non-zero exit
