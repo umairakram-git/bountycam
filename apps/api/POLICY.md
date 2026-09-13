@@ -688,7 +688,14 @@ Check order:
 4. **Category.** Length bounds. Failure: `INVALID_CATEGORY` (400).
 5. **Policy field rules**, in the canonical field order of section 2.1; each failure
    returns its own section 2.3 code (400).
-6. **Requirement rules** per section 2.2; codes per section 2.3 (400).
+6. **Requirement rules** per section 2.2; codes per section 2.3 (400). The list bound —
+   1 to 20 items — is the section 2.1 field rule for `evidence_requirements` and was
+   already checked at step 5, in canonical field position. This step checks the items,
+   item index ascending, keys in canonical order within each item: the `prompt` bounds,
+   then the `type` value. `required` carries no per-item rule here — a non-boolean
+   `required` is a step 2 type failure (`INVALID_REQUEST`) — so its only step 6 rule is
+   list-level: the at-least-one-`required`-true check, run last, after every per-item
+   check.
 7. **Build and hash.** Inject the constants and configured defaults, assign the salt
    and fresh requirement uuids, canonicalise the sixteen-field object and hash it
    (section 3);
@@ -723,15 +730,23 @@ parameters:
 Check order:
 
 1. **Auth**; 401 codes.
-2. **Parameter shape.** Unknown parameters, missing required parameters, or a
-   non-integer `radius_m`, `limit` or `offset`: `INVALID_REQUEST` (400).
+2. **Parameter shape.** Unknown parameters, missing required parameters, a
+   non-integer `radius_m`, `limit` or `offset`, or `limit` or `offset` outside their
+   bounds: `INVALID_REQUEST` (400). Integer form is a string check run before any
+   numeric parse: ASCII digits only (U+0030 to U+0039), no sign, no leading zeros
+   (the single digit `0` is allowed), and at most nine digits. The length bound
+   keeps every accepted numeral inside safe integer range — a 40-digit `offset` is
+   a form failure at this step, never a value a double has rounded (section 6.1's
+   no-doubles rule applied at the query boundary).
 3. **Coordinates.** `lat` and `lon` against the section 5 rules: `INVALID_GPS` (400).
 4. **Radius.** Bounds: `INVALID_QUERY_RADIUS` (400).
 5. **Query.** Rows with `state` in the discoverable set — exactly `AVAILABLE` —
    within `radius_m` metres of the query point, measured against `location_public`
    only; ordered by distance to `location_public` ascending, then `created_at`
-   descending, then `id`, so pagination is deterministic. The query point is the
-   caller's own and is not snapped; it commits the caller's location to nothing.
+   descending, then `id` ascending. The last key makes the order total — offset
+   pagination requires one; equal distances and equal timestamps cannot reorder
+   rows between pages. The query point is the caller's own and is not snapped; it
+   commits the caller's location to nothing.
 6. **Respond** 200 with an object whose single key `bounties` holds the list items.
 
 Distance is computed inside the query for filtering and ordering and never appears in
@@ -1059,7 +1074,11 @@ Create — success and invariants:
 9. `location` is the exact point; `location_public` equals the section 9.1 snap of
    the same coordinates.
 10. The salt is exactly 64 lowercase hex characters and equals the injected
-    randomness double's output — the source test (section 2.1).
+    randomness double's output — the source test (section 2.1). Two further
+    asserts in the same test: a failed create's error body is exactly the
+    one-key `error` object, and the injected salt's hex appears nowhere in log
+    output captured across one successful and one failed create with logging
+    enabled — the D54 never-in-error-or-log clause, tested (sections 2.1, 9.4).
 11. Each requirement id is a lowercase version 4 uuid and equals the injected
     double's output — the source test (section 2.2).
 12. `cluster` and `settlement_mint` absent — the configured values appear in the
@@ -1132,7 +1151,11 @@ Discovery:
     discoverable (section 7.3).
 53. An `AVAILABLE` row outside the radius is absent.
 54. List items contain no exact coordinates, no salt, no requirement id and no
-    distance field (sections 8.2, 9.3, 9.4).
+    distance field (sections 8.2, 9.3, 9.4). The property: the salt value and
+    each requirement uuid appear nowhere in the serialised response body, under
+    any key, at any depth. The test asserts it by scanning the whole body for
+    the known injected values from the randomness double; whatever replaces the
+    double must still supply the values to scan for.
 55. Parameter failures: missing `lat` — `INVALID_REQUEST`; malformed `lon` —
     `INVALID_GPS`; `radius_m` 99 and 50001 — `INVALID_QUERY_RADIUS`; `limit` 0 and
     101 — `INVALID_REQUEST`.
@@ -1144,7 +1167,10 @@ Detail:
 58. A non-requester reads a `DRAFT` — 404 `NOT_FOUND`.
 59. A non-requester reads a seeded `AVAILABLE` — 200 public view: no `lat`, no
     `lon`, no salt, no requirement ids; `policy_public` has exactly thirteen
-    top-level fields; `location_public` present.
+    top-level fields; `location_public` present. Same whole-body property as
+    test 54: the salt value and each requirement uuid appear nowhere in the
+    serialised response body, under any key, at any depth, asserted by scanning
+    for the known injected values.
 60. A malformed id and an absent uuid — both 404 with identical bodies.
 61. Owner reads own `CANCELLED` — 200; a non-requester — 404.
 

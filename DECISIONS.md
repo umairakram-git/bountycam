@@ -416,3 +416,25 @@ invented value, the Session 4 fee-constant incident as a column. `title` and
 `instructions` collapse to one `prompt` column matching the hashed object. Both by the
 Session 7b migrations, whose rollbacks are valid only while the tables are empty
 (POLICY.md section 11.3).
+
+**D63 — Session 7b pre-implementation rulings; salt-absence tests named.** Four rulings,
+amended into POLICY.md before any code. (1) The 1-to-20 requirements bound runs at step
+5 in canonical field position; it is the section 2.1 field rule. The ambiguity came from
+the section 2.1 table cell doing double duty — it sets the list bound AND defers
+per-item rules to section 2.2 — noted here so the next reader does not re-derive the
+question. Test 40 pins the ordering: an empty list beside a malformed `lat` returns
+`INVALID_REQUIREMENTS`. (2) Step 6 checks items in index order, keys in canonical order
+within an item (`prompt` bounds, then `type` value); a non-boolean `required` is a step
+2 type failure, so the only step 6 `required` rule is the list-level
+at-least-one-true check, run last. (3) Query integers are validated as strings before
+any numeric parse: ASCII digits only, no sign, no leading zeros, at most nine digits —
+the length check means no accepted value ever approaches where a double rounds (the D57
+rule at the query boundary). (4) The discovery tie-break is `id` ascending: offset
+pagination needs a total order. Also recorded: D54 promises the salt never appears in
+any public view, list item, error or log — the test naming each surface is test 10
+(error body, captured log), test 54 (list item), test 59 (public view). Tests 54 and 59
+assert the whole-body property — the salt value and each requirement uuid appear
+nowhere in the serialised response, under any key, at any depth — by scanning for the
+known injected values. A decision with no named test is how a property survives on
+paper and dies in code. The 75-test gate is unchanged; every addition is an assert
+inside an existing numbered test.
