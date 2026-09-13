@@ -200,6 +200,41 @@ function extractDiscoveryQuery(query: unknown): DiscoveryQuery | null {
   return { lat, lon, radiusM: Number(radius), limit, offset };
 }
 
+const ME_KEYS: readonly string[] = ["limit", "offset"];
+
+interface MeQuery {
+  limit: number;
+  offset: number;
+}
+
+// Section 8.6 step 2: limit and offset as in section 8.4 — same integer
+// form, bounds and defaults — and nothing else. lat, lon and radius_m are
+// unknown parameters here; every failure maps to one INVALID_REQUEST.
+function extractMeQuery(query: unknown): MeQuery | null {
+  if (typeof query !== "object" || query === null) return null;
+  const record = query as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (!ME_KEYS.includes(key)) return null;
+  }
+
+  let limit = 20;
+  if ("limit" in record) {
+    const value = record["limit"];
+    if (typeof value !== "string" || !INTEGER_FORM.test(value)) return null;
+    limit = Number(value);
+    if (limit < 1 || limit > 100) return null;
+  }
+
+  let offset = 0;
+  if ("offset" in record) {
+    const value = record["offset"];
+    if (typeof value !== "string" || !INTEGER_FORM.test(value)) return null;
+    offset = Number(value);
+  }
+
+  return { limit, offset };
+}
+
 interface DetailRow {
   id: string;
   title: string;
@@ -212,7 +247,9 @@ interface DetailRow {
   canonical_json: string;
 }
 
-interface DiscoveryRow {
+// One row shape for both list endpoints — the 8.2 list item is "one shape",
+// and both queries select exactly the columns listItem consumes.
+interface ListItemRow {
   id: string;
   title: string;
   category: string;
@@ -437,7 +474,7 @@ export function registerBountyRoutes(
     // the caller's own and is not snapped. canonical_json is selected
     // because listItem snaps the policy lat/lon strings — location_public
     // is never rendered back out of the geography column (D64).
-    const result = await pool.query<DiscoveryRow>(
+    const result = await pool.query<ListItemRow>(
       `SELECT b.id, b.title, b.category, b.state, b.created_at,
               b.reward_amount, p.required_assurance, p.canonical_json
        FROM bounties b
@@ -540,6 +577,56 @@ export function registerBountyRoutes(
           canonicalJson: row.canonical_json,
         }),
       );
+    },
+  );
+
+  // POLICY.md section 8.6: GET /me/bounties, the three-step check order.
+  // The path is /me/bounties, not /bounties/mine — mine would be captured
+  // by section 8.5's :id segment, and a route whose reachability depends
+  // on registration order is a bug waiting for a refactor.
+  app.get(
+    "/me/bounties",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      // Step 1 ran as the preHandler; the accessor is the identity read.
+      const caller = authUser(request);
+
+      // Step 2: limit and offset only — INVALID_REQUEST.
+      const query = extractMeQuery(request.query);
+      if (query === null) return fail(reply, 400, "INVALID_REQUEST");
+
+      // Step 3: the caller as requester, all states — deliberately no
+      // state filter (8.6: "The caller's own bounties, all states").
+      // created_at DESC then id ASC is the section 8.4 tie-break that
+      // keeps offset pagination total (D63, 8.6 as amended).
+      // canonical_json feeds listItem's snap of the policy lat and lon;
+      // location_public is never read back from the column (D64).
+      const result = await pool.query<ListItemRow>(
+        `SELECT b.id, b.title, b.category, b.state, b.created_at,
+                b.reward_amount, p.required_assurance, p.canonical_json
+         FROM bounties b
+         JOIN policies p ON p.id = b.policy_id
+         WHERE b.requester_id = $1
+         ORDER BY b.created_at DESC, b.id ASC
+         LIMIT $2 OFFSET $3`,
+        [caller.id, query.limit, query.offset],
+      );
+
+      // 200, an object whose single key is bounties.
+      return reply.status(200).send({
+        bounties: result.rows.map((row) =>
+          listItem({
+            id: row.id,
+            title: row.title,
+            category: row.category,
+            state: row.state,
+            createdAt: row.created_at,
+            rewardAmount: row.reward_amount,
+            requiredAssurance: row.required_assurance,
+            canonicalJson: row.canonical_json,
+          }),
+        ),
+      });
     },
   );
 }
