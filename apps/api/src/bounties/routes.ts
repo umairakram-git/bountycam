@@ -629,4 +629,108 @@ export function registerBountyRoutes(
       });
     },
   );
+
+  // POLICY.md section 8.7: POST /bounties/:id/cancel, the eight-step check
+  // order as amended (D66). Step 2 runs before the id form. The step 7
+  // reload happens exactly once: a second zero-row result would falsify
+  // the 7.2 state machine — no transition re-enters DRAFT — so it throws
+  // to the 500 handler rather than retrying.
+  app.post<{ Params: { id: string } }>(
+    "/bounties/:id/cancel",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      // Step 1 ran as the preHandler; the accessor is the identity read.
+      const caller = authUser(request);
+
+      // Step 2: any present body — an empty JSON object included — is
+      // INVALID_REQUEST. Presence on the wire, not object contents (D66).
+      if (request.body !== undefined && request.body !== null) {
+        return fail(reply, 400, "INVALID_REQUEST");
+      }
+
+      // Step 3: id form — NOT_FOUND, byte-identical with step 4 absence.
+      const { id } = request.params;
+      if (!UUID_FORM.test(id)) return fail(reply, 404, "NOT_FOUND");
+
+      // Step 4: load, by id alone; DetailRow is the section 8.5 shape.
+      // policy_hash and canonical_json ride along here — immutable after
+      // creation (section 4) — so both owner-view arms are served from
+      // this load, never from the UPDATE's RETURNING.
+      const result = await pool.query<DetailRow>(
+        `SELECT b.id, b.title, b.category, b.state, b.program_account,
+                b.created_at, b.requester_id, p.policy_hash,
+                p.canonical_json
+         FROM bounties b
+         JOIN policies p ON p.id = b.policy_id
+         WHERE b.id = $1`,
+        [id],
+      );
+      const row = result.rows[0];
+      if (row === undefined) return fail(reply, 404, "NOT_FOUND");
+
+      // Step 5: not the requester — hidden states are 404 (7.3), so a
+      // cancel probe is no existence oracle; visible states are 403.
+      if (row.requester_id !== caller.id) {
+        if (row.state === "DRAFT" || row.state === "CANCELLED") {
+          return fail(reply, 404, "NOT_FOUND");
+        }
+        return fail(reply, 403, "FORBIDDEN");
+      }
+
+      const ownerBody = (state: string): Record<string, unknown> =>
+        ownerView({
+          id: row.id,
+          title: row.title,
+          category: row.category,
+          state,
+          programAccount: row.program_account,
+          createdAt: row.created_at,
+          policyHashHex: bytesToHex(row.policy_hash),
+          canonicalJson: row.canonical_json,
+        });
+
+      // Step 6: already cancelled — a retry is a success, not a conflict.
+      if (row.state === "CANCELLED") {
+        return reply.status(200).send(ownerBody("CANCELLED"));
+      }
+
+      // Step 7: the one conditional update — id, requester and DRAFT all
+      // match, or zero rows return.
+      if (row.state === "DRAFT") {
+        const updated = await pool.query<{ state: string }>(
+          `UPDATE bounties
+           SET state = 'CANCELLED'
+           WHERE id = $1 AND requester_id = $2 AND state = 'DRAFT'
+           RETURNING state`,
+          [row.id, caller.id],
+        );
+        const updatedRow = updated.rows[0];
+        if (updatedRow !== undefined) {
+          return reply.status(200).send(ownerBody(updatedRow.state));
+        }
+
+        // Zero rows: a concurrent transition won. Reload once and
+        // re-apply steps 6 and 8. DRAFT again is impossible (7.2, D66):
+        // it throws instead of retrying.
+        const reread = await pool.query<{ state: string }>(
+          `SELECT state FROM bounties WHERE id = $1`,
+          [row.id],
+        );
+        const rerow = reread.rows[0];
+        if (rerow === undefined) {
+          throw new Error("cancel reload: row vanished after zero-row update");
+        }
+        if (rerow.state === "CANCELLED") {
+          return reply.status(200).send(ownerBody("CANCELLED"));
+        }
+        if (rerow.state === "DRAFT") {
+          throw new Error("cancel reload: DRAFT after zero-row update");
+        }
+        return fail(reply, 409, "BOUNTY_NOT_CANCELLABLE");
+      }
+
+      // Step 8: anything else admits no cancellation in Session 7.
+      return fail(reply, 409, "BOUNTY_NOT_CANCELLABLE");
+    },
+  );
 }
