@@ -2,14 +2,16 @@
 // list item — three separate functions, never one function with a mode flag,
 // so no later edit can leak a field across views by flipping the wrong branch.
 //
-// publicView and listItem land in commit 7 beside tests 54 and 59, which pin
-// their exact key sets; their absence here is scoping, not omission. When they
-// arrive: policy_public is an allow-list rebuild (thirteen keys written out),
-// and location_public is computed by snapLat/snapLon over the parsed policy's
-// lat and lon strings — never read back from the PostGIS location_public
-// column, because geography round-trips through float8 and would reintroduce
-// floating point into the one value D58 keeps out. A later "we already have
-// it in the row" optimisation is exactly what this comment exists to stop.
+// publicView and listItem are pinned by tests 54 and 59, which assert their
+// exact key sets. policy_public is an allow-list rebuild (thirteen keys
+// written out), and location_public is computed by snapLat/snapLon over the
+// parsed policy's lat and lon strings — never read back from the PostGIS
+// location_public column, because geography round-trips through float8 and
+// would reintroduce floating point into the one value D58 keeps out. A later
+// "we already have it in the row" optimisation is exactly what this comment
+// exists to stop.
+
+import { snapLat, snapLon } from "./snap.ts";
 
 export interface OwnerViewInput {
   id: string;
@@ -36,5 +38,105 @@ export function ownerView(input: OwnerViewInput): Record<string, unknown> {
     created_at: input.createdAt.toISOString(),
     policy_hash: input.policyHashHex,
     policy: JSON.parse(input.canonicalJson) as unknown,
+  };
+}
+
+export interface PublicViewInput {
+  id: string;
+  title: string;
+  category: string;
+  state: string;
+  createdAt: Date;
+  policyHashHex: string;
+  canonicalJson: string;
+}
+
+export interface ListItemInput {
+  id: string;
+  title: string;
+  category: string;
+  state: string;
+  createdAt: Date;
+  rewardAmount: string;
+  requiredAssurance: number;
+  canonicalJson: string;
+}
+
+// The parsed-policy types deliberately omit the salt and the requirement id:
+// the withheld section 9.4 values are unreadable at compile time here, on top
+// of the allow-list rebuilds that keep them out of every emitted object.
+interface StoredRequirement {
+  prompt: string;
+  required: boolean;
+  type: string;
+}
+
+interface StoredPolicy {
+  acceptance_window_seconds: number;
+  attester_pubkey: string;
+  capture_radius_m: number;
+  chain: string;
+  challenge_window_seconds: number;
+  cluster: string;
+  completion_window_seconds: number;
+  domain_tag: string;
+  evidence_requirements: StoredRequirement[];
+  fee_amount: string;
+  lat: string;
+  lon: string;
+  required_assurance: number;
+  reward_amount: string;
+  settlement_mint: string;
+}
+
+// Section 8.2 public view: eight keys, any other authenticated caller.
+// policy_public writes the thirteen keys out literally in canonical order;
+// each requirement item is a new object of exactly prompt, required, type.
+export function publicView(input: PublicViewInput): Record<string, unknown> {
+  const policy = JSON.parse(input.canonicalJson) as StoredPolicy;
+  return {
+    id: input.id,
+    title: input.title,
+    category: input.category,
+    state: input.state,
+    created_at: input.createdAt.toISOString(),
+    policy_hash: input.policyHashHex,
+    location_public: { lat: snapLat(policy.lat), lon: snapLon(policy.lon) },
+    policy_public: {
+      acceptance_window_seconds: policy.acceptance_window_seconds,
+      attester_pubkey: policy.attester_pubkey,
+      capture_radius_m: policy.capture_radius_m,
+      chain: policy.chain,
+      challenge_window_seconds: policy.challenge_window_seconds,
+      cluster: policy.cluster,
+      completion_window_seconds: policy.completion_window_seconds,
+      domain_tag: policy.domain_tag,
+      evidence_requirements: policy.evidence_requirements.map((item) => ({
+        prompt: item.prompt,
+        required: item.required,
+        type: item.type,
+      })),
+      fee_amount: policy.fee_amount,
+      required_assurance: policy.required_assurance,
+      reward_amount: policy.reward_amount,
+      settlement_mint: policy.settlement_mint,
+    },
+  };
+}
+
+// Section 8.2 list item: eight keys, one shape for both list endpoints.
+// reward_amount and required_assurance are the read-model copies (D65); the
+// policy is parsed only for the lat and lon strings that feed the snap.
+export function listItem(input: ListItemInput): Record<string, unknown> {
+  const policy = JSON.parse(input.canonicalJson) as StoredPolicy;
+  return {
+    id: input.id,
+    title: input.title,
+    category: input.category,
+    state: input.state,
+    created_at: input.createdAt.toISOString(),
+    reward_amount: input.rewardAmount,
+    required_assurance: input.requiredAssurance,
+    location_public: { lat: snapLat(policy.lat), lon: snapLon(policy.lon) },
   };
 }
