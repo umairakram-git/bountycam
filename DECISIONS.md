@@ -474,3 +474,17 @@ column would serve a value the requester never committed to. Drift guard: test 8
 gains an assert that `policies.required_assurance` equals the policy value at
 creation. Per D63 this is an assert inside an existing numbered test; the 76 gate
 is unchanged.
+
+**D66 — Cancel body rule numbered; empty object ruled; the reload is single.** Three
+rulings for section 8.7, amended before the code. (1) The no-body rule moved from
+prose into the check order as step 2 — before the id form check — so "first failing
+step wins" (8.1) has meaning for it; the later steps renumber to 3 through 8. (2) An
+empty JSON object is a present body and returns `INVALID_REQUEST`: the rule is body
+presence on the wire, not object contents — two bytes of `{}` are a body. Test 69
+names the case. (3) Step 7's re-application after a zero-row conditional update is a
+single reload, never a loop: by step 5 the caller is proven the requester and
+`requester_id` never changes, so zero rows means the state left `DRAFT`, and 7.2 has
+no transition back into `DRAFT` — the reloaded row terminates in the cancelled arm
+(200) or the not-cancellable arm (409). A second zero-row result would falsify the
+state machine and must surface as an error, not a retry; recorded so nobody later
+writes a retry loop around an invariant.

@@ -789,23 +789,26 @@ registration order is a bug waiting for a refactor.
 ### 8.7 `POST /bounties/:id/cancel`
 
 Soft-cancels an unfunded bounty (sections 4 and 7.2). No idempotency key: the
-operation is idempotent by state (section 10.4). No request body; a non-empty body
-is `INVALID_REQUEST` (400).
+operation is idempotent by state (section 10.4). No request body (step 2).
 
 1. **Auth**; 401 codes.
-2. **Id form**, as section 8.5 step 2: `NOT_FOUND` (404).
-3. **Load.** No row: `NOT_FOUND` (404).
-4. **Caller.** Not the requester: `NOT_FOUND` (404) if the state is `DRAFT` or
+2. **Body.** Any present request body is `INVALID_REQUEST` (400) — an empty JSON
+   object included: the rule is body presence on the wire, not object contents
+   (D66). Runs before the id form check.
+3. **Id form**, as section 8.5 step 2: `NOT_FOUND` (404).
+4. **Load.** No row: `NOT_FOUND` (404).
+5. **Caller.** Not the requester: `NOT_FOUND` (404) if the state is `DRAFT` or
    `CANCELLED` (hidden, section 7.3); `FORBIDDEN` (403) otherwise — the caller can
    see the bounty but cannot cancel it. (The 403 arm is unreachable through Session
    7 APIs; the test seeds the state by SQL.)
-5. **Already cancelled.** State `CANCELLED`: 200 with the owner view. A retry of a
+6. **Already cancelled.** State `CANCELLED`: 200 with the owner view. A retry of a
    cancel is a success, not a conflict.
-6. **Cancel.** State `DRAFT`: one conditional update — set `state` to `CANCELLED`
+7. **Cancel.** State `DRAFT`: one conditional update — set `state` to `CANCELLED`
    where the id, the requester and `state = 'DRAFT'` all match, returning the row.
-   Zero rows returned means a concurrent transition won; reload and re-apply steps
-   5 to 7. On success: 200, owner view.
-7. **Anything else.** `BOUNTY_NOT_CANCELLABLE` (409). Funded-state cancellation is
+   Zero rows returned means a concurrent transition won; reload once and re-apply
+   steps 6 to 8 — a second zero-row result falsifies the 7.2 state machine and
+   surfaces as an error, never a retry (D66). On success: 200, owner view.
+8. **Anything else.** `BOUNTY_NOT_CANCELLABLE` (409). Funded-state cancellation is
    Session 9's (section 7.2). (Unreachable through Session 7 APIs; seeded by SQL in
    the test.)
 
@@ -1203,7 +1206,8 @@ Cancel:
 66. A non-owner cancels a `DRAFT` — 404 `NOT_FOUND`.
 67. A non-owner cancels a seeded `AVAILABLE` — 403 `FORBIDDEN`.
 68. Owner cancels a seeded `FUNDED` — 409 `BOUNTY_NOT_CANCELLABLE`.
-69. A non-empty request body — 400 `INVALID_REQUEST`.
+69. A non-empty request body — 400 `INVALID_REQUEST`; an empty JSON object is a
+    present body and fails identically (step 2, before the id form check).
 
 Configuration:
 
