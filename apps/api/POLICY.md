@@ -863,6 +863,20 @@ The snapped pair is written once at creation to `bounties.location_public` (Post
 geography with a GIST index, D21; migration in section 11) and is the only location
 data any non-requester response or query predicate ever touches.
 
+How coordinates enter the column: PostGIS geography stores coordinates as float8
+pairs, so choosing the column type chose float8 storage — every entry path
+(`ST_MakePoint`, WKT, EWKB) lands there, and the scaled-integer rule above governs
+the snap computation, not the storage format. The entry is safe by arithmetic: a
+profile string carries at most ten significant digits, and decimal text round-trips
+exactly through float8 up to fifteen, so the stored double is the unique float8 for
+the rendered string. In the other direction the rule is a prohibition: no code path
+may render coordinates back out of a geography column — string coordinates are
+produced only by the section 5 profile check and the snap above, from the policy
+`lat` and `lon`. The column may feed PostGIS distance internals (section 8.4) and
+nothing else. A read-back would reintroduce floating point into a value whose whole
+point is exactness, and it would do so silently: the first fifteen digits agree, so
+no test that compares rendered strings would catch the substitution.
+
 ### 9.2 Deterministic, no jitter
 
 The same input snaps to the same output, forever, so repeated queries reveal nothing

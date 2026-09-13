@@ -437,4 +437,24 @@ assert the whole-body property — the salt value and each requirement uuid appe
 nowhere in the serialised response, under any key, at any depth — by scanning for the
 known injected values. A decision with no named test is how a property survives on
 paper and dies in code. The 75-test gate is unchanged; every addition is an assert
-inside an existing numbered test.
+inside an existing numbered test. (Gate later moved to 76 within Session 7b: a
+ruling added test 76, the `authUser()` wiring guard, amending POLICY.md section 12
+and HANDOFF together in their own commit.)
+
+**D64 — Geography entry rule: float8 storage is chosen; read-back is forbidden.** The
+gap: POLICY.md named `location_public` as PostGIS geography (D21, section 11) but
+never said how a rendered profile string becomes a stored point — found at the first
+`ST_MakePoint` call site. Now spec text in section 9.1. Choosing geography chose
+float8 storage: every entry path (`ST_MakePoint`, WKT, EWKB) lands in float8 pairs,
+so the section 9.1 scaled-integer rule governs the snap computation, not the storage
+format. Entry is safe by arithmetic, a claim that stays true: a profile string
+carries at most ten significant digits, and decimal text round-trips exactly through
+float8 up to fifteen, so the stored double is the unique float8 for the rendered
+string. The reverse direction is a prohibition, not an observation about today's
+code: no code path may render coordinates back out of a geography column — string
+coordinates are produced only by the section 5 profile check and the section 9.1
+snap, from the policy `lat` and `lon`; the column may feed PostGIS distance
+internals (section 8.4) and nothing else. The reason travels with the rule: a
+read-back reintroduces floating point into a value whose whole point is exactness,
+and silently — the first fifteen digits agree, so no test comparing rendered strings
+would catch the substitution.
