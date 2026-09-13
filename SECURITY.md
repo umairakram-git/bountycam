@@ -43,18 +43,17 @@ does not independently authorise moving money.
 
 ---
 
-## 1. Open contradiction — acceptance and cancellation
+## 1. Resolved contradiction — acceptance and cancellation (D49)
 
-D1 keeps acceptance off-chain. The trust model says the requester cannot cancel after
-acceptance. Both cannot hold: if acceptance exists only in the database, the program
+D1 kept acceptance off-chain. The trust model says the requester cannot cancel after
+acceptance. Both could not hold: if acceptance exists only in the database, the program
 cannot know a Scout accepted, and a requester who calls `cancel` directly strands the
 Scout mid-mission.
 
-BACKLOG already lists an on-chain `accept` for Session 8, so D1 and the plan disagree.
-Resolve with a D-entry before Session 8. Preferred: an on-chain `accept` transition that
-moves zero USDC, records the Scout, and after which `cancel` fails. Alternative: keep
-acceptance off-chain and state the real on-chain cancellation rule in the product.
-Do not build the contradictory design.
+Resolved by D49, which supersedes the second half of D1: acceptance moves on-chain.
+Session 8 adds an `accept` instruction that moves zero USDC and records the Scout;
+`cancel` is rejected from ACCEPTED onward. The database row lock remains the race
+arbiter for who gets to accept first; the chain records the outcome.
 
 ---
 

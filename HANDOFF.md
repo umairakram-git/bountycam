@@ -1,9 +1,9 @@
 # BountyCam — Handoff
 
-**Date:** 13 September 2026
-**Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b commits 0–4c
-**Next session:** 7b commit 5 — the four remaining endpoints (POLICY.md sections 8.4–8.7), publicView and listItem, tests 4 and 51–69
-**Deadline:** 8 October 2026 (25 days remaining)
+**Date:** 14 September 2026
+**Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b (complete)
+**Next session:** 8 — Escrow: `accept`, `submit_attestation`, challenge nonce issuance (BACKLOG)
+**Deadline:** 8 October 2026 (24 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
 
@@ -60,7 +60,7 @@ sufficient for truth.
 ```
 hackathon202609/
 ├── apps/
-│   ├── api/          Fastify + TS, SIWS auth, POST /bounties, 6 migrations
+│   ├── api/          Fastify + TS, SIWS auth, five bounty endpoints, 6 migrations
 │   └── mobile/       Expo + TS skeleton, android/ kept, ios/ deleted
 ├── packages/
 │   └── shared/       SPEC.md (normative) + implementation, 66 passing tests
@@ -313,33 +313,67 @@ The gate, all from raw output: bounties `tests 56, pass 56, fail 0`; auth
 Test 5 reproduced V1's policy hash end to end through the HTTP path; test 47
 carries the omitted-vs-present optional-key 409.
 
-## Next: Session 7b commit 5 — three facts that must survive compaction
+## Session 7b commit 5 — the four endpoints and the full test suite
 
-Scope: the four remaining endpoints (POLICY.md sections 8.4 to 8.7 — discovery,
-detail, `GET /me/bounties`, cancel), `publicView` and `listItem` added to
-`views.ts` beside the tests that pin their key sets (54, 59), and tests 4 and
-51 to 69 in the bounties suite.
+Thirteen single-purpose commits (c7964bf..fa42c0e), spec-first held: three
+amendments each rode ahead of the code they govern — D65 (list-item
+`required_assurance` from the policies read-model column; test 8 gains the
+drift-guard assert), the section 8.6 tie-break amendment (`id` ascending,
+matching 8.4), and D66 (cancel body rule numbered as step 2 before the id
+form; an empty JSON object is a present body; the step 7 reload is single —
+a second zero-row result falsifies the 7.2 state machine and throws).
 
-Spec amendment riding ahead of the implementation, in its own commit (D65): the
-list item's `required_assurance` comes from the policies read-model column, the
-same source as `reward_amount` — section 8.2 row updated, test 8 gains the
-drift-guard assert (`policies.required_assurance` equals the policy value at
-creation), gate unchanged at 76.
+Delivered, all verified from raw output:
 
-- **The test count gate moves 56 to exactly 76.** The suite passes only if the
-  summary reads `tests 76, pass 76, fail 0`; the migration scratch test reads
-  `tests 1, pass 1, fail 0`. Any other count is a failure, whatever the banner
-  says (D36).
-- **The D64 read-back prohibition.** No code path may render coordinates back
-  out of a geography column. Coordinate strings come only from the section 5
-  profile check and the section 9.1 snap over the parsed `canonical_json`'s
-  `lat` and `lon` — the views.ts header comment names the tempting
-  "we already have it in the row" optimisation this forbids.
-- **The migration 5 and 6 rollbacks are now documentation only.** They were
-  runnable only while the tables were empty (POLICY.md section 11.3), and 7b's
-  endpoints have written rows. Rolling back now requires a data-preserving
-  down migration written at that time; never claim the shipped rollbacks as
-  demonstrated.
+- `publicView` and `listItem` in views.ts: allow-list rebuilds with keys
+  written literally, eight keys each; `StoredPolicy` omits `salt` and the
+  requirement `id` so a leak cannot even compile.
+- `GET /bounties` (8.4): geography `ST_DWithin` in metres — both operands
+  stay geography; a geometry cast would filter in degrees and match the
+  planet — ordering distance ascending, `created_at` DESC, `id` ASC.
+- `GET /bounties/:id` (8.5): owner/public split by requester; the malformed
+  id and the absent uuid return byte-identical 404 bodies (7.3).
+- `GET /me/bounties` (8.6): its own extractor — `limit` and `offset` only;
+  the discovery parameters are unknown here — no state filter.
+- `POST /bounties/:id/cancel` (8.7 as amended): eight steps verbatim, one
+  conditional UPDATE, owner view served from the step 4 load.
+- Tests 4 and 51–69. Load-bearing details: whole-body scans with vacuity
+  guards before them (54, 59 — every scanned-for value proven a real string
+  of the expected form first); test 51's two rows sit at different bearings
+  from a latitude-60 query point, so a planar degree-space ordering flips
+  the pair; tests 52, 53 and 62 carry presence controls proving each
+  absence assert could have failed; test 56 asserts pages partition the
+  full ordering; test 65 asserts the cancel retry body is byte-identical.
+
+The gate: bounties `tests 76, pass 76, fail 0`; auth `tests 38, pass 38,
+fail 0`; migrations `tests 1, pass 1, fail 0`; lint exit 0.
+
+## Next: Session 8 — what must survive compaction
+
+Scope (BACKLOG remaining plan): Escrow — `accept`, `submit_attestation`,
+challenge nonce issuance. D49 fixes `accept`'s shape: it moves zero USDC,
+records the Scout, and `cancel` is rejected from ACCEPTED onward.
+
+Three facts from commit 5 that the diffs do not show:
+
+- **`created_at` takes the column default `now()`** — the database clock,
+  outside the injectable clock. Ordering tests seed timestamps by SQL
+  (test 62). A session wanting deterministic `created_at` has to route it
+  through the clock first.
+- **The randomness double is fixed for the salt and queued for the uuids.**
+  Every `randomBytes` call returns V1's 32 bytes; `randomUUID` shifts
+  `uuidQueue` first, then falls back to a counter. A test pushing N uuids
+  must create a bounty with exactly N requirements, or the leftovers land
+  in the next create inside the same test.
+- **Three lines over 100 in bounties.test.ts** (the test-name lines of
+  tests 07, 08, 32) predate commit 5 — verified against HEAD's copy via
+  `git show`. BACKLOG item, not a blocker.
+
+Still standing from the commit-5 list, both durable: the D64 read-back
+prohibition (no code path renders coordinates out of a geography column —
+the views.ts header names the tempting optimisation), and the migration 5
+and 6 rollbacks being documentation only now that rows exist (POLICY.md
+section 11.3) — never claim them as demonstrated.
 
 Riding along from earlier sessions: AUTH.md section 14.2 domain value and the
 fallback signing path both validate on device in Session 10. The three test
@@ -365,3 +399,6 @@ tsconfig instances recorded in BACKLOG are owed to commit 7's before-count.
 - A test pass counts only if the summary shows the expected test count. A
   green run that executed nothing looks identical from the exit banner alone
   (D36).
+- Never `git stash`. It moves uncommitted work out of the working tree and
+  the pop can fail. For a read-only comparison against HEAD, read the
+  committed file from the object store: `git show HEAD:<path>`.
