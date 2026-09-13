@@ -1,9 +1,9 @@
 # BountyCam — Handoff
 
-**Date:** 12 September 2026
-**Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a
-**Next session:** 7b — implement POLICY.md: migrations 5 and 6, policy creation, bounty CRUD
-**Deadline:** 8 October 2026 (26 days remaining)
+**Date:** 13 September 2026
+**Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b commits 0–4c
+**Next session:** 7b commit 5 — the four remaining endpoints (POLICY.md sections 8.4–8.7), publicView and listItem, tests 4 and 51–69
+**Deadline:** 8 October 2026 (25 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
 
@@ -60,10 +60,10 @@ sufficient for truth.
 ```
 hackathon202609/
 ├── apps/
-│   ├── api/          Fastify + TS, SIWS auth, 4 migrations
+│   ├── api/          Fastify + TS, SIWS auth, POST /bounties, 6 migrations
 │   └── mobile/       Expo + TS skeleton, android/ kept, ios/ deleted
 ├── packages/
-│   └── shared/       SPEC.md (normative) + stubs — implementation pending
+│   └── shared/       SPEC.md (normative) + implementation, 66 passing tests
 └── programs/
     └── escrow/       Anchor 1.1.2, SPEC.md, 10 passing tests
 ```
@@ -282,25 +282,62 @@ the salt edit caught it; this is the working rules producing exactly what they
 exist to produce, and a reason to keep re-deriving counts rather than trusting
 approved prose.
 
-## Next: Session 7b — two facts that must survive compaction
+## Session 7b (commits 0–4c) — policy creation implemented
 
-Implement POLICY.md: migrations 5 and 6, policy creation, bounty CRUD behind the
-auth middleware. Two numbers Session 7b must carry in from the spec:
+Spec-first held: three POLICY.md amendments each rode in their own commit before
+the code they govern — D63 (check order, integer form, tie-break, salt-absence
+tests), test 76 (the `authUser()` wiring-guard unit test; gate moved 75 to 76),
+and D64 (section 9.1 geography entry rule).
 
-- **The test count gate is exactly 76.** The suite passes only if the summary
-  reads `tests 76, pass 76, fail 0`; the migration scratch test reads
+Delivered, single-purpose commits, verified from raw output (06733ae..454489c):
+
+- Migrations 5 and 6: policy-hash CHECK and prompt rename; bounty columns —
+  `numeric(20,0)` reward with a u64 CHECK, `location` and `location_public`
+  geography, and the idempotency unique index whose exact name the route's
+  23505 handler matches.
+- Injectable randomness module (salt bytes, requirement uuids), mirroring the
+  clock (D54); tests inject a deterministic double and source-test both values.
+- GPS profile form rules, scaled-integer BigInt snap, and the sixteen-field
+  policy build hashed via `packages/shared` only.
+- Startup config: `SOLANA_CLUSTER` (default devnet), `SETTLEMENT_MINT`
+  (required, base58/32), `ATTESTER_PUBKEYS` (strict comma split — no trim, no
+  empty elements, no duplicates); malformed values exit non-zero before listening.
+- `requireAuth` preHandler and the throwing `authUser()` accessor.
+- POST /bounties: the section 8.3 ten-step check order verbatim; the request
+  digest preserves optional-key presence (section 10.2); replay and 409 served
+  from stored rows; 23505 discriminated by constraint name; the collision
+  re-read goes to the pool, never the possibly-dead transaction client.
+
+The gate, all from raw output: bounties `tests 56, pass 56, fail 0`; auth
+`tests 38, pass 38, fail 0`; migrations `tests 1, pass 1, fail 0`; lint exit 0.
+Test 5 reproduced V1's policy hash end to end through the HTTP path; test 47
+carries the omitted-vs-present optional-key 409.
+
+## Next: Session 7b commit 5 — three facts that must survive compaction
+
+Scope: the four remaining endpoints (POLICY.md sections 8.4 to 8.7 — discovery,
+detail, `GET /me/bounties`, cancel), `publicView` and `listItem` added to
+`views.ts` beside the tests that pin their key sets (54, 59), and tests 4 and
+51 to 69 in the bounties suite.
+
+- **The test count gate moves 56 to exactly 76.** The suite passes only if the
+  summary reads `tests 76, pass 76, fail 0`; the migration scratch test reads
   `tests 1, pass 1, fail 0`. Any other count is a failure, whatever the banner
-  says (D36). (Was 75 at session start; moved to 76 during Session 7b when
-  POLICY.md section 12 gained test 76, the `authUser()` wiring-guard unit
-  test.)
-- **The migration 5 and 6 rollbacks are valid only while the tables are empty.**
-  Both re-add NOT NULL columns without defaults (POLICY.md section 11.3). Once 7b's
-  endpoints write the first row, the shipped rollbacks are documentation of the
-  reverse shape, not runnable escape hatches; rolling back after that requires a
-  data-preserving down migration written at that time.
+  says (D36).
+- **The D64 read-back prohibition.** No code path may render coordinates back
+  out of a geography column. Coordinate strings come only from the section 5
+  profile check and the section 9.1 snap over the parsed `canonical_json`'s
+  `lat` and `lon` — the views.ts header comment names the tempting
+  "we already have it in the row" optimisation this forbids.
+- **The migration 5 and 6 rollbacks are now documentation only.** They were
+  runnable only while the tables were empty (POLICY.md section 11.3), and 7b's
+  endpoints have written rows. Rolling back now requires a data-preserving
+  down migration written at that time; never claim the shipped rollbacks as
+  demonstrated.
 
 Riding along from earlier sessions: AUTH.md section 14.2 domain value and the
-fallback signing path both validate on device in Session 10.
+fallback signing path both validate on device in Session 10. The three test
+tsconfig instances recorded in BACKLOG are owed to commit 7's before-count.
 
 ---
 
