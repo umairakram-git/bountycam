@@ -654,7 +654,7 @@ every public response is tested (section 12).
 |---|---|
 | `id`, `title`, `category`, `state`, `created_at` | bounty row |
 | `reward_amount` | base-unit string, from the read-model column |
-| `required_assurance` | integer 0 to 4 |
+| `required_assurance` | integer 0 to 4, from the read-model column (D65) |
 | `location_public` | as above |
 
 Lists never carry policies or requirement data; the detail endpoint does.
@@ -1084,7 +1084,8 @@ Create — success and invariants:
    for byte (section 3.4, second invariant).
 8. Rows per section 7.1: requirement rows with `prompt` and `sequence` equal to
    array position; bounty `DRAFT`; `program_account` null; the `reward_amount`
-   column equals the policy string.
+   column equals the policy string; `policies.required_assurance` equals the
+   policy integer (D65).
 9. `location` is the exact point; `location_public` equals the section 9.1 snap of
    the same coordinates.
 10. The salt is exactly 64 lowercase hex characters and equals the injected

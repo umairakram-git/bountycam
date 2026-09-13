@@ -320,6 +320,12 @@ detail, `GET /me/bounties`, cancel), `publicView` and `listItem` added to
 `views.ts` beside the tests that pin their key sets (54, 59), and tests 4 and
 51 to 69 in the bounties suite.
 
+Spec amendment riding ahead of the implementation, in its own commit (D65): the
+list item's `required_assurance` comes from the policies read-model column, the
+same source as `reward_amount` — section 8.2 row updated, test 8 gains the
+drift-guard assert (`policies.required_assurance` equals the policy value at
+creation), gate unchanged at 76.
+
 - **The test count gate moves 56 to exactly 76.** The suite passes only if the
   summary reads `tests 76, pass 76, fail 0`; the migration scratch test reads
   `tests 1, pass 1, fail 0`. Any other count is a failure, whatever the banner

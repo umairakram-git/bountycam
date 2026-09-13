@@ -458,3 +458,19 @@ internals (section 8.4) and nothing else. The reason travels with the rule: a
 read-back reintroduces floating point into a value whose whole point is exactness,
 and silently — the first fifteen digits agree, so no test comparing rendered strings
 would catch the substitution.
+
+**D65 — List-item `required_assurance` comes from the policies read-model column.**
+The section 8.2 list-item table gave `reward_amount` a source — the read-model
+column — but was silent on `required_assurance`; both lawful readings (the section
+7.1 read-model copy on `policies`, or the parsed `canonical_json`) produce the
+hashed value. Ruled: the read-model column, the same source as `reward_amount`.
+Three reasons. The join to `policies` already exists because `canonical_json` is
+needed for the section 9.1 snap, so the column costs nothing. It parallels
+`reward_amount` in the same section 8.2 table — one sourcing rule, not two. And a
+later assurance filter in discovery indexes that column, so filter and output agree
+by construction. The risk that comes with the ruling: a read-model copy can diverge
+from the hashed value it copies, and the hash is the only authority — a diverged
+column would serve a value the requester never committed to. Drift guard: test 8
+gains an assert that `policies.required_assurance` equals the policy value at
+creation. Per D63 this is an assert inside an existing numbered test; the 76 gate
+is unchanged.
