@@ -237,6 +237,22 @@ test("03 token expired beyond the 60-second tolerance is TOKEN_EXPIRED", async (
   assert.equal(res.json().error, "TOKEN_EXPIRED");
 });
 
+test("04 each of the other four endpoints without a token is TOKEN_MISSING", async () => {
+  // Auth is step 1 on every endpoint, so no query or body is needed to
+  // reach it. One runner test, four asserts (section 12, D36).
+  const endpoints: Array<["GET" | "POST", string]> = [
+    ["GET", "/bounties?lat=10.0000000&lon=10.0000000&radius_m=1000"],
+    ["GET", `/bounties/${NIL_SUB}`],
+    ["GET", "/me/bounties"],
+    ["POST", `/bounties/${NIL_SUB}/cancel`],
+  ];
+  for (const [method, url] of endpoints) {
+    const res = await app.inject({ method, url });
+    assert.equal(res.statusCode, 401, url);
+    assert.deepEqual(res.json(), { error: "TOKEN_MISSING" }, url);
+  }
+});
+
 // --- create: success and invariants (POLICY.md section 12, tests 5 to 11) ---
 
 const V1_HASH =
