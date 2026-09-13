@@ -12,7 +12,8 @@ import type { ValidatedPolicyInput } from "./policy.ts";
 // client. The spec does not constrain the client's generator, so no version
 // nibble here — the v4 rule applies only to server-assigned requirement ids
 // (section 2.2). A v4-only regex would reject keys the spec accepts.
-const UUID_FORM =
+// Exported: section 8.5 step 2 checks :id against the same form.
+export const UUID_FORM =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 // Section 2.3: integer fields accept only JSON numbers that are integers in

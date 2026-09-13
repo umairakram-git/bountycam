@@ -8,7 +8,11 @@ import type { Clock } from "../clock.ts";
 import type { Config } from "../config.ts";
 import type { Randomness } from "../randomness.ts";
 import { authUser, makeRequireAuth } from "../auth/middleware.ts";
-import { extractCreateBody, type ExtractedCreateBody } from "./extract.ts";
+import {
+  UUID_FORM,
+  extractCreateBody,
+  type ExtractedCreateBody,
+} from "./extract.ts";
 import {
   buildPolicy,
   bytesToHex,
@@ -18,7 +22,7 @@ import {
 } from "./policy.ts";
 import { isValidLat, isValidLon } from "./gps.ts";
 import { snapLat, snapLon } from "./snap.ts";
-import { listItem, ownerView } from "./views.ts";
+import { listItem, ownerView, publicView } from "./views.ts";
 
 export interface BountyDeps {
   pool: Pool;
@@ -194,6 +198,18 @@ function extractDiscoveryQuery(query: unknown): DiscoveryQuery | null {
   }
 
   return { lat, lon, radiusM: Number(radius), limit, offset };
+}
+
+interface DetailRow {
+  id: string;
+  title: string;
+  category: string;
+  state: string;
+  program_account: string | null;
+  created_at: Date;
+  requester_id: string;
+  policy_hash: Buffer;
+  canonical_json: string;
 }
 
 interface DiscoveryRow {
@@ -459,4 +475,71 @@ export function registerBountyRoutes(
       ),
     });
   });
+
+  // POLICY.md section 8.5: GET /bounties/:id, the five-step check order.
+  // Steps 2 and 3 use the same fail() call with the same code, so a
+  // malformed id and an absent row return byte-identical bodies (test 60):
+  // an id leak must not become an existence oracle (7.3). UUID_FORM is the
+  // exported section 10.1 regex from extract.ts — one copy, one form.
+  app.get<{ Params: { id: string } }>(
+    "/bounties/:id",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      // Step 1 ran as the preHandler; the accessor is the identity read.
+      const caller = authUser(request);
+
+      // Step 2: id form — NOT_FOUND.
+      const { id } = request.params;
+      if (!UUID_FORM.test(id)) return fail(reply, 404, "NOT_FOUND");
+
+      // Step 3: load by id alone. Ownership is compared in the handler,
+      // not the WHERE clause: a non-owner is still owed the public view
+      // in visible states, so the row loads regardless of who asks and
+      // zero rows means exactly one thing — absence.
+      const result = await pool.query<DetailRow>(
+        `SELECT b.id, b.title, b.category, b.state, b.program_account,
+                b.created_at, b.requester_id, p.policy_hash,
+                p.canonical_json
+         FROM bounties b
+         JOIN policies p ON p.id = b.policy_id
+         WHERE b.id = $1`,
+        [id],
+      );
+      const row = result.rows[0];
+      if (row === undefined) return fail(reply, 404, "NOT_FOUND");
+
+      // Step 4: the owner gets the owner view in every state.
+      if (row.requester_id === caller.id) {
+        return reply.status(200).send(
+          ownerView({
+            id: row.id,
+            title: row.title,
+            category: row.category,
+            state: row.state,
+            programAccount: row.program_account,
+            createdAt: row.created_at,
+            policyHashHex: bytesToHex(row.policy_hash),
+            canonicalJson: row.canonical_json,
+          }),
+        );
+      }
+
+      // Step 5: DRAFT and CANCELLED are hidden from anyone else (7.3);
+      // any other state gets the public view.
+      if (row.state === "DRAFT" || row.state === "CANCELLED") {
+        return fail(reply, 404, "NOT_FOUND");
+      }
+      return reply.status(200).send(
+        publicView({
+          id: row.id,
+          title: row.title,
+          category: row.category,
+          state: row.state,
+          createdAt: row.created_at,
+          policyHashHex: bytesToHex(row.policy_hash),
+          canonicalJson: row.canonical_json,
+        }),
+      );
+    },
+  );
 }
