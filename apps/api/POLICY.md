@@ -1197,8 +1197,10 @@ Configuration:
 
 Snap unit tests:
 
-73. The section 9.1 worked examples reproduce: latitude `90.0000000` to
-    `89.9950000`, longitude `-180.0000000` to `-179.9950000`.
+73. The section 9.1 worked examples and the V3 rows reproduce, plus the positive
+    longitude clamp extreme `180.0000000` to `179.9950000` — not in V3, computed
+    and verified by the Session 7b test run. The clamp moves only the two
+    positive extremes; `-180.0000000` is exact, its cell already in range.
 74. `-0.0000001` snaps to centre `-0.0050000` — floor division, not truncation.
 75. Snap output always passes the section 5 form rules, and the same input twice
     gives identical output.
