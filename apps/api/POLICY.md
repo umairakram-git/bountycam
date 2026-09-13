@@ -1046,7 +1046,7 @@ Runner and rules are Session 6b's: `node:test` against a scratch database, test
 files named explicitly in the test script (D36), the injectable clock, and — new in
 this session — the injectable randomness module (section 2.1) with deterministic
 doubles. The D36 gate: **the suite passes only if the summary reads exactly
-`tests 75, pass 75, fail 0`**, and the migration scratch test reads exactly
+`tests 76, pass 76, fail 0`**, and the migration scratch test reads exactly
 `tests 1, pass 1, fail 0`. A green banner with any other count is a failure.
 
 Where a test needs a state no Session 7 API can produce (`AVAILABLE`, `FUNDED`), it
@@ -1204,6 +1204,12 @@ Snap unit tests:
 74. `-0.0000001` snaps to centre `-0.0050000` — floor division, not truncation.
 75. Snap output always passes the section 5 form rules, and the same input twice
     gives identical output.
+
+Middleware unit test — no database, no app boot, like 73 to 75:
+
+76. `authUser()` on a request that did not pass `requireAuth` throws. The
+    accessor's wiring-bug guard: a route registered without the preHandler
+    fails closed at first read, not silently with an undefined identity.
 
 ---
 

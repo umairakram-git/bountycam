@@ -287,10 +287,12 @@ approved prose.
 Implement POLICY.md: migrations 5 and 6, policy creation, bounty CRUD behind the
 auth middleware. Two numbers Session 7b must carry in from the spec:
 
-- **The test count gate is exactly 75.** The suite passes only if the summary
-  reads `tests 75, pass 75, fail 0`; the migration scratch test reads
+- **The test count gate is exactly 76.** The suite passes only if the summary
+  reads `tests 76, pass 76, fail 0`; the migration scratch test reads
   `tests 1, pass 1, fail 0`. Any other count is a failure, whatever the banner
-  says (D36).
+  says (D36). (Was 75 at session start; moved to 76 during Session 7b when
+  POLICY.md section 12 gained test 76, the `authUser()` wiring-guard unit
+  test.)
 - **The migration 5 and 6 rollbacks are valid only while the tables are empty.**
   Both re-add NOT NULL columns without defaults (POLICY.md section 11.3). Once 7b's
   endpoints write the first row, the shipped rollbacks are documentation of the
