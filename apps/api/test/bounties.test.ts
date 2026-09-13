@@ -1270,6 +1270,184 @@ test("56 limit and offset produce a deterministic slice of the 8.4 ordering", as
   assert.deepEqual(slices, seeded);
 });
 
+// --- detail (POLICY.md section 12, tests 57 to 61) ---
+
+test("57 owner reads own DRAFT: 200 owner view, salt and requirement ids", async () => {
+  const requester = await seedRequester();
+  const injected = "77777777-7777-4777-8777-777777777777";
+  uuidQueue.push(injected);
+  const created = await createBounty(requester.token, validBody());
+  assert.equal(created.statusCode, 201);
+  const res = await app.inject({
+    method: "GET",
+    url: `/bounties/${created.json().id}`,
+    headers: { authorization: `Bearer ${requester.token}` },
+  });
+  assert.equal(res.statusCode, 200);
+  const view = res.json();
+  assert.deepEqual(Object.keys(view).sort(), [
+    "category",
+    "created_at",
+    "id",
+    "policy",
+    "policy_hash",
+    "program_account",
+    "state",
+    "title",
+  ]);
+  assert.equal(view.state, "DRAFT");
+  // Present, and equal to the injected doubles' values — presence alone
+  // would pass on any 64-hex string.
+  assert.equal(view.policy.salt, V1_SALT_HEX);
+  const items: Array<{ id: string }> = view.policy.evidence_requirements;
+  assert.deepEqual(
+    items.map((item) => item.id),
+    [injected],
+  );
+});
+
+test("58 a non-requester reads a DRAFT: 404 NOT_FOUND", async () => {
+  const requester = await seedRequester();
+  const other = await seedRequester();
+  const created = await createBounty(requester.token, validBody());
+  assert.equal(created.statusCode, 201);
+  const res = await app.inject({
+    method: "GET",
+    url: `/bounties/${created.json().id}`,
+    headers: { authorization: `Bearer ${other.token}` },
+  });
+  assert.equal(res.statusCode, 404);
+  assert.deepEqual(res.json(), { error: "NOT_FOUND" });
+});
+
+test("59 non-requester reads AVAILABLE: public view, thirteen fields, no leaks", async () => {
+  const requester = await seedRequester();
+  const viewer = await seedRequester();
+  const injected = [
+    "88888888-8888-4888-8888-888888888888",
+    "99999999-9999-4999-8999-999999999999",
+  ];
+  uuidQueue.push(...injected);
+  const exactLat = "15.0000000";
+  const exactLon = "15.0000000";
+  const body = validBody();
+  body.policy["lat"] = exactLat;
+  body.policy["lon"] = exactLon;
+  body.policy["evidence_requirements"] = [
+    { prompt: "Storefront with signage visible", required: true, type: "PHOTO" },
+    { prompt: "Street number visible", required: false, type: "PHOTO" },
+  ];
+  const created = await createBounty(requester.token, body);
+  assert.equal(created.statusCode, 201);
+  const id = created.json().id;
+  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+    id,
+  ]);
+
+  // Vacuity guard: every scanned-for value is a real string of the
+  // expected form before its absence is asserted.
+  assert.match(V1_SALT_HEX, /^[0-9a-f]{64}$/);
+  for (const uuid of injected) {
+    assert.match(uuid, UUID_V4_LOWER);
+  }
+  assert.equal(isValidLat(exactLat), true);
+  assert.equal(isValidLon(exactLon), true);
+
+  const res = await app.inject({
+    method: "GET",
+    url: `/bounties/${id}`,
+    headers: { authorization: `Bearer ${viewer.token}` },
+  });
+  assert.equal(res.statusCode, 200);
+  const view = res.json();
+  // Exact key equality against the 8.2 public-view table.
+  assert.deepEqual(Object.keys(view).sort(), [
+    "category",
+    "created_at",
+    "id",
+    "location_public",
+    "policy_hash",
+    "policy_public",
+    "state",
+    "title",
+  ]);
+  // Exactly thirteen top-level fields: the sixteen minus lat, lon, salt.
+  assert.deepEqual(Object.keys(view.policy_public).sort(), [
+    "acceptance_window_seconds",
+    "attester_pubkey",
+    "capture_radius_m",
+    "chain",
+    "challenge_window_seconds",
+    "cluster",
+    "completion_window_seconds",
+    "domain_tag",
+    "evidence_requirements",
+    "fee_amount",
+    "required_assurance",
+    "reward_amount",
+    "settlement_mint",
+  ]);
+  // Requirement items carry prompt, required, type and nothing else (8.2).
+  for (const item of view.policy_public.evidence_requirements) {
+    assert.deepEqual(Object.keys(item).sort(), ["prompt", "required", "type"]);
+  }
+  // Whole-body scan, as test 54: the raw serialised response carries no
+  // salt, no requirement uuid, and no exact coordinate (the exact strings
+  // are not substrings of their snaps, "15.0050000").
+  assert.equal(res.body.includes(V1_SALT_HEX), false);
+  for (const uuid of injected) {
+    assert.equal(res.body.includes(uuid), false);
+  }
+  assert.equal(res.body.includes(exactLat), false);
+  assert.equal(res.body.includes(exactLon), false);
+});
+
+test("60 a malformed id and an absent uuid: both 404 with identical bodies", async () => {
+  const viewer = await seedRequester();
+  const get = (id: string) =>
+    app.inject({
+      method: "GET",
+      url: `/bounties/${id}`,
+      headers: { authorization: `Bearer ${viewer.token}` },
+    });
+  const malformed = await get("not-a-uuid");
+  const absent = await get("ffffffff-ffff-4fff-8fff-ffffffffffff");
+  assert.equal(malformed.statusCode, 404);
+  assert.equal(absent.statusCode, 404);
+  assert.deepEqual(malformed.json(), { error: "NOT_FOUND" });
+  // Identical to each other, byte for byte — a malformed id must be
+  // indistinguishable from absence (7.3), not merely the same code.
+  assert.equal(malformed.body, absent.body);
+});
+
+test("61 owner reads own CANCELLED: 200; a non-requester: 404", async () => {
+  const requester = await seedRequester();
+  const other = await seedRequester();
+  const created = await createBounty(requester.token, validBody());
+  assert.equal(created.statusCode, 201);
+  const id = created.json().id;
+  const cancelled = await app.inject({
+    method: "POST",
+    url: `/bounties/${id}/cancel`,
+    headers: { authorization: `Bearer ${requester.token}` },
+  });
+  assert.equal(cancelled.statusCode, 200);
+  const owner = await app.inject({
+    method: "GET",
+    url: `/bounties/${id}`,
+    headers: { authorization: `Bearer ${requester.token}` },
+  });
+  assert.equal(owner.statusCode, 200);
+  assert.equal(owner.json().state, "CANCELLED");
+  const res = await app.inject({
+    method: "GET",
+    url: `/bounties/${id}`,
+    headers: { authorization: `Bearer ${other.token}` },
+  });
+  assert.equal(res.statusCode, 404);
+  assert.deepEqual(res.json(), { error: "NOT_FOUND" });
+});
+
 // --- configuration tests (POLICY.md section 12, tests 70 to 72) ---
 
 // 70 and 71 spawn the real entrypoint: section 8.1 requires a non-zero exit
