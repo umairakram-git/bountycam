@@ -1448,6 +1448,91 @@ test("61 owner reads own CANCELLED: 200; a non-requester: 404", async () => {
   assert.deepEqual(res.json(), { error: "NOT_FOUND" });
 });
 
+// --- GET /me/bounties (POLICY.md section 12, tests 62 and 63) ---
+
+test("62 only the caller's bounties, every state, newest first", async () => {
+  const caller = await seedRequester();
+  const other = await seedRequester();
+  // The other requester's row is seeded AVAILABLE — a publicly visible
+  // state — so its absence below is requester scoping, not visibility.
+  const otherCreated = await createBounty(other.token, validBody());
+  assert.equal(otherCreated.statusCode, 201);
+  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+    otherCreated.json().id,
+  ]);
+  // Three rows for the caller: DRAFT, CANCELLED (through the API) and
+  // AVAILABLE (seeded). created_at is the column default now(), outside
+  // the injectable clock, so the test seeds distinct timestamps by SQL —
+  // deliberately out of insertion order, or an ordering by insertion or
+  // by id could pass by accident.
+  const a = await createBounty(caller.token, validBody());
+  assert.equal(a.statusCode, 201);
+  const b = await createBounty(caller.token, validBody());
+  assert.equal(b.statusCode, 201);
+  const cancelled = await app.inject({
+    method: "POST",
+    url: `/bounties/${b.json().id}/cancel`,
+    headers: { authorization: `Bearer ${caller.token}` },
+  });
+  assert.equal(cancelled.statusCode, 200);
+  const c = await createBounty(caller.token, validBody());
+  assert.equal(c.statusCode, 201);
+  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+    c.json().id,
+  ]);
+  const stamps: Array<[string, Date]> = [
+    [a.json().id, new Date(BASE.getTime())],
+    [b.json().id, new Date(BASE.getTime() + 120_000)],
+    [c.json().id, new Date(BASE.getTime() + 60_000)],
+  ];
+  for (const [id, at] of stamps) {
+    await pool.query("UPDATE bounties SET created_at = $2 WHERE id = $1", [
+      id,
+      at,
+    ]);
+  }
+  const res = await app.inject({
+    method: "GET",
+    url: "/me/bounties",
+    headers: { authorization: `Bearer ${caller.token}` },
+  });
+  assert.equal(res.statusCode, 200);
+  const items: Array<Record<string, unknown>> = res.json().bounties;
+  // Exact sequence, not membership: newest first by created_at, all
+  // three states, and nothing of the other requester's — including
+  // their AVAILABLE row.
+  assert.deepEqual(
+    items.map((entry) => entry["id"]),
+    [b.json().id, c.json().id, a.json().id],
+  );
+  assert.deepEqual(
+    items.map((entry) => entry["state"]),
+    ["CANCELLED", "AVAILABLE", "DRAFT"],
+  );
+});
+
+test("63 /me/bounties unknown query parameters are INVALID_REQUEST", async () => {
+  const caller = await seedRequester();
+  const rejectsQuery = async (query: string): Promise<void> => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/me/bounties?${query}`,
+      headers: { authorization: `Bearer ${caller.token}` },
+    });
+    assert.equal(res.statusCode, 400, query);
+    assert.deepEqual(res.json(), { error: "INVALID_REQUEST" }, query);
+  };
+  await rejectsQuery("foo=bar");
+  // 8.6 accepts limit and offset only: the discovery parameters are
+  // unknown here — exactly the case a reused discovery extractor would
+  // wrongly pass.
+  await rejectsQuery("lat=10.0000000");
+  await rejectsQuery("lon=10.0000000");
+  await rejectsQuery("radius_m=1000");
+  // A lawful pair beside an unknown parameter still fails.
+  await rejectsQuery("limit=5&offset=0&lat=10.0000000");
+});
+
 // --- configuration tests (POLICY.md section 12, tests 70 to 72) ---
 
 // 70 and 71 spawn the real entrypoint: section 8.1 requires a non-zero exit
