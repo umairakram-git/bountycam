@@ -779,7 +779,8 @@ The caller's own bounties, all states, newest first.
 2. **Parameters.** `limit` and `offset` as in section 8.4; unknown parameters
    `INVALID_REQUEST` (400).
 3. **Query.** Rows with the caller as requester, ordered by `created_at` descending
-   then `id`; respond 200 with `bounties` holding list items.
+   then `id` ascending — the section 8.4 tie-break, because offset pagination needs
+   a total order (D63); respond 200 with `bounties` holding list items.
 
 The route is `GET /me/bounties`, not `GET /bounties/mine`: `mine` would be captured
 by the `:id` segment of section 8.5, and a route whose reachability depends on
