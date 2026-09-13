@@ -1,5 +1,6 @@
-// POLICY.md section 8.3: POST /bounties, the ten-step check order, numbered
-// inline. The first failing step wins; no later step runs.
+// POLICY.md section 8.3 (POST /bounties, ten steps) and section 8.4
+// (GET /bounties, six steps): check orders numbered inline. The first
+// failing step wins; no later step runs.
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { SpecError, canonicalise, sha256 } from "@hackathon/shared";
 import type { Pool } from "pg";
@@ -15,8 +16,9 @@ import {
   validateRequirements,
   type PolicyLimits,
 } from "./policy.ts";
+import { isValidLat, isValidLon } from "./gps.ts";
 import { snapLat, snapLon } from "./snap.ts";
-import { ownerView } from "./views.ts";
+import { listItem, ownerView } from "./views.ts";
 
 export interface BountyDeps {
   pool: Pool;
@@ -132,6 +134,77 @@ function isIdempotencyCollision(error: unknown): boolean {
   return (
     code === "23505" && constraint === "bounties_requester_idempotency_uidx"
   );
+}
+
+// Section 8.4 step 2 (D63): integer form is a string check run before any
+// numeric parse — ASCII digits only, no sign, no leading zeros (the single
+// digit 0 is allowed), at most nine digits. The length bound keeps every
+// accepted numeral inside safe integer range.
+const INTEGER_FORM = /^(?:0|[1-9][0-9]{0,8})$/;
+
+const DISCOVERY_KEYS: readonly string[] = [
+  "lat",
+  "lon",
+  "radius_m",
+  "limit",
+  "offset",
+];
+
+interface DiscoveryQuery {
+  lat: string;
+  lon: string;
+  radiusM: number;
+  limit: number;
+  offset: number;
+}
+
+// Section 8.4 step 2: unknown parameters, missing required parameters,
+// integer form, and limit/offset bounds — every failure here maps to one
+// INVALID_REQUEST. Coordinate rules (step 3) and radius bounds (step 4)
+// carry their own codes and run in the handler. Number() runs only on
+// strings the form check has already accepted.
+function extractDiscoveryQuery(query: unknown): DiscoveryQuery | null {
+  if (typeof query !== "object" || query === null) return null;
+  const record = query as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (!DISCOVERY_KEYS.includes(key)) return null;
+  }
+
+  const lat = record["lat"];
+  const lon = record["lon"];
+  const radius = record["radius_m"];
+  if (typeof lat !== "string") return null;
+  if (typeof lon !== "string") return null;
+  if (typeof radius !== "string" || !INTEGER_FORM.test(radius)) return null;
+
+  let limit = 20;
+  if ("limit" in record) {
+    const value = record["limit"];
+    if (typeof value !== "string" || !INTEGER_FORM.test(value)) return null;
+    limit = Number(value);
+    if (limit < 1 || limit > 100) return null;
+  }
+
+  let offset = 0;
+  if ("offset" in record) {
+    const value = record["offset"];
+    if (typeof value !== "string" || !INTEGER_FORM.test(value)) return null;
+    // The form check already enforces 0 or more; no upper bound beyond it.
+    offset = Number(value);
+  }
+
+  return { lat, lon, radiusM: Number(radius), limit, offset };
+}
+
+interface DiscoveryRow {
+  id: string;
+  title: string;
+  category: string;
+  state: string;
+  created_at: Date;
+  reward_amount: string;
+  required_assurance: number;
+  canonical_json: string;
 }
 
 export function registerBountyRoutes(
@@ -317,5 +390,73 @@ export function registerBountyRoutes(
     } finally {
       client.release();
     }
+  });
+
+  // POLICY.md section 8.4: GET /bounties, the six-step check order.
+  app.get("/bounties", { preHandler: requireAuth }, async (request, reply) => {
+    // Step 1 ran as the preHandler; the accessor asserts the wiring.
+    authUser(request);
+
+    // Step 2: parameter shape — INVALID_REQUEST.
+    const query = extractDiscoveryQuery(request.query);
+    if (query === null) return fail(reply, 400, "INVALID_REQUEST");
+
+    // Step 3: coordinates against the section 5 rules — INVALID_GPS.
+    if (!isValidLat(query.lat) || !isValidLon(query.lon)) {
+      return fail(reply, 400, "INVALID_GPS");
+    }
+
+    // Step 4: radius bounds — INVALID_QUERY_RADIUS.
+    if (query.radiusM < 100 || query.radiusM > 50000) {
+      return fail(reply, 400, "INVALID_QUERY_RADIUS");
+    }
+
+    // Step 5: the discoverable set is exactly AVAILABLE, measured against
+    // location_public only (9.1). Both ST_DWithin operands are geography —
+    // no ::geometry anywhere — so the radius is metres on the spheroid; on
+    // geometry the same literal would mean degrees and match the planet.
+    // ST_MakePoint is (x, y) = (lon, lat), as in the insert above. Distance
+    // exists only in ORDER BY and is discarded (9.3); the id ASC tie-break
+    // makes the order total for offset pagination (D63). The query point is
+    // the caller's own and is not snapped. canonical_json is selected
+    // because listItem snaps the policy lat/lon strings — location_public
+    // is never rendered back out of the geography column (D64).
+    const result = await pool.query<DiscoveryRow>(
+      `SELECT b.id, b.title, b.category, b.state, b.created_at,
+              b.reward_amount, p.required_assurance, p.canonical_json
+       FROM bounties b
+       JOIN policies p ON p.id = b.policy_id
+       WHERE b.state = 'AVAILABLE'
+         AND ST_DWithin(
+               b.location_public,
+               ST_SetSRID(ST_MakePoint($1::float8, $2::float8), 4326)
+                 ::geography,
+               $3::float8)
+       ORDER BY
+         ST_Distance(
+           b.location_public,
+           ST_SetSRID(ST_MakePoint($1::float8, $2::float8), 4326)
+             ::geography) ASC,
+         b.created_at DESC,
+         b.id ASC
+       LIMIT $4 OFFSET $5`,
+      [query.lon, query.lat, query.radiusM, query.limit, query.offset],
+    );
+
+    // Step 6: 200, an object whose single key is bounties.
+    return reply.status(200).send({
+      bounties: result.rows.map((row) =>
+        listItem({
+          id: row.id,
+          title: row.title,
+          category: row.category,
+          state: row.state,
+          createdAt: row.created_at,
+          rewardAmount: row.reward_amount,
+          requiredAssurance: row.required_assurance,
+          canonicalJson: row.canonical_json,
+        }),
+      ),
+    });
   });
 }
