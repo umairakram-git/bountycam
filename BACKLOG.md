@@ -86,6 +86,20 @@ would keep passing if `loadConfig` returned something the routes could not
 use. Session 8's attester work reads `attesterPubkeys` for real; the gap
 stops being theoretical there.
 
+Second known instance (Session 7b, commit 4c): `auth.test.ts` builds
+`AppDeps` by hand and omits the now-required `randomness` field. At runtime
+`registerBountyRoutes` closes over `undefined`; the only dereference is
+POST /bounties step 7, which the auth suite never issues — verified still
+38/38 after the change, from raw output. Same class, same treatment:
+recorded for the commit 7 before-count, not silently fixed.
+
+Third known instance (Session 7b, commit 4c): the chunk 2 run of
+`bounties.test.ts` failed tests 5 and 7 with ReferenceError —
+`canonicalise` and `sha256` were used but never imported. tsc does not see
+`test/`, so the missing import was invisible until runtime. Unlike the
+first two instances, this one broke rather than silently passing; the
+strongest argument yet for the commit 7 decision.
+
 **`uuid@7.0.3` is a deprecated transitive dependency.** `pnpm why uuid` to
 find the parent; decide whether it matters (Session 7).
 
