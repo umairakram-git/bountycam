@@ -990,6 +990,286 @@ test("50 same body re-serialised with different key order: 201 replay", async ()
   assert.equal(second.json().id, first.json().id);
 });
 
+// --- discovery (POLICY.md section 12, tests 51 to 56) ---
+//
+// Each test queries its own patch of the globe, so one test's seeded rows
+// can never sit inside another's radius: 51 at (60, 30), 52 at (25, 25),
+// 53 at (30, 30), 54 at (10, 10), 56 at (45, 45); 55 seeds nothing.
+
+test("51 AVAILABLE within radius returned; two rows in distance-ascending order", async () => {
+  const requester = await seedRequester();
+  const viewer = await seedRequester();
+  const make = async (lat: string, lon: string): Promise<string> => {
+    const body = validBody();
+    body.policy["lat"] = lat;
+    body.policy["lon"] = lon;
+    const res = await createBounty(requester.token, body);
+    assert.equal(res.statusCode, 201);
+    const id: string = res.json().id;
+    await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+      id,
+    ]);
+    return id;
+  };
+  // Different bearings from the query point (60, 30), chosen so a planar
+  // degree-space ordering flips the pair: at latitude 60 a longitude
+  // degree is about half a latitude degree in metres. Snapped centres:
+  // east row 0.0851 deg away but ~4.8 km; north row 0.0552 deg away but
+  // ~6.1 km. Degree distance puts north first; metres put east first.
+  const eastId = await make("60.0000000", "30.0800000");
+  const northId = await make("60.0500000", "30.0000000");
+  const res = await app.inject({
+    method: "GET",
+    url: "/bounties?lat=60.0000000&lon=30.0000000&radius_m=10000",
+    headers: { authorization: `Bearer ${viewer.token}` },
+  });
+  assert.equal(res.statusCode, 200);
+  const items: Array<Record<string, unknown>> = res.json().bounties;
+  assert.deepEqual(
+    items.map((entry) => entry["id"]),
+    [eastId, northId],
+  );
+});
+
+test("52 DRAFT and CANCELLED rows within the radius are absent", async () => {
+  const requester = await seedRequester();
+  const viewer = await seedRequester();
+  const at = (): CreateBody => {
+    const body = validBody();
+    body.policy["lat"] = "25.0000000";
+    body.policy["lon"] = "25.0000000";
+    return body;
+  };
+  const draft = await createBounty(requester.token, at());
+  assert.equal(draft.statusCode, 201);
+  const toCancel = await createBounty(requester.token, at());
+  assert.equal(toCancel.statusCode, 201);
+  // CANCELLED through the API that produces it (8.7) — no SQL seed needed.
+  const cancelled = await app.inject({
+    method: "POST",
+    url: `/bounties/${toCancel.json().id}/cancel`,
+    headers: { authorization: `Bearer ${requester.token}` },
+  });
+  assert.equal(cancelled.statusCode, 200);
+  assert.equal(cancelled.json().state, "CANCELLED");
+  // Control row: AVAILABLE at the same point. Its presence proves the
+  // query sees this area, so the two absences below are state-driven,
+  // not a wrong-radius vacuity.
+  const control = await createBounty(requester.token, at());
+  assert.equal(control.statusCode, 201);
+  const controlId: string = control.json().id;
+  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+    controlId,
+  ]);
+  const res = await app.inject({
+    method: "GET",
+    url: "/bounties?lat=25.0000000&lon=25.0000000&radius_m=10000",
+    headers: { authorization: `Bearer ${viewer.token}` },
+  });
+  assert.equal(res.statusCode, 200);
+  const ids = (res.json().bounties as Array<Record<string, unknown>>).map(
+    (entry) => entry["id"],
+  );
+  assert.equal(ids.includes(controlId), true);
+  assert.equal(ids.includes(draft.json().id), false);
+  assert.equal(ids.includes(toCancel.json().id), false);
+});
+
+test("53 an AVAILABLE row outside the radius is absent", async () => {
+  const requester = await seedRequester();
+  const viewer = await seedRequester();
+  const body = validBody();
+  // ~22 km north of the query point — outside 10 km, inside 50 km.
+  body.policy["lat"] = "30.2000000";
+  body.policy["lon"] = "30.0000000";
+  const created = await createBounty(requester.token, body);
+  assert.equal(created.statusCode, 201);
+  const id: string = created.json().id;
+  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+    id,
+  ]);
+  const near = await app.inject({
+    method: "GET",
+    url: "/bounties?lat=30.0000000&lon=30.0000000&radius_m=10000",
+    headers: { authorization: `Bearer ${viewer.token}` },
+  });
+  assert.equal(near.statusCode, 200);
+  const nearIds = (near.json().bounties as Array<Record<string, unknown>>).map(
+    (entry) => entry["id"],
+  );
+  assert.equal(nearIds.includes(id), false);
+  // Control: the same row is returned at 50 km, so the absence above is
+  // the radius filter at work, not an invisible or misplaced row.
+  const far = await app.inject({
+    method: "GET",
+    url: "/bounties?lat=30.0000000&lon=30.0000000&radius_m=50000",
+    headers: { authorization: `Bearer ${viewer.token}` },
+  });
+  assert.equal(far.statusCode, 200);
+  const farIds = (far.json().bounties as Array<Record<string, unknown>>).map(
+    (entry) => entry["id"],
+  );
+  assert.equal(farIds.includes(id), true);
+});
+
+test("54 list item keys exact; salt and requirement uuids absent from body", async () => {
+  const requester = await seedRequester();
+  const viewer = await seedRequester();
+  const injected = [
+    "55555555-5555-4555-8555-555555555555",
+    "66666666-6666-4666-8666-666666666666",
+  ];
+  uuidQueue.push(...injected);
+  const exactLat = "10.0000000";
+  const exactLon = "10.0000000";
+  const body = validBody();
+  body.policy["lat"] = exactLat;
+  body.policy["lon"] = exactLon;
+  body.policy["evidence_requirements"] = [
+    { prompt: "Storefront with signage visible", required: true, type: "PHOTO" },
+    { prompt: "Street number visible", required: false, type: "PHOTO" },
+  ];
+  const created = await createBounty(requester.token, body);
+  assert.equal(created.statusCode, 201);
+  const id = created.json().id;
+  // Unfunded is never discoverable (7.3) and no Session 7 API funds, so
+  // the state is seeded by SQL (section 12 preamble).
+  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+    id,
+  ]);
+
+  // The scanned-for values must be real before absence means anything — a
+  // scan for undefined or "" passes vacuously.
+  assert.match(V1_SALT_HEX, /^[0-9a-f]{64}$/);
+  for (const uuid of injected) {
+    assert.match(uuid, UUID_V4_LOWER);
+  }
+  assert.equal(isValidLat(exactLat), true);
+  assert.equal(isValidLon(exactLon), true);
+
+  const res = await app.inject({
+    method: "GET",
+    url: "/bounties?lat=10.0000000&lon=10.0000000&radius_m=1000",
+    headers: { authorization: `Bearer ${viewer.token}` },
+  });
+  assert.equal(res.statusCode, 200);
+  const items: Array<Record<string, unknown>> = res.json().bounties;
+  const item = items.find((entry) => entry["id"] === id);
+  if (item === undefined) throw new Error("created bounty not in the slice");
+  // Exact key equality against the 8.2 list-item table: an extra field
+  // beside the expected eight fails, not only a missing one.
+  assert.deepEqual(Object.keys(item).sort(), [
+    "category",
+    "created_at",
+    "id",
+    "location_public",
+    "required_assurance",
+    "reward_amount",
+    "state",
+    "title",
+  ]);
+  // The whole-body property (D63): the raw serialised response — any key,
+  // any depth — carries neither the salt nor a requirement uuid.
+  assert.equal(res.body.includes(V1_SALT_HEX), false);
+  for (const uuid of injected) {
+    assert.equal(res.body.includes(uuid), false);
+  }
+  // Exact coordinates: not substrings of their snaps ("10.0050000"), so
+  // the scan is meaningful.
+  assert.equal(res.body.includes(exactLat), false);
+  assert.equal(res.body.includes(exactLon), false);
+});
+
+test("55 discovery parameter failures pin their codes", async () => {
+  const viewer = await seedRequester();
+  // Each assert pins the code, not just the 400: the check order is the
+  // property under test, and a wrong code is a wrong order.
+  const queryRejects = async (query: string, code: string): Promise<void> => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/bounties?${query}`,
+      headers: { authorization: `Bearer ${viewer.token}` },
+    });
+    assert.equal(res.statusCode, 400, query);
+    assert.deepEqual(res.json(), { error: code }, query);
+  };
+  // Missing lat.
+  await queryRejects("lon=10.0000000&radius_m=1000", "INVALID_REQUEST");
+  // Malformed lon (five fraction digits fails the section 5 profile).
+  await queryRejects(
+    "lat=10.0000000&lon=10.44055&radius_m=1000",
+    "INVALID_GPS",
+  );
+  // radius_m one below and one above the 100 to 50000 bounds.
+  await queryRejects(
+    "lat=10.0000000&lon=10.0000000&radius_m=99",
+    "INVALID_QUERY_RADIUS",
+  );
+  await queryRejects(
+    "lat=10.0000000&lon=10.0000000&radius_m=50001",
+    "INVALID_QUERY_RADIUS",
+  );
+  // limit one below and one above the 1 to 100 bounds.
+  await queryRejects(
+    "lat=10.0000000&lon=10.0000000&radius_m=1000&limit=0",
+    "INVALID_REQUEST",
+  );
+  await queryRejects(
+    "lat=10.0000000&lon=10.0000000&radius_m=1000&limit=101",
+    "INVALID_REQUEST",
+  );
+});
+
+test("56 limit and offset produce a deterministic slice of the 8.4 ordering", async () => {
+  const requester = await seedRequester();
+  const viewer = await seedRequester();
+  const seeded: string[] = [];
+  // Five rows east of (45, 45) at strictly increasing distances — the
+  // snapped centres sit 0.015 to 0.095 lon degrees away, all inside
+  // 10 km — so the full 8.4 ordering is exactly the seeding order and
+  // every page boundary is unambiguous.
+  const lons = [
+    "45.0100000",
+    "45.0300000",
+    "45.0500000",
+    "45.0700000",
+    "45.0900000",
+  ];
+  for (const lon of lons) {
+    const body = validBody();
+    body.policy["lat"] = "45.0000000";
+    body.policy["lon"] = lon;
+    const res = await createBounty(requester.token, body);
+    assert.equal(res.statusCode, 201);
+    const id: string = res.json().id;
+    await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+      id,
+    ]);
+    seeded.push(id);
+  }
+  const page = async (query: string): Promise<unknown[]> => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/bounties?lat=45.0000000&lon=45.0000000&radius_m=10000&${query}`,
+      headers: { authorization: `Bearer ${viewer.token}` },
+    });
+    assert.equal(res.statusCode, 200, query);
+    return (res.json().bounties as Array<Record<string, unknown>>).map(
+      (entry) => entry["id"],
+    );
+  };
+  const full = await page("limit=100&offset=0");
+  assert.deepEqual(full, seeded);
+  // The slices partition the full ordering: concatenated pages reproduce
+  // it exactly — order, membership and boundaries, not lengths.
+  const slices = [
+    ...(await page("limit=2&offset=0")),
+    ...(await page("limit=2&offset=2")),
+    ...(await page("limit=2&offset=4")),
+  ];
+  assert.deepEqual(slices, seeded);
+});
+
 // --- configuration tests (POLICY.md section 12, tests 70 to 72) ---
 
 // 70 and 71 spawn the real entrypoint: section 8.1 requires a non-zero exit
