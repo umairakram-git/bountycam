@@ -75,6 +75,20 @@ May: attest that a specific policy was met at a specific level for a specific bo
 May not: choose the recipient; change the reward or the bounty; refund; release escrow.
 An attestation is evidence for a payout decision, not authority to move funds.
 
+**Eligibility service** — dedicated key, program-level (D68).
+May: attest that a named Scout satisfies a bounty's precommitted off-chain
+eligibility requirements, for one bounty, until a stated expiry.
+May not: move funds; change the reward, requester, Scout after assignment, evidence
+policy or assurance level; set or alter the committed policy; accept on a Scout's
+behalf; act as attester, relayer or arbiter.
+
+**Capture nonce service** — trusted for freshness issuance (D73).
+May: issue short-lived unpredictable capture nonces to the currently assigned Scout.
+May not: move funds; change bounty policy; determine assurance; sign the evidence
+attestation. If compromised or colluding with a Scout it can weaken freshness by
+issuing earlier than represented, so A1 freshness can no longer be trusted; the
+attester and the on-chain settlement rules retain their separate authorities.
+
 **Relayer** — trusted for liveness only (D2).
 May: pay fees; submit already-authorised transactions.
 May not: act as any other authority; choose accounts; alter instruction data; move USDC.
@@ -149,15 +163,22 @@ acceptance, an evidence submission, a payout approval, or an on-chain authorisat
 ## 5. Signed-object domain separation
 
 Every non-transaction signature identifies what it authorises. Never sign ambiguous
-JSON. Canonical signed objects begin with a versioned domain tag:
-`BOUNTYCAM_EVIDENCE_V1`, `BOUNTYCAM_ATTESTATION_V1`, `BOUNTYCAM_ACCEPTANCE_V1`.
+JSON. Every signed object begins with a versioned domain tag. `BOUNTYCAM_EVIDENCE_V1`
+is canonical JSON, signed off-chain; `BOUNTYCAM_ATTESTATION_V1` and
+`BOUNTYCAM_ELIGIBILITY_V1` are fixed binary layouts verified on-chain (D70).
+`BOUNTYCAM_ACCEPTANCE_V1` is retired: D49's acceptance-signature concept is
+superseded by D68's eligibility voucher, which the Scout's own transaction
+signature accompanies.
 Authentication is exempt: SIWS carries its own separation (domain line plus statement).
 
 A signature for one domain fails verification in every other domain.
 
-Canonical serialisation lives only in `packages/shared` (SPEC.md). No route, client,
-test helper, attester service or program keeps an alternative implementation. Golden
-vectors verify every producer against every verifier.
+Canonical JSON has a single implementation, in `packages/shared` (SPEC.md), and is
+used off-chain only. No route, client, test helper or attester service keeps an
+alternative implementation. On-chain signed security messages use separately
+specified fixed binary layouts with their own domain tags and schema versions
+(D70); the program neither serialises nor parses canonical JSON. Golden vectors
+verify every producer against every verifier, for both forms.
 
 ---
 
