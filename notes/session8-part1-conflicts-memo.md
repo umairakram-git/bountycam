@@ -41,6 +41,13 @@ without direct evidence.
    section 7.2 (lines 522–575); packages/shared/SPEC.md sections 1–3
    (lines 21–337). All read in full this session. [VERIFIED]
 
+4. notes/ was untracked scratch when this memo was written; the memo itself
+   was committed in 6a41f8a ("docs: session 8 part 1 conflicts memo for
+   ruling"), and the other six files in that directory remain untracked.
+   [VERIFIED this session — git log restricted to the memo path, last
+   commit, one-line form; and git status in porcelain form over the notes
+   directory]
+
 ---
 
 ## 1. Platform fee
@@ -258,7 +265,7 @@ the **relayer**; only a direct caller pays their own fee.
   of value with its own section 8 attack checklist. Consequence: the only
   economic answer that is sybil-resistant — it prices the attack
   per-assignment rather than per-wallet, so fresh keypairs buy nothing. The
-  non-economic alternative is a minimum trust level (m5, not yet written),
+  non-economic alternative is a minimum trust level (m5, below),
   sybil-resistant only to the extent of whatever its cheapest qualifying
   route costs.
 - (m2) **Per-wallet concurrent-assignment cap.** On-chain this needs a
@@ -278,6 +285,30 @@ the **relayer**; only a direct caller pays their own fee.
   (or refunds). Shortens each lockup from deadline-length to window-length
   but does nothing about instant re-acceptance, so starvation persists; and
   it pulls Session 9 scope (an expire-class transition) into Session 8.
+- (m5) **Minimum trust level at accept.** The Scout must hold at least a
+  defined trust level before an accept is allowed — trust level in the PRD
+  section 38 sense already adopted by SECURITY.md section 14 ("Identity
+  verification (KYC) is a trust level (PRD section 38), not an architecture
+  change"), the same shape the A4 finding recommends for the ladder itself
+  (item 8 of the flagged list: redefine as a minimum trust level with SGT
+  as one qualifying route). Explicitly NOT SGT gating: the program must not
+  check for a Seeker Genesis Token or any device-specific artifact. An
+  on-chain device check would hardwire a device into the escrow exactly as
+  D13's A4 hardwires one into the ladder, against PRD section 8 (Seeker is
+  the initial distribution layer, not the boundary); SGT ownership may be
+  one route the API recognises off-chain, never something the program
+  reads. Trust levels live off-chain (API and database; reputation counters
+  are Session 18, SKR Session 19), so enforcement is either API-side —
+  which does not bind direct callers, m2's failure — or carried inside an
+  m3-style voucher, where m5 is issuance policy the API applies before
+  signing, not a separate mechanism. Sybil resistance equals the cost of
+  the cheapest qualifying route to the minimum level: a route any fresh
+  SIWS account satisfies prices the attack at zero (m2 with extra steps);
+  only routes with a per-identity cost (completion history, a bond per m1,
+  KYC) price it above zero, and the price is exactly what that route costs.
+  Consequence: never a standalone defence against a direct caller;
+  meaningful only as issuance policy inside m3, and exactly as strong as
+  its cheapest qualifying route.
 
 **Options.**
 
@@ -382,8 +413,20 @@ Fetched this session (14 September 2026) — cited, not recalled:
   https://www.anchor-lang.com/docs/references/account-constraints
 - RareSkills, "Ed25519 Signature Verification in Solana" (third-party guide):
   https://rareskills.io/post/solana-signature-verification
-- Wormhole post-mortem (third-party, surfaced by search):
-  https://nomoslabs.io/blog/wormhole-bridge-hack-complete-post-mortem-analysis
+- Wormhole citation removed (amendment 2, 14 September, part 2). Two
+  attempts at a better source returned HTTP 403 and HTTP 429; nothing from
+  either URL was read, and Wormhole's own incident report was never
+  consulted. One search this session for a first-party fix commit found
+  nothing:
+  ```
+  $ gh search commits --repo wormhole-foundation/wormhole \
+      "load_instruction_at" --json sha,commit --limit 5
+  []
+  ```
+  The dollar figure is dropped. The line-level claim in check 1 — that
+  `load_instruction_at` performs no owner check where
+  `load_instruction_at_checked` does — rests on the RareSkills guide above,
+  third-party.
 
 **The mechanism.** A Solana program cannot CPI into the Ed25519 precompile
 (signature verification runs outside the SVM; the precompile's cost model
@@ -409,7 +452,8 @@ depends on it being a top-level instruction). The pattern is therefore
 
 **Every check the program must perform, and what omitting each one costs.**
 Sources: the RareSkills guide's checklist, the Anza proposal, the Anchor
-constraints reference; the Wormhole item from the cited post-mortem.
+constraints reference; the Wormhole item per the RareSkills guide,
+third-party (amendment 2 — no Wormhole source was read).
 
 1. **Sysvar identity**: the passed sysvar account is exactly
    `Sysvar1nstructions1111111111111111111111111` — in Anchor,
@@ -417,9 +461,10 @@ constraints reference; the Wormhole item from the cited post-mortem.
    per the fetched Anchor reference), or `load_instruction_at_checked`, which
    performs the owner check the deprecated `load_instruction_at` lacked.
    *Omitted:* the attacker supplies a fake account containing a forged
-   "Ed25519 instruction" that was never executed — the Wormhole class
-   (≈$326M, per the cited post-mortem: the missing check was exactly
-   `account.key == &Sysvar1nstructions::id()`).
+   "Ed25519 instruction" that was never executed — the Wormhole class of
+   failure. The line-level claim — that `load_instruction_at` performs no
+   owner check where `load_instruction_at_checked` does — is per the
+   RareSkills guide, third-party (amendment 2 in the source list above).
 2. **Program id of the loaded instruction** equals
    `Ed25519SigVerify111111111111111111111111111`.
    *Omitted:* any instruction (a memo, a no-op to an attacker program) passes
@@ -670,6 +715,25 @@ root the attestation commits to.
    into apparent authority. [VERIFIED that the finding stands in BACKLOG:31–35;
    the "should" is a recommendation]
 
+8. **The A4 hardwiring — D13's A4 names a device.** Recorded this session
+   as a BACKLOG open finding; flagged here because part 2's spec prose will
+   describe `required_assurance` and must not restate A4's current wording
+   as settled. "A3 + Verified Seeker + wallet signature" (DECISIONS.md:96)
+   makes the top assurance rung unreachable without a Seeker. The integer
+   travels the whole stack: policy v1 `required_assurance` bounded 0 to 4
+   (POLICY.md:92, 112, 189), the escrow's `u8` (state.rs:28), the on-chain
+   gate per D17. [VERIFIED — DECISIONS.md:96, POLICY.md:92/112/189 and
+   state.rs:28 all checked from raw grep output this session] The integer
+   is inside the hashed policy; the meaning of the integer is not, so
+   redefining A4 changes what already-committed policy hashes meant with no
+   hash changing. Contradicts PRD section 8 (Seeker is the initial
+   distribution layer, not the boundary) and section 52. [UNVERIFIED — PRD
+   references reproduced from the BACKLOG entry; the PRD was not read this
+   session] Options: leave it; redefine A4 as a minimum trust level with
+   SGT as one qualifying route (the m5 shape, item 2); or version the
+   ladder so A4's meaning is pinned per policy version. Owed before
+   Session 14 grades against the ladder.
+
 ---
 
 ## Which of the six I could not investigate
@@ -678,8 +742,10 @@ None — all six were investigated. Two caveats on depth, stated plainly:
 
 - **Item 4**: the official Solana docs page documents the mechanism and struct
   but not the attack-per-omitted-check enumeration; that enumeration rests on
-  the cited RareSkills guide (third-party) and the cited Wormhole post-mortem
-  (third-party). The Anza `runtime/programs` page is now an empty redirect
+  the cited RareSkills guide (third-party) alone — the Wormhole citation was
+  removed by amendment 2 (two attempts at a better source returned 403 and
+  429; nothing from either was read). The Anza `runtime/programs` page is
+  now an empty redirect
   stub. The Solana-Audit-Arena issue on index hardcoding is cited by title
   only; I did not fetch its body.
 - **Item 6**: nothing to read — the finding is precisely that no normative
