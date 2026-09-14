@@ -381,7 +381,7 @@ tsconfig instances recorded in BACKLOG are owed to commit 7's before-count.
 
 ---
 
-## Session 8 part 1 — conflicts memo, and how the session failed
+## Session 8 parts 1 and 2 — conflicts memo, and how part 1 failed
 
 `notes/session8-part1-conflicts-memo.md` holds the six-item conflicts memo for
 ruling: platform fee, the accept race, attestation serialisation, the ed25519
@@ -395,12 +395,33 @@ committed version, so the 250 bps figure exists only in the stale
 fee-sponsorship analysis in item 2 is complete; D2 means `accept` is sponsored
 by default, so on the app path the relayer funds any griefing.
 
-Still unwritten in the memo, carried to part 2: m5 as a minimum trust level
-(NOT SGT gating); a new item 8 on the A4 hardwiring (now also a BACKLOG open
-finding); amendment 2 replacing the Wormhole citation, whose first-party
-sources returned 403 and 429 and were never read; amendment 3 showing the
-`notes/` check as its four separate results. The m1 closing sentence was fixed
-in the close-out script.
+Part 2 (commit a964519) wrote three of those four. m5 is a minimum trust level
+at accept, explicitly not SGT gating — the program reads no device artifact,
+and because trust levels live off-chain, m5 binds a direct caller only as
+issuance policy inside an m3-style voucher. Item 8 records the A4 hardwiring
+and cross-references the BACKLOG open finding. Amendment 2 removed the
+Wormhole citation from four places and dropped the dollar figure; the
+line-level `load_instruction_at` claim is attributed to RareSkills as
+third-party, and the 403 and 429 attempts plus an empty `gh` search for a
+first-party fix commit are recorded in the memo. Amendment 3 was retired as
+obsolete: the `notes/` check existed to decide whether the memo would survive
+to be committed, and it did, so section 0 item 4 records that answer instead.
+The m1 closing sentence was fixed in the close-out script.
+
+Nothing further is owed to the memo. The next step is not an agent session:
+the six items need rulings recorded as D-entries before any spec prose exists.
+Four are close to decided on the memo's own reasoning — fee, the challenge
+naming, the fixed-byte-layout attestation, and the capture nonce's issuance
+moment. Two are coupled and carry real cost either way: the accept race and
+the A4 hardwiring. A trust-level A4 can only be enforced against a direct
+caller inside a voucher, so ruling for the voucher makes the A4 redefinition
+cheap, and ruling for permissionless accept leaves A4's device wording doing
+work no other layer can check. Decide those two together.
+
+Part 2 ran in a fresh session and produced no re-proposals: it blocked rather
+than reconstruct output it had not seen, corrected a commit SHA it was given,
+and found two stale cross-references unprompted. That supports compaction as
+part 1's cause rather than anything about the task.
 
 How the session failed, worth not rediscovering: after a wide reading pass and
 five external fetches, a one-sentence edit could not be applied across five
