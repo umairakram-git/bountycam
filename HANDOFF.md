@@ -381,13 +381,13 @@ tsconfig instances recorded in BACKLOG are owed to commit 7's before-count.
 
 ---
 
-## Session 8 parts 1 and 2 — conflicts memo, and how part 1 failed
+## Session 8 — conflicts memo, fourteen rulings, and how part 1 failed
 
 `notes/session8-part1-conflicts-memo.md` holds the six-item conflicts memo for
 ruling: platform fee, the accept race, attestation serialisation, the ed25519
 mechanism, the three meanings of "challenge", and capture nonce origin, plus a
-"flagged for your ruling" list of seven further items. No ruling has been given
-and no spec prose exists. Part 2 has not started.
+"flagged for your ruling" list of seven further items. All are now ruled
+(below); no spec prose exists yet.
 
 Settled from raw output this session: `PLATFORM_FEE_BPS` has been `0` in every
 committed version, so the 250 bps figure exists only in the stale
@@ -408,15 +408,43 @@ obsolete: the `notes/` check existed to decide whether the memo would survive
 to be committed, and it did, so section 0 item 4 records that answer instead.
 The m1 closing sentence was fixed in the close-out script.
 
-Nothing further is owed to the memo. The next step is not an agent session:
-the six items need rulings recorded as D-entries before any spec prose exists.
-Four are close to decided on the memo's own reasoning — fee, the challenge
-naming, the fixed-byte-layout attestation, and the capture nonce's issuance
-moment. Two are coupled and carry real cost either way: the accept race and
-the A4 hardwiring. A trust-level A4 can only be enforced against a direct
-caller inside a voucher, so ruling for the voucher makes the A4 redefinition
-cheap, and ruling for permissionless accept leaves A4's device wording doing
-work no other layer can check. Decide those two together.
+**All fourteen rulings are held.** D67 to D73 close the six questions; D74 to
+D80 close the seven flagged items. Commits c0e3f71 and c4d9e03, with the
+earlier 9dd2ee6 and 628696e. The memo is fully discharged and nothing further
+is owed to it.
+
+What changed materially, for anyone reading the rulings cold. Acceptance is no
+longer permissionless: a server-issued eligibility voucher is required and the
+Scout still signs (D68), which closed a griefing attack that would have let any
+wallet lock the whole marketplace for transaction fees — funded by our own
+relayer under D2. A4 no longer names Seeker hardware; the qualifying rule set is
+committed in the policy as an eligibility profile (D69). On-chain signed
+messages are fixed binary layouts rather than canonical JSON (D70), which
+removes the section 5 versus section 6 contradiction without a second
+serialiser. Ed25519 verification accepts only BountyCam's canonical
+self-contained shape, at an explicitly supplied index, top-level only (D71). The
+arbiter becomes program state rather than a caller-supplied account (D74).
+Policy-to-chain consistency is enforced by the attester, the only layer that
+sees both representations (D77).
+
+What the spec session inherits, in order:
+
+1. **POLICY.md currently contradicts two held decisions.** D79 amends sections
+   7.2 and 7.3 — `AVAILABLE` is produced by confirmed funding rather than by
+   Session 15, and discoverability requires no active reservation as well as
+   the state. D72 requires a naming mapping note. Make those edits before
+   writing anything new.
+2. The binary-message specification for D70 and D71, with golden vectors, as a
+   dedicated artifact — it is consumed by the program, the verifier service and
+   the Session 17 independent verifier.
+3. The replacement `programs/escrow/SPEC.md` per D80: wholesale, not patched,
+   with the authority order that decision fixes.
+
+Still no Rust until those exist. Two questions are deliberately open for the
+spec session: whether attestations carry an expiry (D70, D77), and the
+transaction-size budget D77 requires be computed rather than discovered on
+device. Smaller and noted rather than blocking: SECURITY section 2's API server
+entry still says "store challenges", which D72 made a non-term.
 
 Part 2 ran in a fresh session and produced no re-proposals: it blocked rather
 than reconstruct output it had not seen, corrected a commit SHA it was given,
