@@ -831,3 +831,337 @@ an earlier assignment of the same bounty rejected; re-issue supersedes the
 previous; evidence under a superseded nonce cannot satisfy A1; a successful
 submission consumes the nonce exactly once; offline evidence with no previously
 issued valid nonce cannot be graded A1.
+
+---
+
+## Session 8 flagged-item rulings (14 September)
+
+The seven items the conflicts memo flagged outside the six questions. D74, D75
+and D76 touch what Session 8 builds; D77 to D80 shape the spec session and
+Session 9.
+
+**D74 — One program-level arbiter authority; no per-bounty arbiter.**
+`create_and_fund` currently takes `arbiter_authority` as an unchecked account and
+stores it per bounty, so a direct caller names any arbiter including themselves.
+Inert today — nothing reads it — but Session 9's `resolve` moves money to one side
+of a dispute, and a self-nominated arbiter would resolve every dispute in their
+own favour. D9 already describes a dedicated administrative arbiter, singular and
+protocol-level; the code does not enforce that reading.
+
+For the MVP: `arbiter_authority` is removed from `create_and_fund` arguments and
+from the per-bounty escrow account. The authorised arbiter public key is held in
+explicit program or config state. `resolve` requires the signer to equal that
+configured authority. The key is dedicated — separate from the eligibility
+authority (D68), the evidence attester, the relayer, and any ordinary API key. A
+direct caller has no way to nominate an arbiter.
+
+The arbiter is materially more privileged than D68's eligibility authority and is
+separately keyed and separately documented for that reason: eligibility
+authorises who may accept work; the arbiter causes locked funds to be released to
+one side of a dispute.
+
+Rotation semantics, defined now though rotation is not implemented. The
+configured arbiter is protocol state and bounties do not snapshot an arbiter at
+funding. If the protocol rotates the arbiter through an authorised configuration
+change or upgrade, the currently configured arbiter becomes authoritative for all
+unresolved disputes, including bounties funded earlier. This avoids stranded
+disputes if a key is lost or compromised — `resolve` being the only exit from
+`DISPUTED` — and matches a protocol-level administrative role rather than a
+per-bounty contractual choice. No broadly callable `set_arbiter` instruction is
+added: introducing rotation requires its own authorisation model, tests and
+SECURITY decision.
+
+Tests, at minimum: the requester cannot supply an arbiter during funding; an
+arbitrary signer cannot resolve; the requester cannot resolve their own dispute by
+virtue of being requester; the Scout cannot resolve; the eligibility, attester and
+relayer keys cannot resolve; the configured arbiter can resolve only from
+`DISPUTED`; the arbiter cannot alter the reward amount or destination beyond the
+finite outcomes `resolve` encodes; and altering unrelated bounty or account data
+cannot substitute another arbiter. The account-layout change lands in the Session
+8 redeploy.
+
+**D75 — `UnauthorizedRequester` is split; error variants are append-only.** One
+error currently serves two failures: "the signer is not the requester"
+(`cancel.rs:13`) and "this token account is not yours" (`cancel.rs:30`,
+`create_and_fund.rs:33`). Error codes are the API surface the mobile app reads,
+and a user told they lack requester authority when they actually supplied a wrong
+account looks in the wrong place. Session 8 adds errors regardless, so the split
+costs one appended variant now rather than a renumber later.
+
+Three distinct meanings: `UnauthorizedRequester` — the signer is not the requester
+authorised for this bounty, retained at `cancel.rs:13`.
+`TokenAccountOwnerMismatch` — the supplied token account is not owned by the
+expected wallet; new, taking over `cancel.rs:30` and `create_and_fund.rs:33`.
+`MintMismatch` — the supplied token account has the wrong mint, unchanged.
+
+Ownership and mint are not combined. They are already checked independently and
+are different failures; keeping them separate gives the client materially better
+feedback. The new variant is named for the account relationship that failed, not
+as another generic `Unauthorized...`.
+
+Compatibility rule, binding on the program from here: Anchor error variants are
+append-only. New errors are added at the end of the enum. Existing variants are
+never reordered, inserted around, or removed, so previously published numeric
+codes — 6000 plus the variant index — remain stable across upgrades. If an
+existing error later needs finer semantics, the old variant keeps its code for its
+existing uses and a new variant is appended for the newly distinguished condition;
+the enum is not restructured.
+
+Tests, at minimum: wrong requester signer yields `UnauthorizedRequester`; correct
+requester with a token account owned by another wallet yields
+`TokenAccountOwnerMismatch`; correct owner with the wrong mint yields
+`MintMismatch`; correct requester, owner and mint passes these checks; and
+existing error variants retain their current numeric codes after the Session 8
+additions.
+
+**D76 — The on-chain `Cancelled` variant is removed; cancellation is an event plus
+a database record.** `cancel` returns the USDC and closes both the vault and the
+bounty account, so no observer ever sees a bounty in `Cancelled` — they see an
+account that used to exist. SECURITY.md section 9 requires that a variant exist
+only if an instruction can enter it with defined exits and tests both ways; this
+one fails that on its own terms. Setting the state immediately before closure
+would satisfy the letter while leaving the data unreadable, which is worse than
+dropping it because it looks solved.
+
+Cancellation is therefore: `Funded` → refund reward → emit `BountyCancelled` →
+close the reward vault → close the bounty account. The event carries enough stable
+information for reconciliation: bounty identifier or address, requester, reward
+amount refunded, token mint, and cancellation time or slot. Events live in
+transaction logs and are not an archival guarantee — the database is the durable
+record and the event is the reconciliation anchor.
+
+The database keeps `bounty_state = CANCELLED`, `cancelled_at`, the cancellation
+transaction signature, whether the bounty had previously been funded, and any
+other lifecycle information needed for requester statistics. Requester profile
+metrics derive from the database, never from persistent cancelled Solana accounts.
+
+Cancellation is distinguished from harmful requester behaviour: cancelling before
+a Scout accepts may be counted but normally carries little or no reputation
+impact; after acceptance the requester cannot unilaterally cancel under the escrow
+rules; disputes, settlement outcomes and approval behaviour are tracked separately
+and are the more meaningful trust signals.
+
+The intended mapping, which settles half of the enum reconciliation BACKLOG
+assigns to Session 9: DB `CANCELLED` unfunded means no on-chain bounty ever
+existed (POLICY.md 7.2); DB `CANCELLED` funded means the bounty existed on-chain,
+was refunded and closed, with the cancellation transaction and event recorded; the
+on-chain `Cancelled` enum variant is removed.
+
+**D77 — Policy-to-chain bindings are enforced by the attester, not the program.**
+`create_and_fund` takes `required_assurance`, `deadline` and `review_window_secs`
+as arguments and stores `policy_hash` as opaque bytes. Nothing makes the two
+representations agree, so a direct caller can fund a bounty whose on-chain gate
+says assurance 0 while its committed policy says 4. The program cannot check this:
+doing so requires parsing the canonical policy, which D70 keeps off-chain. After
+D69 the gap is sharper still — the program gates on `required_assurance` while
+that number's meaning lives in an eligibility profile inside the policy.
+
+The attester is the only layer that sees both. Before signing it must obtain the
+exact canonical policy whose hash is committed on-chain; recompute and verify
+`policy_hash`; read the settlement-critical values from that policy; read the
+corresponding values from the on-chain bounty account; require exact agreement;
+and refuse to attest on any disagreement.
+
+The bound set is not an open-ended manual list. **Policy-to-chain bindings**
+becomes a normative concept in the policy specification: whenever a policy value
+is duplicated into program state, its binding rule is registered there. The
+current set is `required_assurance`; `deadline`; `review_window_secs` against the
+canonical policy's `challenge_window_seconds` (D72's mapping); and D69's
+eligibility profile identifier and hash.
+
+`BOUNTYCAM_ATTESTATION_V1` carries the settlement-critical chain values the
+attester checked — `policy_hash`, `required_assurance`, `deadline`,
+`review_window_secs`, `eligibility_profile_hash`, achieved assurance, alongside
+the existing bounty, requester, Scout and evidence bindings. The signature then
+means: I verified evidence against Policy P, and I verified that this bounty's
+settlement-critical chain state agrees with Policy P. The program reconstructs
+those values from its own account state and compares the complete message
+byte-for-byte per D71, so it never parses canonical JSON. A second property
+follows and should not be optimised away as redundant: because reconstruction uses
+current state, an attestation cannot be valid for a bounty whose
+settlement-critical state differs from what the attester inspected.
+
+This resolves D70's first open question: `eligibility_profile_hash` is present in
+the attestation, 32 bytes always allocated. Attestation expiry remains open.
+
+Transaction budget. The ed25519 instruction carries the message inline plus a
+32-byte key, 64-byte signature and 16-byte header, so the additional bindings push
+it toward 400 bytes. With `submit_attestation`'s own data, its account keys, the
+fee payer signature and the blockhash, the 1232-byte transaction limit is
+reachable. The binary specification computes this budget explicitly rather than
+discovering it on device; domain tag length is a deliberate lever.
+
+Authority split, stated rather than hidden. `policy_hash` is the immutable
+commitment to what the requester specified. The duplicated on-chain fields are
+authoritative for the program's mechanical state transitions. A bounty whose two
+representations disagree is malformed: it can never receive a valid attestation
+and therefore cannot progress through the attestation-gated settlement path.
+
+Defence in depth. The API performs the same comparison before a bounty becomes
+discoverable, so honest users never create malformed jobs — but chain safety does
+not depend on it, because a direct caller bypasses the API. Session 15's
+reconciliation classifies a policy-chain mismatch as malformed and surfaces it
+rather than guessing which representation was intended.
+
+Honest limitation. A direct caller may still fund inconsistent values. That locks
+their own funds in a bounty that cannot attest, harms no one else, never becomes
+discoverable, and recovers through `expire`. Acceptable for the MVP because the
+inconsistency cannot lower the evidence bar and still produce a valid payout.
+
+Tests, at minimum: all bindings match, attester issues; policy hash does not match
+the canonical policy, refuse; on-chain `required_assurance` differs from the
+policy, refuse; deadline differs, refuse; review window differs, refuse;
+eligibility profile differs, refuse; one-field mutation after attestation, the
+program rejects because the reconstructed D70 bytes no longer match; a malformed
+direct-funded bounty is not discoverable by the API; a malformed bounty cannot
+obtain a valid attestation; and a malformed bounty remains recoverable through the
+defined expiry path.
+
+**D78 — One canonical implementation for production; independent implementation
+for verification only.** SECURITY.md section 5 says canonical serialisation has one
+implementation and nobody keeps an alternative. `packages/shared/SPEC.md` says the
+functions are computed independently by the mobile app, the API and a standalone
+verifier, gives Rust implementers normative key-ordering guidance, and BACKLOG's
+verification gate requires that a standalone script reproduce the Merkle root byte
+for byte. A gate satisfied by the same code that produced the value proves
+nothing, so the rule and the gate pull opposite ways. D70 did not resolve this: it
+removed canonical JSON from the program, while Session 17 is off-chain tooling
+whose purpose is reproducibility for a human.
+
+Production rule, unchanged in substance: production producers and money-path
+consumers use the single canonical implementation in `packages/shared`. No
+production service, mobile client or settlement component maintains an
+alternative.
+
+Independent verification tooling is a deliberate exception, because independence
+is its purpose. The Session 17 verifier is implemented independently of
+`packages/shared`, preferably in a different language or runtime such as Rust so
+it does not inherit implementation assumptions; it consumes the normative
+specification directly and passes the same immutable vectors. It never signs
+attestations, issues eligibility vouchers, determines whether payout occurs, feeds
+reconstructed values back into the program, or forms part of the mobile app's
+normal operation. It is never bundled into capture, submission, acceptance or
+settlement — a verifier that becomes a runtime dependency stops being independent
+and becomes a second production implementation on the money path.
+
+Authority when implementations disagree, in order: the normative specification;
+the published immutable vectors; the production `packages/shared` implementation;
+the independent verifier. Neither implementation is authoritative merely because
+it existed first. Where a disagreement concerns an input a normative rule already
+covers, whichever violates the specification is wrong. Where the specification
+does not resolve it, this is a specification gap: clarify the normative rule, add
+a worked vector for the case, and update whichever implementations fail the
+clarified rule. Published vectors are not silently rewritten; a genuine change of
+semantics goes through an explicit specification version change.
+
+CI uses the verifier as a development and release gate, never a runtime
+dependency. Both implementations run the shared vectors. The load-bearing check is
+cross-generation: one implementation generates evidence bundles and the other
+verifies their roots, with varying inputs rather than a fixed pair — a fixed pair
+is only another vector, and divergence outside the published vector set is exactly
+what this catches. CI fails if either implementation diverges from the normative
+vectors or from the other.
+
+**D79 — `bounties.state` tracks confirmed chain state; `assignments` owns the
+reservation.** POLICY.md 7.2 names Session 8 as the first producer of `ACCEPTED`
+but defines no transition into it, and D68 introduced a gap between voucher
+issuance and on-chain confirmation that the database had no way to represent.
+
+No `RESERVED` bounty state is added. Reservation is not a lifecycle state of the
+bounty; it is a transient claim attempt by one Scout, and `assignments` already
+owns it through the unique partial index on `(bounty_id) WHERE status = 'ACTIVE'`
+built in Session 3. A `RESERVED` state would duplicate that, add an enum value
+with no chain counterpart, add timeout transitions, add reconciliation cases, and
+create a second place for the bounty row and the assignment row to disagree.
+
+Voucher issuance atomically creates the active assignment reservation under the
+existing constraint, issues the voucher bound to that Scout and bounty, and leaves
+the bounty state `AVAILABLE`. `AVAILABLE` means the bounty has not been confirmed
+as accepted on-chain; it does not mean the bounty is currently offerable.
+Discoverability therefore requires both `bounty_state = AVAILABLE` and no active
+unexpired assignment reservation — amending POLICY.md 7.3, which currently makes
+the discoverable set exactly `AVAILABLE`. A second Scout never sees a bounty while
+the first is submitting.
+
+The durable transition `AVAILABLE` to `ACCEPTED` occurs only on confirmed on-chain
+acceptance, at which point the assignment moves from reservation to confirmed. The
+chain is authoritative: voucher issuance or database reservation alone never
+produces `ACCEPTED`. "Confirmed" means observed from chain confirmation, never
+from a submission response — SECURITY.md section 12, and the MWA case in BACKLOG
+where the wallet submitted successfully while the app reported failure.
+
+If the Scout never submits, the transaction fails, or the voucher or reservation
+TTL expires before confirmation, the reservation is released or expired and the
+bounty remains `AVAILABLE`, provided the chain still shows it acceptable. A stale
+database reservation never permanently blocks a bounty.
+
+Adjacent correction to POLICY.md 7.2: Session 15 is not the first producer of
+`AVAILABLE`. The production path projects confirmed chain results into the
+database immediately — confirmed `create_and_fund` produces `AVAILABLE`, confirmed
+`accept` produces `ACCEPTED`. Session 15 reconciliation is the backstop that
+repairs missed, crashed or inconsistent projections, not the mechanism by which
+the application discovers what happened. Otherwise a newly funded bounty would be
+undiscoverable until a later reconciliation pass.
+
+Session 15 reconciles: chain funded but database behind, repair to `AVAILABLE`;
+chain accepted but database behind, repair to `ACCEPTED`; database accepted with
+no chain acceptance, flag and repair against confirmed transaction history; stale
+reservation without on-chain acceptance, expire the reservation.
+
+Tests, at minimum: confirmed funding moves the database to `AVAILABLE`; voucher
+issuance creates one active reservation and leaves the bounty `AVAILABLE`; a
+reserved bounty is excluded from discovery; a second active reservation cannot be
+created; confirmed on-chain accept moves the bounty to `ACCEPTED`; voucher
+issuance without an on-chain accept never produces `ACCEPTED`; a failed accept
+releases the reservation and the bounty becomes discoverable again; an expired
+voucher or reservation becomes claimable again; two racing Scouts yield only the
+chain-confirmed winner as the accepted assignment; a database winner cannot
+override a different valid on-chain winner; and reconciliation repairs a missed
+`AVAILABLE` or `ACCEPTED` projection.
+
+**D80 — `programs/escrow/SPEC.md` is replaced wholesale, not patched.** The
+existing file was written after Session 4's implementation, documents what was
+built rather than constraining it, and recorded an invented 250 bps fee as though
+intended — superseded by D67, but the rest has never been checked against
+anything. Correcting one row and adding Session 8's normative material would
+legitimise every unreviewed statement around it by proximity.
+
+Authority order for the replacement: held D-entries and SECURITY decisions first;
+the intended state machine and policy specifications second; existing source and
+tests third, and only for behaviour no decision or specification already governs;
+the old SPEC.md fourth, as a checklist of topics that may need covering and never
+as authority.
+
+Existing behaviour is read from source and tests directly, and is not
+automatically converted into a normative requirement. Where current code conflicts
+with a held decision, a security invariant or the intended lifecycle, that is
+recorded as an implementation discrepancy to fix — never laundered into the new
+specification by widening it to match.
+
+The old file is superseded rather than incrementally repaired; git history
+preserves it and the active tree carries no second stale normative document. The
+new file states at the top that it supersedes the previous post-hoc
+specification.
+
+Scope: the whole account structure and state machine, and the instructions that
+exist or are being built. `approve`, `reject`, `resolve` and `expire` remain
+Session 9's to specify — writing them now would repeat the same error in the other
+direction.
+
+Structure is modular. `programs/escrow/SPEC.md` carries normative program
+behaviour, accounts, instructions, state transitions, authorities and invariants.
+The D70 and D71 binary layouts and their golden vectors live in a dedicated
+binary-message specification, because they are consumed by the program, the
+verifier service and the Session 17 independent verifier, and only the first of
+those reads an escrow specification. Shared policy and canonicalisation rules stay
+in `packages/shared/SPEC.md`. The escrow spec references these rather than
+duplicating byte-level definitions.
+
+Reconciliation before the replacement is declared complete: every existing
+instruction is represented; every account field has a defined purpose; every enum
+state is reachable with defined exits; every authority is defined and enforced;
+every money-moving path has explicit preconditions and destinations; every stored
+field is either required by the specification or removed; every held decision D67
+to D79 is reflected; existing tests are checked against the new requirements; and
+any source behaviour differing from the new spec becomes an explicit
+implementation task.
