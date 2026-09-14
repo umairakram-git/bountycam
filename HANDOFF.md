@@ -381,6 +381,44 @@ tsconfig instances recorded in BACKLOG are owed to commit 7's before-count.
 
 ---
 
+## Session 8 part 1 — conflicts memo, and how the session failed
+
+`notes/session8-part1-conflicts-memo.md` holds the six-item conflicts memo for
+ruling: platform fee, the accept race, attestation serialisation, the ed25519
+mechanism, the three meanings of "challenge", and capture nonce origin, plus a
+"flagged for your ruling" list of seven further items. No ruling has been given
+and no spec prose exists. Part 2 has not started.
+
+Settled from raw output this session: `PLATFORM_FEE_BPS` has been `0` in every
+committed version, so the 250 bps figure exists only in the stale
+`programs/escrow/SPEC.md` and the code complies with D24. The griefing and
+fee-sponsorship analysis in item 2 is complete; D2 means `accept` is sponsored
+by default, so on the app path the relayer funds any griefing.
+
+Still unwritten in the memo, carried to part 2: m5 as a minimum trust level
+(NOT SGT gating); a new item 8 on the A4 hardwiring (now also a BACKLOG open
+finding); amendment 2 replacing the Wormhole citation, whose first-party
+sources returned 403 and 429 and were never read; amendment 3 showing the
+`notes/` check as its four separate results. The m1 closing sentence was fixed
+in the close-out script.
+
+How the session failed, worth not rediscovering: after a wide reading pass and
+five external fetches, a one-sentence edit could not be applied across five
+attempts, including two where the literal `old_str` and `new_str` were supplied
+and one where a diagnostic command was requested instead. The tell was the
+agent reading four unrelated documents between each refusal and an identical
+re-proposal. Different signature from 7b's re-send: there the answer repeated,
+here the edit repeated while the reading widened. Treat a small edit that will
+not land after a long reading pass as a signal to end the session rather than
+to rephrase.
+
+Also recorded, because it cost three refusals: the edit approval prompt renders
+a replacement as the deleted lines stacked above their replacement, with no
+marker between them. That reads as a duplicate insertion. It is not. Verify
+with `grep -n` against the file before refusing an edit on that basis.
+
+---
+
 ## Working rules
 
 - Read SECURITY.md before touching the escrow, auth, verifier, or any key (D50).

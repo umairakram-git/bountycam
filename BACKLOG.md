@@ -17,6 +17,18 @@ requester side.
 
 ## Open findings from completed sessions
 
+**D13's A4 names a device.** "A3 + Verified Seeker + wallet signature"
+(DECISIONS.md:96) makes the top assurance rung unreachable without a Seeker.
+It is carried into policy v1 as `required_assurance` bounded 0 to 4
+(POLICY.md:92, 112, 189), into the escrow as a `u8`, and gated on-chain per
+D17. The integer is inside the hashed policy; the meaning of the integer is
+not, so redefining A4 changes what already-committed policy hashes meant with
+no hash changing. Contradicts PRD section 8 (Seeker is the initial
+distribution layer, not the boundary) and section 52. Options: leave it;
+redefine as a minimum trust level with SGT as one qualifying route; or version
+the ladder so A4's meaning is pinned per policy version. Owed before Session
+14 grades against the ladder. Found Session 8 part 1.
+
 **`Cancelled` enum variant is unreachable.** `cancel` closes the account rather
 than setting state, so the variant can never be observed. Either drop it, or
 set state before closing so an indexer can see the terminal state.
