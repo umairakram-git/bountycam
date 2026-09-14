@@ -35,10 +35,10 @@ Normative elsewhere, and winning on conflict in their own scope:
   serialisation and hashing
 - `apps/api/AUTH.md` — authentication, JWT verification, and the middleware this
   document's protected endpoints reuse (section 8.1)
-- the escrow program and its Session 9 specification — the on-chain state machine and
-  every financial transition; until Session 9 reconciles the enums, the chain is
-  authoritative for financial truth and the database `bounty_state` is workflow display
-  (SECURITY.md section 0; section 7 here)
+- the escrow program and its specification, `programs/escrow/SPEC.md` (D80) — the
+  on-chain state machine and every financial transition; until Session 9 reconciles
+  the enums, the chain is authoritative for financial truth and the database
+  `bounty_state` is workflow display (SECURITY.md section 0; section 7 here)
 
 This document wins over any implementation of it.
 
@@ -127,13 +127,18 @@ Notes:
   is discoverable; `completion_window_seconds` — from acceptance to the submission
   deadline; `challenge_window_seconds` — from policy pass to auto-release, within which
   the requester may dispute (D12). Absolute deadlines are derived workflow data
-  (section 2.4). The minimum of 60 seconds admits the D12 demo challenge window; the
-  maxima — 30 days for acceptance and completion, 24 hours for challenge — bound
-  derived deadlines to sane timestamps. The challenge maximum is deliberately the
-  shortest: the challenge window holds a Scout's already-earned payment awaiting
+  (section 2.4). The minimum of 60 seconds admits the D12 demo review window; the
+  maxima — 30 days for acceptance and completion, 24 hours for review — bound
+  derived deadlines to sane timestamps. The review maximum is deliberately the
+  shortest: the review window holds a Scout's already-earned payment awaiting
   requester silence, and a week-long hold is a marketplace failure, not a parameter
   choice. The bounds are provisional product values; changing them is a spec
   amendment and does not affect any existing hash.
+- Mapping (D72): the canonical policy JSON field `challenge_window_seconds`, the
+  on-chain field `review_window_secs`, and the prose term *review window* are the
+  same concept. `challenge_window_seconds` is retained solely for compatibility with
+  the existing hashed-policy schema and must never be read as the SIWS challenge or
+  the capture nonce.
 
 ### 2.2 Evidence requirements
 
@@ -539,37 +544,59 @@ define during the enum reconciliation (BACKLOG), including whether such a row en
 
 The remaining eleven values are unreachable in Session 7 code: no statement writes
 them, and reads treat them as opaque display values. The normative assignment of each
-value to a producing transition is the Session 9 enum reconciliation. The column
-below is informative expectation only, recorded so a later session's claim to a value
-is checked against a written plan rather than memory:
+value to a producing transition is the Session 9 enum reconciliation, except the two
+D79 fixes: confirmed on-chain `create_and_fund` produces `AVAILABLE`, and confirmed
+on-chain `accept` produces `ACCEPTED` — both only on chain confirmation, never from
+voucher issuance, a database reservation, or a submission response. Session 15
+reconciliation is the backstop that repairs missed or inconsistent projections, not
+the mechanism by which the application discovers what happened (D79).
+
+The table below is informative expectation only, recorded so a later session's claim
+to a value is checked against a written plan rather than memory:
 
 | State | Expected first producer (informative) |
 |---|---|
-| `FUNDED`, `AVAILABLE` | Session 15 — reconciliation of `create_and_fund` confirmations |
-| `ACCEPTED` | Session 8 — accept, challenge nonce issuance |
+| `AVAILABLE` | the D79 prose above — confirmed `create_and_fund`, projected immediately |
+| `FUNDED` | Session 9 enum reconciliation to define; D79 assigns it no producer |
+| `ACCEPTED` | the D79 prose above — confirmed `accept`; Session 11 ships the path |
 | `SUBMITTED` | Session 13 — evidence upload and submission |
 | `IN_REVIEW`, `APPROVED`, `REJECTED`, `DISPUTED` | Session 16 — requester review, dispute |
 | `PAID`, `REFUNDED`, `EXPIRED` | Session 15 — reconciliation of settlement confirmations |
 
+`SUBMITTED` is likewise expected from confirmed on-chain `submit_attestation`; its
+normative assignment remains Session 9's.
+
 Decided now, so nobody reads a scheduling conflict into the table: Session 11's
 assignment race test targets the `assignments` unique partial index, not the funding
 path, so it seeds an `AVAILABLE` bounty by direct SQL — exactly as the section 8
-tests seed states no API can yet produce. Session 11 owns that seeding. The `FUNDED`
-flip through the API arrives with Session 15's reconciliation, and nothing earlier
-depends on it.
+tests seed states no API can yet produce. Session 11 owns that seeding. The
+`AVAILABLE` projection through the API arrives with the funding confirmation path
+(D79); no session before that path depends on the API producing `AVAILABLE`.
 
 ### 7.3 Discoverability
 
-**An unfunded bounty is never discoverable.** The discoverable set is exactly the
-single state `AVAILABLE`; widening it is an amendment by the session whose transition
-justifies it. The rule is enforced in the discovery query's state filter (section
-8.4) — in SQL, not in serialisation and not in the client. Since Session 7 code
-cannot produce `AVAILABLE`, discovery over real data returns an empty list, and the
-section 12 tests seed states directly to prove both directions: an `AVAILABLE` row
-appears, and `DRAFT` and `CANCELLED` rows are absent.
+**An unfunded bounty is never discoverable.** D79 narrows the set further: a bounty
+is discoverable exactly when its `bounty_state` is `AVAILABLE` and no `assignments`
+row for it has `status = 'ACTIVE'`. That conjunction is the complete rule. A
+reservation is expired when its row no longer holds `status = 'ACTIVE'` — the status
+flip, never a timestamp comparison in the discovery query. The query therefore never
+excludes a bounty the Session 3 unique partial index would admit: discovery and
+reservation cannot disagree about whether a reservation has expired, and concurrent
+claims are still resolved by the index. The flip's timestamp source, writer and lag
+bound are owed by the voucher-issuance session (section 14).
 
-Single-bounty reads follow the same line: `DRAFT` and `CANCELLED` rows are visible to
-their requester only, and to anyone else they are `NOT_FOUND` — indistinguishable
+The rule is enforced in the discovery query (section 8.4) — in SQL, not in
+serialisation and not in the client; widening the set again is an amendment by the
+session whose transition justifies it. Until voucher issuance ships, nothing writes
+an `ACTIVE` reservation, so the reservation conjunct is unenforced against live
+data. Since Session 7 code cannot produce `AVAILABLE`, discovery over real data
+returns an empty list, and the section 12 tests seed states directly to prove both
+directions: an `AVAILABLE` row appears, and `DRAFT` and `CANCELLED` rows are absent.
+
+The conjunction governs discovery only: single-bounty reads by id do not apply it — a
+caller holding the id learns nothing from a reservation's existence, and a reserved
+bounty remains readable by id (section 8.5). `DRAFT` and `CANCELLED` rows are visible
+to their requester only, and to anyone else they are `NOT_FOUND` — indistinguishable
 from absence, so an id leak does not become an existence oracle (section 8.5).
 
 ---
@@ -675,7 +702,8 @@ view. The body is a JSON object with exactly four keys:
 `acceptance_window_seconds`, `attester_pubkey`, `capture_radius_m`,
 `challenge_window_seconds`, `completion_window_seconds`, `evidence_requirements`,
 `lat`, `lon`, `required_assurance`, `reward_amount`, and optionally `cluster` and
-`settlement_mint`. A constant or assigned field in the request — `chain`,
+`settlement_mint`. `challenge_window_seconds` is the review window (section 2.1
+mapping note). A constant or assigned field in the request — `chain`,
 `domain_tag`, `fee_amount`, `salt`, a requirement `id` — is an unknown field.
 
 Check order:
@@ -1065,7 +1093,9 @@ files named explicitly in the test script (D36), the injectable clock, and — n
 this session — the injectable randomness module (section 2.1) with deterministic
 doubles. The D36 gate: **the suite passes only if the summary reads exactly
 `tests 76, pass 76, fail 0`**, and the migration scratch test reads exactly
-`tests 1, pass 1, fail 0`. A green banner with any other count is a failure.
+`tests 1, pass 1, fail 0`. A green banner with any other count is a failure. 76 is
+the Session 7b shipped count: tests 77 and 78 have no implementation yet, and the
+expected count becomes 78 in the session that writes them.
 
 Where a test needs a state no Session 7 API can produce (`AVAILABLE`, `FUNDED`), it
 seeds the row by direct SQL (sections 7.2, 8.1).
@@ -1231,6 +1261,14 @@ Middleware unit test — no database, no app boot, like 73 to 75:
     accessor's wiring-bug guard: a route registered without the preHandler
     fails closed at first read, not silently with an undefined identity.
 
+Discovery, reservation exclusion (section 7.3):
+
+77. An `AVAILABLE` bounty with a seeded `assignments` row at `status = 'ACTIVE'` is
+    absent from discovery — reserved is never discoverable. The seeded row must set
+    `challenge_nonce` (a D72 non-term pending rename; the rename updates this test).
+78. The same bounty with the row flipped to `EXPIRED` is returned — the flip, not a
+    timestamp, restores discoverability (section 14 item 6).
+
 ---
 
 ## 13. Worked vectors
@@ -1380,3 +1418,12 @@ incident). Each carries its revisit condition.
    detail and accept, all consumers — so no session owns the lift. The session that
    first gives a client a create flow inherits it; if the plan gains such a session,
    name it here and in section 5 at that time.
+6. **Reservation expiry mechanics.** Section 7.3 defines a reservation as expired
+   when its `assignments` row no longer holds `status = 'ACTIVE'`: the write-time
+   flip is the definition, and the discovery query never compares timestamps.
+   Undecided: the timestamp source the flip reads — no reservation-expiry column
+   exists, and `assignments.deadline` is the completion deadline of an accepted
+   assignment, not a reservation TTL; the sweeper or opportunistic write that flips
+   `ACTIVE` off; and the bound on the lag between true expiry and the flip. The
+   interval is operational; POLICY names no interval. All three are owed by the
+   session that ships voucher issuance.
