@@ -94,10 +94,14 @@ May: pay fees; submit already-authorised transactions.
 May not: act as any other authority; choose accounts; alter instruction data; move USDC.
 Every money-moving instruction must remain safe if the relayer is malicious.
 
-**Arbiter** — dedicated administrative authority (D9).
-May: resolve a bounty only while it is on-chain `DISPUTED`, only to protocol-defined
-destinations.
-May not: create recipients; change amounts; act on non-disputed bounties.
+**Arbiter** — dedicated protocol-level administrative key, held as program or config
+state, never per-bounty and never caller-supplied (D9, D74).
+May: resolve a bounty only while it is on-chain `DISPUTED`, choosing one of the
+settlement outcomes the program permits, only to protocol-defined destinations.
+May not: create recipients; change amounts; create, fund, accept or submit evidence;
+alter bounty policy; act outside the dispute state. Materially more privileged than
+the eligibility service and separately keyed for that reason: eligibility authorises
+who may accept work, the arbiter releases locked funds to one side of a dispute.
 
 **API server** — server secret.
 May: issue sessions after wallet authentication; store challenges; gate evidence access;
@@ -179,6 +183,19 @@ alternative implementation. On-chain signed security messages use separately
 specified fixed binary layouts with their own domain tags and schema versions
 (D70); the program neither serialises nor parses canonical JSON. Golden vectors
 verify every producer against every verifier, for both forms.
+
+Independent verification tooling is intentionally exempt from the
+implementation-sharing rule (D78). A standalone verifier may implement the
+normative serialisation and Merkle specifications independently, in a different
+language where practical, for the purpose of demonstrating reproducibility and
+detecting specification-implementation divergence. It must never sign, attest,
+authorise, settle, feed values back into the program, or form part of the mobile
+app's normal operation — a verifier that becomes a runtime dependency is a second
+production implementation on the money path. Both implementations are bound by the
+same immutable vectors. The normative specification, not either implementation, is
+authoritative, and neither is authoritative merely because it existed first. A
+disagreement the specification does not resolve is a specification gap: clarify the
+rule, add a vector, update whichever implementations fail it.
 
 ---
 
