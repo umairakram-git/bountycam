@@ -488,3 +488,346 @@ no transition back into `DRAFT` — the reloaded row terminates in the cancelled
 (200) or the not-cancellable arm (409). A second zero-row result would falsify the
 state machine and must surface as an error, not a retry; recorded so nobody later
 writes a retry loop around an invariant.
+
+---
+
+## Session 8 rulings (14 September)
+
+Seven rulings closing the six questions in
+`notes/session8-part1-conflicts-memo.md`. No spec prose existed before these;
+the memo deliberately resolved nothing. Item 2 produced two entries because the
+A4 hardwiring needed its own.
+
+**D67 — The escrow vault holds the Scout reward and nothing else.**
+`create_and_fund` transfers `reward_amount`, not `reward_amount + platform_fee`,
+even though the two are equal while the fee is zero. The vault is therefore
+definitionally the Scout's reward, and payout releases its full balance without
+reasoning about a second claimant. `platform_fee` is removed from the instruction
+arguments entirely and is not client-supplied; it remains a stored account field
+(D8) that the program initialises to zero. There is no fee input to validate and
+nothing in the IDL implying fees are supported behaviour. `PLATFORM_FEE_BPS` and
+the fee arithmetic are deleted. Tests assert that the vault balance after funding
+equals `reward_amount` and that `platform_fee` is zero. Supersedes the stale
+`programs/escrow/SPEC.md` fee row, which recorded an invented 250 bps that never
+existed in committed code.
+
+When fees are introduced they do not enter the reward vault. The requester's
+payment splits at source — reward to the bounty escrow, fee to separate fee
+handling — so settlement never divides a mixed balance. Adding a fee argument or
+configuration is part of that deliberate work, together with the destination,
+authorisation model, refund and dispute behaviour, tests and disclosure required
+by SECURITY.md section 8. Whether the fee is earned at funding or at successful
+settlement is left open: collecting at funding creates a refund path for
+cancelled bounties that collecting at settlement avoids. Decided when
+monetisation is built.
+
+**D68 — Acceptance requires a server-issued eligibility voucher; the Scout still
+signs and submits.** Supersedes D49's arbiter sentence. A permissionless `accept`
+lets any wallet claim every funded bounty for transaction fees alone, blocking
+legitimate Scouts and locking requester funds until expiry — and under D2 the
+relayer would fund that attack. An API co-signature on the transaction itself was
+rejected as broader authority than necessary and contrary to SECURITY.md
+section 2.
+
+The BountyCam eligibility service issues a narrowly scoped authorisation: Scout X
+may accept Bounty Y under the already-committed policy until time T. The voucher
+binds `bounty_id`, the Scout wallet, the committed policy hash, an expiry, a
+unique voucher id, and the program id. The Scout signs and submits `accept`
+themselves, so a copied voucher is useless to another wallet. The database
+atomically reserves the bounty before issuing, so at most one active voucher
+exists per bounty; the program remains the final authority on whether acceptance
+succeeds. The reservation is enforced by a uniqueness or locking constraint, not
+application logic, and chain safety does not depend on it: if two valid vouchers
+were issued in error, only the first on-chain `accept` succeeds, because the
+Funded-to-Accepted transition happens once.
+
+The voucher attests that a Scout satisfies a policy committed at funding. It can
+never set or change that policy. The service cannot move funds, change the
+reward, the requester or the evidence policy, or accept on a Scout's behalf.
+
+Mechanics: a dedicated eligibility key, separate from the attester key, so a leak
+of one does not grant the other; a single program-level eligibility authority for
+the MVP rather than a per-bounty choice, held as explicit program or config state
+and never an implicit client assumption; and no on-chain nonce account — the
+state transition is the replay defence and the voucher id serves the database
+only.
+
+Voucher verification establishes, at minimum: a correct ed25519 verification
+instruction; the expected eligibility authority public key; the exact expected
+voucher message schema and domain; the correct program id and domain separation;
+voucher `bounty_id` matches the bounty being accepted; voucher Scout wallet
+equals the `accept` signer; voucher policy hash equals the policy hash already
+committed for that bounty; the voucher has not expired per the on-chain Clock,
+not merely per the issuing service; and the bounty is in a state that permits
+acceptance. The precompile-mechanics checks are common with `submit_attestation`
+and specified once (D71); the bindings above are acceptance-specific.
+
+Availability: if the eligibility service is down, new accepts stop. Funding,
+already-accepted missions and settlement remain operable. Accepted for the MVP as
+the cost of preventing permissionless claim griefing. `expire` remains mandatory
+in Session 9 — vouchers prevent unauthorised accepts, not abandonment, so the
+requester still needs a deterministic recovery path.
+
+**D69 — A4 stops naming Seeker hardware; the qualifying rule set is committed in
+the policy.** D13's ladder defines A4 as "A3 + Verified Seeker + wallet
+signature", making the top assurance tier unreachable without one Android
+handset. The integer travels into policy v1 as `required_assurance`, into the
+escrow as a `u8`, and into the on-chain payout comparison (D17), while its
+meaning lives only in prose — so redefining A4 later would change what
+already-committed policy hashes meant with no hash changing. That contradicts PRD
+section 8, where Seeker is the initial distribution layer rather than the market
+boundary, and section 52.
+
+The ladder now describes the level of trust required. Seeker and SGT become one
+qualifying route rather than the definition. The program continues to compare the
+`u8`; what satisfies it is decided off-chain against a rule set named in the
+policy.
+
+The committed policy therefore carries two fields, not one: `required_assurance`
+and an `eligibility_profile_id` with its hash, identifying the qualifying rule
+set for that bounty. For the MVP the only A4 profile is `A4_SEEKER_V1` = valid A3
+evidence + Scout wallet signature + verified SGT eligibility. D68's voucher
+attests that the named Scout satisfies that specific committed profile, never
+that the service currently considers them level 4.
+
+A new A4 route — another hardware-backed identity, a verified credential path —
+is a new profile, never an edit to `A4_SEEKER_V1`. New bounties may adopt it;
+already-funded bounties keep the meaning they were funded with. A general
+`policy_version` system is deliberately not built: a stable committed profile
+identifier is sufficient for the MVP and leaves a clean migration path if the
+ladder itself ever changes.
+
+In practice A4 still means Verified Seeker for the hackathon, because SGT is the
+only implemented route. The difference is that the ladder does not say so, and a
+second route later is a verifier and profile change rather than a redefinition of
+the ladder or a change to payout logic.
+
+Sequencing: adding `eligibility_profile_id` is a policy v1 field addition and
+changes the canonical object, so every policy hash changes. Harmless now — no
+bounties exist outside testing — but it must land before any bounty intended to
+outlive development, or the migration this entry exists to avoid is inherited
+anyway.
+
+**D70 — On-chain signed messages are fixed binary layouts, never canonical
+JSON.** SECURITY.md section 5 forbids a second canonical-serialisation
+implementation; section 6 requires on-chain attestation verification. Both hold
+only if the bytes the program verifies are not canonical JSON: otherwise the
+program must rebuild them in Rust, which is the forbidden second implementation,
+and must agree byte-for-byte with TypeScript across the UTF-16 key-ordering rule
+`packages/shared/SPEC.md` already flags as a cross-language hazard.
+
+Two separate schemas, each with its own domain tag, so an eligibility signature
+can never validate as an evidence attestation or the reverse:
+`BOUNTYCAM_ELIGIBILITY_V1` for D68 acceptance vouchers, and
+`BOUNTYCAM_ATTESTATION_V1` for evidence and assurance attestations. Both carry a
+`schema_version` in the signed bytes from the outset, so a future format change
+cannot silently reinterpret old signatures. `schema_version` is retained even
+though `_V1` appears in the domain tag: the tag identifies the message namespace,
+the field gives the verifier an unambiguous value to compare and reject on.
+
+Each schema defines its complete field set, with exact widths and offsets. There
+are no optional fields in a schema. Fields required only by one message type
+exist only in that message type — the two schemas are intentionally different and
+neither reserves space for the other's fields. Whether
+`eligibility_profile_hash` belongs in the attestation is decided in the binary
+specification: if yes, 32 bytes always allocated; if no, absent entirely. Voucher
+expiry always exists, per D68. Attestation expiry exists only if the attestation
+needs it, never for symmetry.
+
+The attestation payload carries, at fixed offsets: domain tag; schema version;
+deployment identifier; program id; bounty id or address; requester wallet; Scout
+wallet; evidence root; committed policy hash; achieved assurance level;
+issued-at. The voucher payload carries the acceptance-specific set per D68.
+
+Encoding rules for the signed path: public keys and hashes as 32 raw bytes;
+assurance level and version as fixed-width integers; timestamps as fixed-width
+integers; little-endian byte order, aligned with Solana and Rust convention and
+locked by the test vectors; fixed-byte-length domain tags, never variable runtime
+strings; no strings, delimiters, optional fields or key ordering anywhere on the
+signed path. Cluster separation uses a fixed deployment identifier committed in
+program configuration, never a signed variable string such as "devnet", so a
+signature issued for one deployment cannot replay against another.
+
+The richer JSON attestation survives off-chain for APIs, storage and human
+inspection, and is non-authoritative for settlement. The verifier builds both
+representations from the same typed internal object and never generates the
+signed binary payload by parsing the published JSON.
+
+Specification before implementation, in either language. For each message type
+the vectors give: a field table with offset, width and encoding; exact input
+values; the expected byte sequence in hexadecimal; the expected signature
+message; integer and timestamp boundary cases; a mutation test per
+security-relevant field; cross-type rejection proving a voucher cannot validate
+as an attestation; and version and domain mismatch rejection. TypeScript and Rust
+tests consume the same immutable vectors. Rust implements no canonical JSON at
+all — it checks fixed offsets against the bytes the ed25519 precompile verified.
+
+**D71 — Ed25519 verification: canonical shape only, explicit index, top-level
+only.** D68 and D70 put off-chain signature verification on the money path in two
+instructions. A Solana program cannot verify ed25519 directly; the native
+verifier runs as a separate top-level instruction and the program confirms,
+through the Instructions sysvar, that the verification it depends on already
+happened over the bytes it expects. Every rule below closes a gap between "a
+signature was verified" and "my signer signed my message".
+
+Invocation context. `accept` and `submit_attestation` require the current
+invocation stack height to be exactly the top-level height. Invocation through
+CPI is rejected outright. The Instructions sysvar is used only to locate and
+inspect the designated ed25519 instruction, never to infer how BountyCam itself
+was reached.
+
+Locating the verification. Each instruction takes a
+`verification_instruction_index` — not the preceding instruction, not a
+hard-coded transaction index. The program verifies the supplied Instructions
+sysvar account key is exactly the native Instructions sysvar; reads the current
+top-level index; requires `verification_instruction_index <
+current_instruction_index`, so the verification has already executed; loads
+exactly that instruction; and requires its program id to be the native ed25519
+verifier. A wrong, missing or out-of-range index is rejected. Because adjacency
+is not required, compute-budget and other unrelated instructions compose freely.
+
+Canonical shape. The shared routine is not a general ed25519 instruction parser;
+it recognises the one shape BountyCam produces. All three instruction-reference
+fields — `signature_instruction_index`, `public_key_instruction_index`,
+`message_instruction_index` — must indicate the ed25519 instruction itself
+(`u16::MAX`), so signature, key and message can never be sourced from elsewhere
+in the transaction. This makes the verified-here-but-read-from-there class
+structurally impossible rather than caught by a check. Required exactly:
+signature count 1; the canonical padding byte; one 14-byte offset structure; key,
+signature and message each at their exact expected offsets; message length equal
+to the expected D70 message length; total instruction-data length equal to the
+canonical layout plus that message length; no trailing or unreferenced bytes; and
+the expected account shape with no unexpected accounts.
+
+Message comparison is reconstruct-then-compare. The program builds the complete
+expected D70 binary message from trusted on-chain state and validated instruction
+inputs, then requires the message in the designated ed25519 instruction to equal
+it byte for byte. It must never parse attacker-supplied message fields and
+selectively compare them against state: a field nobody thought to compare is a
+field the attacker chooses.
+
+Shared mechanics, separate bindings. One helper —
+`verify_ed25519_instruction(sysvar, index, expected_authority,
+expected_message)` — establishes only that exactly one verification at the
+designated index verified exactly those bytes under exactly that key. It knows
+nothing of eligibility versus evidence. `accept` constructs the
+`BOUNTYCAM_ELIGIBILITY_V1` bytes and supplies the eligibility authority;
+`submit_attestation` constructs the `BOUNTYCAM_ATTESTATION_V1` bytes and supplies
+the attester authority. D70's separate domains keep the two un-interchangeable.
+
+Duplicates. Multiple ed25519 instructions may exist in a transaction. Only the
+one at the supplied index binds this invocation; others neither satisfy nor
+invalidate it. Uniqueness is not scanned for — the explicit index is the binding.
+
+Interoperability trade-off, chosen deliberately. BountyCam accepts only its
+canonical self-contained one-signature shape. A differently encoded but
+cryptographically valid ed25519 verification is rejected. This is intentional on
+the settlement path; integrations construct the canonical form.
+
+Tests, at minimum: fake Instructions sysvar; wrong verification index; index
+equal to or after the current instruction; wrong program at the index; zero
+signatures; two signatures; correct signature over the wrong message; correct
+message signed by the wrong authority; eligibility message presented to the
+attestation path and the reverse; each of the three offset instruction-index
+fields redirected elsewhere; malformed or truncated offsets; shifted key,
+signature or message offsets; wrong message length; trailing bytes; mutation of
+every signed field; `accept` through CPI rejected; `submit_attestation` through
+CPI rejected; two identical valid ed25519 instructions with the first designated,
+succeeding; the same with the second designated, succeeding; and a valid matching
+signature present elsewhere while the designated index does not match, rejected.
+
+Invariant: BountyCam does not prove that an ed25519 verification exists somewhere
+in the transaction. It proves that the designated earlier native ed25519
+instruction verified exactly one BountyCam-defined message under exactly the
+authority this instruction expects.
+
+**D72 — Three concepts, three names; "challenge" alone is not a valid term.** The
+word appears 124 times across the repo carrying three unrelated meanings:
+authentication, evidence freshness, and the post-submission dispute period.
+Session 8 introduces the second as new normative text and Session 9 the third as
+an on-chain transition, so two unrelated concepts called "challenge" would arrive
+in adjacent sessions.
+
+From this point: **SIWS challenge** is the authentication challenge proving
+wallet control; **capture nonce** is the unpredictable value issued for a mission
+and bound into captured evidence; **review window** is the period after a valid
+submission in which the requester may dispute before automatic settlement. Bare
+"challenge" is not a normative BountyCam term and is not used for either the
+capture nonce or the review window.
+
+Existing committed names are kept. The hashed-policy wire field stays
+`challenge_window_seconds`: renaming it would change the canonical policy
+representation and every hash for no benefit. The on-chain field stays
+`review_window_secs`, which is the better name and becomes the preferred
+terminology everywhere outside the existing wire representation. The shipped
+authentication interface — `/auth/siws/challenge` and the `auth_challenges` table
+— is external and unchanged; `siws_challenge` applies to new prose, types and
+code only.
+
+A mapping note goes in POLICY.md, the Session 8 specification, and anywhere the
+policy schema is documented: the canonical policy JSON field
+`challenge_window_seconds`, the on-chain field `review_window_secs`, and the
+prose term review window are the same concept; `challenge_window_seconds` is
+retained solely for compatibility with the existing hashed-policy schema and must
+never be read as the SIWS challenge or the capture nonce.
+
+The new capture mechanism uses `capture_nonce` consistently in specifications,
+APIs, database fields, typed objects, evidence manifests, tests and comments. A
+field named merely `nonce` is not used — authentication already has nonce
+terminology of its own. No on-chain or canonical-policy migration is required.
+
+**D73 — The capture nonce is issued at capture-session start, not at accept.** No
+normative definition existed anywhere: one line in an informative POLICY.md table
+and one positioning sentence in HANDOFF. Issuing at accept would let a Scout hold
+the nonce for hours before arriving, leaving a staging window wide enough that A1
+would promise more than it delivers. The value of the mechanism is the narrowness
+of that window.
+
+Mechanism, deliberately thin. The Scout accepts normally. On arrival they press
+Start Capture and the app calls a dedicated endpoint. The API verifies the
+authenticated Scout holds the active assignment and the bounty is in a state
+permitting capture, generates a `capture_nonce` through the existing injectable
+randomness module (D54), and stores it server-side bound to bounty, Scout and
+assignment with issue time, expiry, and status (active, consumed, expired). The
+nonce returns to the app and is bound into the evidence manifest. A valid
+submission consumes it atomically, so a retry cannot produce a second A1
+submission from the same value. No persistent capture-session domain object is
+built: for the MVP, capture-session start is the issuance event plus its validity
+window.
+
+A1 is therefore defined as: evidence bound to a fresh, unpredictable capture
+nonce issued to the assigned Scout after capture was explicitly started and
+before the evidence was produced. A1 is never described as proof that the
+physical scene is genuine. It establishes freshness relative to issuance, subject
+to trust in the issuer and the capture pipeline.
+
+Expiry and re-issue. The nonce has a short TTL, configured in one authoritative
+place rather than as literals in clients, short enough that live capture stays
+meaningful and long enough for a normal mission. An existing nonce is never
+silently extended. On re-issue the previous nonce is marked superseded and a new
+random value issued; evidence intended for A1 must carry the currently valid
+nonce, and evidence captured under a superseded nonce is never upgraded to A1
+because the Scout later reconnects.
+
+Binding. The verifier confirms the nonce was issued for the same bounty, assigned
+Scout, assignment, deployment and validity interval. The assignment identifier is
+bound as well as the bounty identifier, so a nonce from an earlier assignment
+cannot be reused after a bounty expires and is reassigned. The nonce need not
+stay secret after issuance: its property is unpredictability before issuance plus
+single use, not confidentiality.
+
+Offline. A1 requires connectivity at capture-session start. The app may still
+permit offline capture if the product wants that fallback, but such evidence
+cannot honestly satisfy A1, and no nonce is issued retroactively. The UI
+distinguishes live capture, where A1 and above are possible, from offline
+capture, where the maximum assurance is below A1 — stated before capture begins,
+not discovered at grading.
+
+Tests, at minimum: a wallet other than the assigned Scout cannot request a nonce;
+no issuance before acceptance; none for a completed, cancelled or expired bounty;
+two issued values are unpredictably distinct; expired rejected; consumed
+rejected; a nonce from another bounty rejected; from another Scout rejected; from
+an earlier assignment of the same bounty rejected; re-issue supersedes the
+previous; evidence under a superseded nonce cannot satisfy A1; a successful
+submission consumes the nonce exactly once; offline evidence with no previously
+issued valid nonce cannot be graded A1.
