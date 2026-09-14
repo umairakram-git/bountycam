@@ -446,6 +446,21 @@ transaction-size budget D77 requires be computed rather than discovered on
 device. Smaller and noted rather than blocking: SECURITY section 2's API server
 entry still says "store challenges", which D72 made a non-term.
 
+Two schema findings from reading migration 1 directly, for whoever picks up the
+`assignments` table — recorded nowhere else:
+
+- **`assignment_status` has no reservation label.** The enum is `ACTIVE`,
+  `ABANDONED`, `EXPIRED`, `COMPLETED`. Nothing distinguishes a pre-confirmation
+  reservation from a confirmed assignment, so D79's Session 15 case — stale
+  reservation without on-chain acceptance — cannot be found, and D79's "moves from
+  reservation to confirmed" has no schema representation.
+- **`assignments.challenge_nonce` is a D72 non-term whose role predates D73.** The
+  D73 capture-nonce store carries its own issue time, expiry and status server-side,
+  so the column's purpose is unsettled: rename, supersede, or both. The rename
+  touches the column and POLICY section 12 test 77. Do not reuse the column as the
+  reservation TTL — POLICY section 14 item 6 owes that timestamp to the
+  voucher-issuance session.
+
 Part 2 ran in a fresh session and produced no re-proposals: it blocked rather
 than reconstruct output it had not seen, corrected a commit SHA it was given,
 and found two stale cross-references unprompted. That supports compaction as
