@@ -1165,3 +1165,281 @@ field is either required by the specification or removed; every held decision D6
 to D79 is reflected; existing tests are checked against the new requirements; and
 any source behaviour differing from the new spec becomes an explicit
 implementation task.
+
+---
+
+## Spec session step 3 rulings (16 September)
+
+Six rulings from the escrow specification session, step 3. They close the implementation
+discrepancies recorded in `packages/shared/MESSAGES.md` section 10 and the further gaps found
+by reading the Session 4 source, and precede the wholesale replacement of
+`programs/escrow/SPEC.md` under D80.
+
+**D81 — Windows are stored as durations; absolute times are computed on-chain.**
+`create_and_fund` takes an absolute `deadline`. D62 removed absolute deadlines from the policy
+because none can exist before the event that starts its window, so D77's deadline binding
+compared the chain against nothing, and `MESSAGES.md` section 6 used that value as the
+attestation's only time bound. The missing upper bound and the unvalidated review window
+(`MESSAGES.md` section 10, items 4 and 5) are symptoms of the same gap.
+
+`create_and_fund` takes `acceptance_window_secs`, `completion_window_secs` and
+`review_window_secs`, each `i64`, and no absolute deadline. All three are stored on the bounty
+account. The program requires each to be greater than zero and no greater than a compiled
+ceiling: 2592000 seconds (30 days) for acceptance, 2592000 for completion, 86400 (24 hours)
+for review. Review greater than zero is D12's never-immediate rule, not a parameter choice.
+The 60-second product minimums stay off-chain in POLICY.md section 2.1, so tightening a
+product limit needs no upgrade; widening past a ceiling does.
+
+At funding the program stores `acceptance_cutoff` as the Clock `unix_timestamp` plus
+`acceptance_window_secs`. At `accept` it stores `deadline` as the Clock `unix_timestamp` plus
+`completion_window_secs`. Both additions are checked even though the ceilings make overflow
+practically unreachable. `accept` succeeds while the current time is at or before
+`acceptance_cutoff`. `deadline` has no meaningful value before acceptance: it is written by
+`accept` and consumed only from `Accepted` onward; its representation before that is the
+specification's to define, and no instruction reads it in `Funded`. The cutoff is anchored to
+the funding transaction's Clock, not to database discoverability; the two differ by projection
+lag and the chain value governs.
+
+`acceptance_window_secs` and `completion_window_secs` are stored on-chain but are not
+duplicated into `BOUNTYCAM_ATTESTATION_V1`. The attester verifies both against the policy
+(D84). `deadline`, computed and stored at `accept`, is the signed consequence of
+`completion_window_secs`. No instruction can change any duration or the cutoff after creation,
+so D77's second property — an attestation cannot be valid for state other than what the
+attester inspected — is not weakened by their absence from the signed bytes.
+`review_window_secs` remains signed. The layout and published vectors are unchanged; only
+`MESSAGES.md` wording changes.
+
+Tests, at minimum: each duration at zero, negative, and one above its ceiling is rejected;
+each at one and at its ceiling is accepted; `acceptance_cutoff` equals the funding Clock plus
+the window; `accept` exactly at the cutoff succeeds and one second after is rejected;
+`deadline` equals the accept Clock plus the completion window; an attestation exactly at
+`deadline` is accepted and one second after is rejected.
+
+**D82 — One configured attester; `attester_pubkey` leaves the policy; attestations carry no
+expiry.**
+Amends D11 and SECURITY.md sections 2 and 6. D11 and SECURITY.md section 2 have the requester
+name the attester in the policy, while the code stores a caller-supplied attester per bounty,
+so a direct caller names themselves and signs their own attestations. `MESSAGES.md` section 6,
+committed in 2ccc405, already adopted a configured authority without a D-entry; SECURITY.md
+change control requires one, and this entry supplies it.
+
+`submit_attestation` verifies against the attester authority held in the configuration account
+(D83), read at submission time. Bounties do not snapshot an attester, so rotation reaches
+outstanding bounties, through D83's mechanism only. `attester_authority` is removed from the
+`create_and_fund` arguments and from the bounty account.
+
+`attester_pubkey` is removed from the policy object rather than renamed. POLICY.md section 2.4
+defines the hashed policy as what the verifier or the program relies on; nothing relies on a
+requester-named attester once the configured authority governs, and an audit-only field would
+widen that boundary for no security benefit. Which key attested any settlement remains
+auditable from the ed25519 verification instruction in that transaction, the configuration in
+force at submission, and the transaction itself. Removing the field changes every policy hash
+and is landed together with D84 under one V1 supersession. Consequences in `apps/api`: the
+request field, `ATTESTER_NOT_ALLOWED` in its policy-validation sense, the `ATTESTER_PUBKEYS`
+configuration key, the `policies` read-model column POLICY.md section 7.1 names and its
+migration, tests 24, 25 and 71, and vectors V1 and V2.
+
+No attestation expiry. `BOUNTYCAM_ATTESTATION_V1` carries `issued_at`, which records what the
+attester asserted and signed; the program does not compare it with the Clock and it is never
+described as on-chain evidence of when capture, verification or signing occurred. Validity is
+bounded by bounty state, the `deadline` set at `accept` (D81), the currently configured
+attester authority, and exact reconstruction (D71, D77). Stated limit: an attestation issued
+early remains submittable until `deadline` unless the bounty state changes or the authority is
+rotated. Evidence freshness belongs to the capture nonce (D73), not to how recently the
+attester signed.
+
+Attester key id. SECURITY.md section 6 lists an attester key id, and SECURITY-PRODUCTION.md
+section 1 requires one so a rotated key can be retired without invalidating history. It is
+satisfied by the verifying public key in the ed25519 instruction, recorded permanently with
+the transaction. The signed bytes do not repeat it: settlement verifies only against the
+configured key, so an in-message id would add no settlement binding. Revisit before mainnet if
+any consumer must verify an attestation detached from its transaction; the off-chain JSON
+representation carries the key in any case.
+
+Tests, at minimum: an attestation signed by a key other than the configured attester is
+rejected; one signed by the eligibility or arbiter key is rejected; `create_and_fund` exposes
+no attester input; a policy request carrying `attester_pubkey` fails under the POLICY.md
+section 8.3 unknown-field rule.
+
+**D83 — One immutable configuration account, initialised once by the upgrade authority.**
+The account holds `deployment_id` (`u8`), `usdc_mint`, `eligibility_authority`,
+`attester_authority`, `arbiter_authority` and its bump. It is the explicit program state D68
+requires for the eligibility authority, D74 for the arbiter, D70 for the deployment identifier
+and D82 for the attester, and it is the one configured mint SECURITY.md section 8 requires.
+
+`initialize` is the only instruction that writes it, and it succeeds once: the account is a
+single PDA on a fixed seed and a second initialisation fails. The signer must be the program's
+upgrade authority, established from the ProgramData account: its address is derived from the
+escrow program id under the upgradeable loader, and its recorded upgrade authority equals the
+signer. A recorded authority of none is rejected. A caller-supplied claimed-authority account
+never suffices. `eligibility_authority`, `attester_authority` and `arbiter_authority` must be
+pairwise distinct or `initialize` fails; an immutable configuration turns a key collision into
+a deployment-level mistake, so it is a hard invariant rather than an operational convention.
+The relayer is not in configuration and its separation remains operational (SECURITY.md
+section 7). `usdc_mint` must be a mint owned by the classic SPL Token program; Token-2022 is
+unsupported (SECURITY.md section 8). Every instruction that touches tokens requires the
+supplied mint to equal the configured `usdc_mint` by address.
+
+No update instruction exists. Upgrading program code does not change an existing account's
+data, so rotation of any configured value requires a deliberately authorised upgrade that
+itself introduces a migration or a new versioned configuration account, under its own D-entry
+covering who may rotate, recovery, tests and auditability. D74's prohibition on a broadly
+callable `set_arbiter` is unchanged. Under SECURITY-PRODUCTION.md section 1 that deferred
+mechanism is a mainnet blocker, not a known limitation.
+
+Compiled constants were rejected: the test suite creates a fresh mint per run and SECURITY.md
+section 7 requires test keys generated per run, which compiled values cannot match, and a test
+build carrying compiled test keys is a devnet deployment risk. Operationally: the development
+key inventory gains dedicated eligibility and arbiter keys, which neither SECURITY.md section
+7 nor `~/bountycam-keys/` currently holds; `initialize` is rehearsed on localnet with the
+exact devnet public keys before devnet. A mistaken devnet initialisation costs an upgrade
+carrying migration code, or a fresh program id.
+
+Test harness note: litesvm 0.10.0 `add_program` loads under the upgradeable loader with the
+upgrade authority recorded as none (`src/lib.rs` lines 857 and 931), so positive `initialize`
+tests overwrite the ProgramData account first, stated in the test as harness setup. The locked
+version is confirmed with `cargo tree` before relying on this.
+
+Tests, at minimum: a signer other than the upgrade authority is rejected; a ProgramData
+account at the wrong address is rejected; a recorded authority of none is rejected; a second
+`initialize` is rejected; each of the three equal-authority pairs is rejected; a positive
+initialisation stores exactly the supplied values; `create_and_fund` with a mint other than
+the configured mint is rejected; no instruction takes the mint from the caller without
+comparing it to configuration. The account adds one read-only account to `accept` and
+`submit_attestation`; the specification checks both lists against the `MESSAGES.md` section 7
+ceiling.
+
+**D84 — The policy-to-chain binding register; `eligibility_profile_id` joins policy V1; V1 is
+superseded once, then frozen.**
+D77 made policy-to-chain bindings a normative concept in the policy specification; POLICY.md
+never gained the register. It is now, with each canonical policy field paired with its
+on-chain field: `required_assurance` with `required_assurance`; `acceptance_window_seconds`
+with `acceptance_window_secs`; `completion_window_seconds` with `completion_window_secs`;
+`challenge_window_seconds` with `review_window_secs` (D72's mapping); the hash derived from
+`eligibility_profile_id` with `eligibility_profile_hash`; `reward_amount` with
+`reward_amount`, the base-unit string parsed exactly to `u64` per POLICY.md section 6.3.
+Outside the register: the mint, pinned by the program (D83) and by the API's
+`MINT_NOT_ALLOWED`; the fee, fixed at zero by the program (D67); the attester, which is not a
+binding (D82). Any future duplication of a policy value into program state is registered
+before code.
+
+Every binding is checked as exact equality, with refusal on any mismatch, at three boundaries.
+Funding projection: a confirmed `create_and_fund` is projected to `AVAILABLE` only when every
+binding agrees; otherwise it is never projected to `AVAILABLE` and is classified malformed.
+This amends D79's sentence that confirmed `create_and_fund` produces `AVAILABLE`; the database
+representation of a malformed funded bounty remains Session 15's under D77. Voucher issuance:
+the eligibility service reads the chain and refuses on mismatch. Attestation: the attester
+refuses per D77. The first two occur before a Scout does any work, which is why
+`reward_amount` is registered: otherwise a Scout is shown the policy's amount while the chain
+holds another. The program stores `eligibility_profile_hash` as `[u8; 32]` from
+`create_and_fund` and cannot validate its content.
+
+Policy V1 gains `eligibility_profile_id`. The canonical policy carries the id only, never the
+hash: the hash is always derivable from the id, and D60 forbids derivable fields inside a
+hash. D69's "identifier with its hash" is satisfied by one normative derivation rule, not by a
+second field. The program stores the derived 32-byte value because D70 reconstruction needs
+fixed bytes and the program never derives it.
+
+Profile id format, frozen: ASCII only, matching the pattern of one uppercase letter followed
+by zero to 63 characters each an uppercase letter, a digit or an underscore, so 1 to 64 bytes.
+Lowercase, spaces, hyphens, any non-ASCII character and any other character are rejected,
+never normalised. Every allowed character is written literally in canonical JSON, so the id's
+bytes inside the policy and its bytes in the derivation are identical and no escaping rule is
+involved. An id must also be present in the profile registry; format validity alone admits
+nothing.
+
+Derivation, frozen: `eligibility_profile_hash` is SHA-256 over the 32 ASCII bytes of the
+domain separator `BOUNTYCAM_ELIGIBILITY_PROFILE_V1` immediately followed by the id's ASCII
+bytes. No length prefix, delimiter, terminator, JSON or hex encoding. The separator is
+fixed-length and the id is the only variable part, so the concatenation is unambiguous. This
+is a byte rule rather than canonical JSON so the independent verifier and any Rust consumer
+reproduce it without a canonical-JSON implementation (D70, D78). The hash is an identifier
+commitment, not blinding: the registry is small and public, so the hash is trivially
+invertible, and nothing relies on it being otherwise. The rule set's meaning is fixed by the
+id because profile definitions are immutable once any bounty uses them (D69); a new route is a
+new id.
+
+Placement: the format and derivation are specified once in `packages/shared/SPEC.md`,
+implemented once in `packages/shared`, and covered by generated vectors in
+`packages/shared/vectors`, because the API, the eligibility service, the attester and the
+independent verifier all consume them (D80's placement rule). POLICY.md holds the registry and
+references the rule.
+
+V1 supersession. Removing `attester_pubkey` (D82) and adding `eligibility_profile_id` change
+the canonical object, every policy hash, and worked vectors V1 and V2 in POLICY.md section 13;
+V3 is unaffected. The domain tag stays `BOUNTYCAM_POLICY_V1` under D69, which permits a V1
+field change while no lasting bounty exists. The previous development V1 and V2 vectors are
+superseded as an intentional pre-freeze schema correction before V1 becomes externally stable,
+not a silent rewrite of an established vector (D78). The replacements are generated by script.
+Existing development rows keep verifying against their stored `canonical_json` and are never
+treated as lasting.
+
+Freeze point. The revised `BOUNTYCAM_POLICY_V1` becomes frozen at the first Git commit in
+which the production `packages/shared` implementation and the API reproduce every regenerated
+V1 and V2 policy vector and every profile-hash vector, with the expected test count shown
+(D36). The specification and vectors are committed before that implementation, as always, but
+remain correctable until it lands, so an error found by running the code is fixed in V1 rather
+than forcing V2. A commit cannot contain its own hash, so its full SHA is recorded immediately
+after it lands, in a new append-only DECISIONS.md entry; no held entry is edited to insert it.
+The same SHA is then cited in POLICY.md. An annotated tag `policy-v1-freeze` may point at it,
+but a tag can be moved or deleted, so the full commit SHA is the reference. After that commit,
+any change affecting canonical policy bytes, field semantics, the profile-hash derivation, or
+any existing V1 vector requires a new policy version and domain tag.
+
+Open, blocking the POLICY.md edit but not this entry: D69 names only `A4_SEEKER_V1`, so
+profile ids for `required_assurance` 0 to 3, and the compatibility rule between an assurance
+level and a profile, are undecided (OPEN-1 below).
+
+Tests, at minimum: for each registered binding, a direct-funded bounty mismatching that one
+field is never projected to `AVAILABLE`, is refused a voucher, and is refused an attestation;
+derivation vectors for `A4_SEEKER_V1`, a 1-byte id and a 64-byte id; format rejection vectors
+for a 65-byte id, an empty id, a leading digit, a lowercase letter, a hyphen and a non-ASCII
+character; a policy without `eligibility_profile_id` is rejected; a well-formed id absent from
+the registry is rejected; an incompatible level-and-profile pair is rejected once OPEN-1 is
+ruled.
+
+**D85 — `submit_attestation` needs no Scout signature; insufficient assurance is rejected
+without a state change.**
+Any fee payer may submit a valid attestation; normally the relayer does (D2). The authority is
+the attester's signature, verified per D71 against the configured attester (D82, D83). The
+Scout is not a transaction signer. The stored Scout remains in the reconstructed message, so a
+valid attestation cannot move between Scouts or between assignments, and later settlement can
+target only the Scout stored by `accept` (SECURITY.md section 8). This fits SECURITY.md
+section 15, where attestation runs after upload and the Scout may be offline.
+
+`achieved_assurance` is compared with `required_assurance` only after the message verifies, so
+the failure reports a genuinely attested shortfall rather than an unauthenticated input. If
+achieved is lower than required, the instruction fails with its own error code: no state
+change, no stored field written, no event. Whether an attested shortfall later produces an
+explicit failure or dispute state is Session 9's decision.
+
+`MESSAGES.md` section 7 counted two signatures; with one, its published total is an upper
+bound and is not re-derived.
+
+Tests, at minimum: a valid attestation submitted by an arbitrary fee payer succeeds with no
+Scout signature; an attestation naming a different Scout is rejected; achieved lower than
+required is rejected and the bounty account is byte-identical afterwards; achieved equal to
+required succeeds; achieved higher than required succeeds.
+
+**D86 — Voucher replay across cancellation and re-creation is a stated MVP limit.**
+`cancel` closes the bounty account (D76), so the same requester can re-create a bounty at the
+same address. An unexpired `BOUNTYCAM_ELIGIBILITY_V1` voucher issued for the closed bounty
+then verifies for the new one when all of these match: `bounty_id`, requester and therefore
+address, `policy_hash`, `eligibility_profile_hash`, `required_assurance`, Scout, deployment
+and program. Acceptance then proceeds without a new database reservation.
+
+Accepted for the MVP. Only the requester can re-create; the terms must be identical; vouchers
+are short-lived; the normal API never reuses a `bounty_id`, so this is principally a
+direct-caller, self-created edge case; and the voucher still attests only that this Scout
+satisfies these exact committed terms. Attestation replay by the same path depends on which
+Session 9 paths close accounts, and is assessed there. No incarnation or non-reuse subsystem
+is built.
+
+Revisit triggers: any supported client path makes bounty ids reusable; voucher validity
+becomes long-lived; or a Session 9 path closes an account that can hold a valid attestation.
+Any of them requires a program-bound bounty incarnation identifier, never reliance on API
+uniqueness.
+
+Tests, at minimum: an unexpired voucher replayed after cancel and identical re-creation
+succeeds, documenting the limit; the same replay with any one bound field changed fails, one
+case per field; the replay after voucher expiry fails.
