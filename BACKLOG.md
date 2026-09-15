@@ -1,6 +1,6 @@
 # BountyCam — Backlog
 
-**As at:** 12 September 2026 · 26 days to deadline
+**As at:** 16 September 2026 · 22 days to deadline
 
 ---
 
@@ -17,7 +17,7 @@ requester side.
 
 ## Open findings from completed sessions
 
-**D13's A4 names a device.** "A3 + Verified Seeker + wallet signature"
+~~**D13's A4 names a device.** "A3 + Verified Seeker + wallet signature"
 (DECISIONS.md:96) makes the top assurance rung unreachable without a Seeker.
 It is carried into policy v1 as `required_assurance` bounded 0 to 4
 (POLICY.md:92, 112, 189), into the escrow as a `u8`, and gated on-chain per
@@ -27,22 +27,31 @@ no hash changing. Contradicts PRD section 8 (Seeker is the initial
 distribution layer, not the boundary) and section 52. Options: leave it;
 redefine as a minimum trust level with SGT as one qualifying route; or version
 the ladder so A4's meaning is pinned per policy version. Owed before Session
-14 grades against the ladder. Found Session 8 part 1.
+14 grades against the ladder. Found Session 8 part 1.~~
+Decided 14 September (D69): the qualifying rule set is a committed eligibility
+profile. Profile-id format and hash derivation fixed 16 September (D84);
+profiles below A4 are OPEN-1 in the spec session step 3 section below.
 
-**`Cancelled` enum variant is unreachable.** `cancel` closes the account rather
+~~**`Cancelled` enum variant is unreachable.** `cancel` closes the account rather
 than setting state, so the variant can never be observed. Either drop it, or
 set state before closing so an indexer can see the terminal state.
 Recommendation: drop. Dead state variants in an escrow mislead whoever adds
-`dispute` later.
+`dispute` later.~~ Decided 14 September (D76): the variant is removed;
+cancellation is an event plus a database record. Code change owed by the escrow
+implementation.
 
-**`UnauthorizedRequester` is overloaded.** It fires both for "you are not the
+~~**`UnauthorizedRequester` is overloaded.** It fires both for "you are not the
 requester" and for "this token account is not yours". A client cannot
 distinguish them. Add a distinct error for token-account ownership — error
-codes are the API surface the mobile app reads.
+codes are the API surface the mobile app reads.~~ Decided 14 September (D75):
+`TokenAccountOwnerMismatch` is appended; error variants are append-only. Code
+change owed by the escrow implementation.
 
 **`SPEC.md` for the escrow was written after implementation.** It documents
 what was built rather than constraining it, and recorded the invented fee
 constant as though intended. Reconcile against the original Session 4 prompt.
+Ruled 14 September (D80): replaced wholesale, not reconciled. Replacement in
+progress as spec session step 3; this item closes when it lands.
 
 **`anchor deploy` is deprecated** in favour of `anchor program deploy`. Switch
 before it is removed.
@@ -97,6 +106,10 @@ with a config object that cannot satisfy its own declared type — the suite
 would keep passing if `loadConfig` returned something the routes could not
 use. Session 8's attester work reads `attesterPubkeys` for real; the gap
 stops being theoretical there.
+Subject changed 16 September (D82): `ATTESTER_PUBKEYS` and the policy's
+`attester_pubkey` are removed, and the attester is read from the on-chain
+configuration account. This instance becomes moot when that removal lands; the
+class of error — untyped test config — is unchanged.
 
 Second known instance (Session 7b, commit 4c): `auth.test.ts` builds
 `AppDeps` by hand and omits the now-required `randomness` field. At runtime
@@ -164,6 +177,53 @@ find the parent; decide whether it matters (Session 7).
 - **Provisional product bounds.** Windows, requirement count and prompt length,
   capture radius, title and category lengths, query radius and pagination.
   Amendable without touching any hash; review by Session 20's two-device runs.
+
+---
+
+## Open items from spec session step 3 (16 September)
+
+- **OPEN-1 — eligibility profiles below A4.** D69 defines only `A4_SEEKER_V1`,
+  and every bounty must name a profile (D84), so levels 0 to 3 need ids and the
+  API needs a rule rejecting an incompatible level-and-profile pair. Proposal:
+  `BASE_V1` for levels 0 to 3, `A4_SEEKER_V1` for level 4 only. Owed by the
+  session that edits POLICY.md for D82 and D84, which reads the Session 8
+  memo's m5 ruling first. Blocks that POLICY.md edit only.
+- **POLICY.md amendments owed (D79, D82, D84).** Sections 2.1 and 2.4: remove
+  `attester_pubkey`, add `eligibility_profile_id`. New sections: the binding
+  register, and the profile registry referencing the shared derivation rule.
+  Section 7.1: the `attester_pubkey` read-model column, with its migration.
+  Section 7.2: projection to `AVAILABLE` requires every binding to agree.
+  Sections 8.1, 8.3 and 8.8: `ATTESTER_PUBKEYS`, the request field and
+  `ATTESTER_NOT_ALLOWED`. Section 12: tests 24, 25 and 71 rewritten,
+  binding-register tests added. Section 13: vectors V1 and V2 regenerated by
+  script, with the supersession statement. `packages/shared/SPEC.md` gains the
+  profile-id format and hash derivation, with generated vectors.
+- **V1 freeze SHA owed (D84).** Record the full SHA of the first commit in
+  which `packages/shared` and the API reproduce every regenerated vector, in a
+  new DECISIONS.md entry, then cite it in POLICY.md.
+- **D86 revisit triggers.** Voucher replay across cancel and re-creation is a
+  stated limit until any of: a supported client path reuses bounty ids;
+  voucher validity becomes long-lived; a Session 9 path closes an account that
+  can hold a valid attestation. Any one requires a program-bound bounty
+  incarnation identifier.
+- **Eligibility and arbiter development keys (D83).** Neither exists in
+  `~/bountycam-keys/`. Generate both before `initialize`, and rehearse
+  `initialize` on localnet with the exact devnet public keys first: the
+  configuration is immutable, so a mistake costs an upgrade with a migration.
+- **Escrow test dev-dependencies are caret ranges.** `litesvm`,
+  `solana-message`, `solana-transaction`, `solana-signer` and `solana-keypair`
+  in `programs/escrow/programs/escrow/Cargo.toml` violate SECURITY.md section
+  10's exact pins. Confirm locked versions with `cargo tree`, then pin. D83's
+  harness note relies on litesvm 0.10.0's `add_program` behaviour.
+- **Devnet bounty accounts do not survive the layout change.** D74 and D81 to
+  D84 change the bounty account, so accounts created under the Session 4
+  program become unreadable after the redeploy. List program-owned accounts on
+  devnet before redeploying and cancel any holding test USDC while the old
+  program can still read them.
+- **SECURITY.md section 7's attester leak line overstates.** It says a colluding
+  Scout is paid without real work; D12's review window still lets the requester
+  dispute before release. Tighten when Session 9 fixes the release and dispute
+  rules.
 
 ---
 
