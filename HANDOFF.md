@@ -1,9 +1,9 @@
 # BountyCam — Handoff
 
-**Date:** 14 September 2026
+**Date:** 16 September 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b (complete)
 **Next session:** 8 — Escrow: `accept`, `submit_attestation`, challenge nonce issuance (BACKLOG)
-**Deadline:** 8 October 2026 (24 days remaining)
+**Deadline:** 8 October 2026 (22 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
 
@@ -480,6 +480,100 @@ Also recorded, because it cost three refusals: the edit approval prompt renders
 a replacement as the deleted lines stacked above their replacement, with no
 marker between them. That reads as a duplicate insertion. It is not. Verify
 with `grep -n` against the file before refusing an edit on that basis.
+
+---
+
+## Spec session — steps 1 to 3 (15 and 16 September)
+
+What the spec session inherited is listed above under Session 8. Steps 1 and 2
+are done; step 3 is done except for its main deliverable, the replacement
+`programs/escrow/SPEC.md`.
+
+**Step 1** (e98976b, 603f168): POLICY.md amended for D79 discoverability and
+the D72 naming note; the two `assignments` schema findings recorded above.
+
+**Step 2** (2ccc405): `packages/shared/MESSAGES.md` specifies both binary
+signed messages, with 35 generated vectors. Attestations carry no expiry; the
+transaction budget is 881 of 1232 bytes with a ceiling of roughly eighteen
+accounts.
+
+**Step 3, done.** Six rulings and four amendments, each applied by a script
+that replaces text matching exactly once, with a dry run, and the result hash
+checked on both machines before a single-file commit:
+
+- eaeb8a3 — DECISIONS.md, D81 to D86 (result sha 46ca2ac6).
+- 34820e1 — SECURITY.md sections 1, 2, 6, 7 and 8 (bb9fcc09).
+- 5bb67f9 — MESSAGES.md wording only; no table row or vector changed
+  (6dcde549).
+- 5bcd219 — BACKLOG.md: D69, D75 and D76 items closed; a new step 3 section
+  holds OPEN-1 and every other owed item (2f32a667).
+
+What D81 to D86 change for the escrow, for anyone reading them cold:
+
+- D81 — `create_and_fund` takes three durations, each with a compiled ceiling;
+  the program computes the acceptance cutoff at funding and `deadline` at
+  `accept`.
+- D82 — one configured attester; `attester_pubkey` leaves the policy; no
+  attestation expiry; the key id is the ed25519 instruction's public key.
+- D83 — one immutable configuration account (deployment id, USDC mint,
+  eligibility, attester and arbiter keys), written once by the upgrade
+  authority as read from ProgramData; the three keys must differ.
+- D84 — the policy-to-chain binding register, checked at funding projection,
+  voucher issuance and attestation; `eligibility_profile_id` joins policy V1
+  with a frozen byte-level hash rule; V1 freezes at the first implementation
+  commit that reproduces the regenerated vectors.
+- D85 — `submit_attestation` needs no Scout signature; an attested shortfall
+  is rejected with no state change.
+- D86 — voucher replay across cancel and re-creation is a stated limit, with
+  revisit triggers in BACKLOG.
+
+Deferred on purpose: the POLICY.md amendments for D82 and D84, blocked by
+OPEN-1 (profiles below A4), which needs the Session 8 memo's m5 ruling. The
+full list is in BACKLOG.
+
+**Step 3, remaining: the SPEC.md replacement.** Recommended in a fresh chat,
+because this one grew long enough for compaction to threaten spec detail. It
+must cover, per D80: a supersession header and authority order; the
+configuration account and `initialize` (D83); the bounty account field by
+field (D67, D74, D81, D82, D84); the state enum without `Cancelled` (D76),
+with `Funded` as the state a bounty is accepted or cancelled from and Session
+9's exits named but not specified; `create_and_fund`, `cancel`, `accept` and
+`submit_attestation`; the error table, append-only, with code 6006
+`AmountOverflow` reserved (D67, D75); invariants mapped to the SECURITY.md
+section 8 and SECURITY-PRODUCTION.md section 8 tests; the `accept` and
+`submit_attestation` account lists counted by script against the ceiling; the
+implementation-task list; and D80's reconciliation checklist.
+
+Upload to that chat, copied by a hash-checking script as in step 3:
+DECISIONS.md, SECURITY.md, SECURITY-PRODUCTION.md, BACKLOG.md, this file,
+`apps/api/POLICY.md`, `packages/shared/MESSAGES.md`, the old
+`programs/escrow/SPEC.md`, both escrow `Cargo.toml` files, `Anchor.toml`, all
+seven `.rs` files under the crate's `src/`, and `tests/test_escrow.rs`.
+
+Facts read from source this session and recorded nowhere else:
+
+- `create_and_fund` accepts any mint account the caller supplies; there is no
+  address constraint. D83 closes it; the code change is owed.
+- `cancel` emits no event, although D76 requires `BountyCancelled`.
+- `cancel_when_accepted_fails` fakes the `Accepted` state by rewriting the
+  account; it must use a real `accept` once one exists.
+- `overflow-checks = true` sits under `[profile.release]` in the workspace
+  `Cargo.toml`, as SECURITY.md section 8 requires.
+- litesvm 0.10.0's `add_program` loads under the upgradeable loader with the
+  upgrade authority recorded as none (its `src/lib.rs`, lines 857 and 931), so
+  a positive `initialize` test must overwrite ProgramData first.
+
+Working practice settled this session:
+
+- Downloads always land in `~/Downloads`. Clear our files there before
+  downloading, and select files by hash: a browser renames a repeat download.
+- A file card opens a preview; its download button saves the file.
+- In zsh, a bare wildcard that matches nothing aborts the whole command.
+  Checks use `find` or quoted names instead.
+- Claude makes technical calls — placement, formats, check order, test design
+  — with a one-line reason. Umair decides what changes the user experience,
+  when money moves, scope, and deadline trade-offs. Per-edit approval and
+  running every command stay unchanged.
 
 ---
 
