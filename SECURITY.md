@@ -52,8 +52,10 @@ Scout mid-mission.
 
 Resolved by D49, which supersedes the second half of D1: acceptance moves on-chain.
 Session 8 adds an `accept` instruction that moves zero USDC and records the Scout;
-`cancel` is rejected from ACCEPTED onward. The database row lock remains the race
-arbiter for who gets to accept first; the chain records the outcome.
+`cancel` is rejected from ACCEPTED onward. D68 and D79 supersede the race rule: a
+database reservation decides which Scout is issued an eligibility voucher, but the chain
+is final — only the first confirmed on-chain `accept` succeeds, and a database winner
+never overrides a different on-chain winner.
 
 ---
 
@@ -70,7 +72,9 @@ May: accept per the assignment rules; submit evidence; sign the evidence commitm
 May not: change the requester; substitute a payout wallet after assignment; claim funds
 because the database says the task is done or because an attestation exists.
 
-**Attester** — key named in the policy at creation (D11).
+**Attester** — dedicated key held in the program configuration account, never named in
+the policy, never per-bounty and never caller-supplied (D82, D83, amending D11). Bounties
+do not snapshot it; the currently configured key governs at submission.
 May: attest that a specific policy was met at a specific level for a specific bounty.
 May not: choose the recipient; change the reward or the bounty; refund; release escrow.
 An attestation is evidence for a payout decision, not authority to move funds.
@@ -104,8 +108,8 @@ the eligibility service and separately keyed for that reason: eligibility author
 who may accept work, the arbiter releases locked funds to one side of a dispute.
 
 **API server** — server secret.
-May: issue sessions after wallet authentication; store challenges; gate evidence access;
-hold workflow metadata.
+May: issue sessions after wallet authentication; store SIWS challenges (D72); gate
+evidence access; hold workflow metadata.
 May not: hold user keys; sign requester or Scout transactions; hold token spending
 authority; manufacture an attestation; determine an on-chain payout destination.
 
@@ -202,9 +206,15 @@ rule, add a vector, update whichever implementations fail it.
 ## 6. Attestation binds everything that matters
 
 An attestation must not merely say "policy X passed at level N". It commits to:
-domain and version; cluster; program ID; bounty id or PDA; requester wallet; assigned
-Scout wallet; evidence bundle commitment; policy hash and version; achieved assurance
-level; attester key id; issuance time; expiry where used.
+domain and version; deployment identifier, in place of a cluster string (D70); program
+ID; bounty id; requester wallet; assigned Scout wallet; evidence bundle commitment;
+policy hash, whose preimage carries the policy version; eligibility profile hash;
+required assurance level; submission deadline; review window; achieved assurance level;
+issuance time (D77, D81). The exact layout is `packages/shared/MESSAGES.md`.
+There is no expiry field: validity is bounded by bounty state, the deadline and the
+currently configured attester (D82). The attester key id is the verifying public key in
+the ed25519 instruction, recorded permanently with the transaction; the signed bytes do
+not repeat it because settlement verifies only against the configured key (D82).
 
 The program never accepts `attestation_valid = true` from the API. If an attestation
 affects an on-chain decision, its verification is enforced on-chain. The program
@@ -219,7 +229,17 @@ All under `~/bountycam-keys/`, mode 600, outside the repo. Production custody ru
 are in `SECURITY-PRODUCTION.md` section 1.
 
 - **upgrade-authority** — deploy and upgrade. Leak: attacker replaces the program.
-- **attester** — sign attestations. Leak: any evidence passes; every bounty drainable.
+- **attester** — sign attestations. Leak: any evidence passes; any bounty pays its
+  assigned Scout, so a Scout colluding with the key holder is paid without real work
+  (D85).
+- **eligibility** — sign acceptance vouchers (D68); not yet generated, owed before
+  `initialize` (D83). Leak: any wallet can be authorised to accept, re-opening the
+  claim griefing D68 closed and bypassing eligibility profiles; USDC cannot move.
+- **arbiter** — resolve disputes (D74); not yet generated, owed before `initialize`
+  (D83). Leak: any open dispute can be resolved to either side within the outcomes
+  `resolve` permits.
+- Configuration is immutable (D83): replacing a leaked attester, eligibility or arbiter
+  key requires a program upgrade carrying a configuration migration.
 - **relayer** — pay gas. Leak: SOL burned; USDC cannot move.
 - **escrow-keypair** — program identity. Needed for redeploy only.
 - **JWT secret** — sessions. Leak: anyone is anyone for up to 7 days (D46).
@@ -245,16 +265,26 @@ test, and a specific error code. Reference `coral-xyz/sealevel-attacks` on GitHu
 current Anchor documentation; fetch them, do not recall them. `sealevel-attacks` is
 teaching material, not a complete audit checklist.
 
-- **Signer validation.** Every authority is a `Signer`, bound by `has_one` to the key
-  in state. Tests: wrong requester, wrong Scout, wrong arbiter, non-signer substituted.
+- **Authority validation.** The requester is a `Signer` bound by `has_one` to the key
+  in the bounty account. At `accept` the Scout is a `Signer` bound to the Scout wallet
+  in the verified voucher (D68) and is then stored; any later Scout-signed action is
+  bound by `has_one` to that stored key. `submit_attestation` takes no Scout signature
+  (D85). The arbiter is a `Signer` bound to the key in the configuration account (D74,
+  D83). The eligibility and attester authorities are never transaction signers: each is
+  established by the designated ed25519 verification, checked per D71 against the key
+  in the configuration account. `initialize` binds its signer to the upgrade authority
+  recorded in ProgramData (D83). Tests: wrong requester, wrong Scout, wrong arbiter,
+  non-signer substituted, `accept` signed by a wallet other than the voucher's Scout,
+  voucher or attestation signed by a non-configured key, `initialize` by a signer other
+  than the upgrade authority.
 - **Account ownership and type.** Typed Anchor accounts; validate owner, discriminator,
   relationship to the bounty, seeds. Test: same-layout account owned by another program.
 - **PDA validation.** Re-derive from seeds and program ID with the canonical bump. An
   attacker-supplied bump never selects the trusted PDA. Tests: wrong bounty seed, wrong
   requester seed, wrong program ID, non-canonical derivation.
-- **Exact USDC mint.** One configured mint per cluster, checked by address, plus the
-  exact token program. Never identify by symbol, name, decimals or metadata. Token-2022
-  is unsupported until a reviewed design needs it.
+- **Exact USDC mint.** One mint per deployment, held in the configuration account (D83),
+  checked by address, plus the exact token program. Never identify by symbol, name,
+  decimals or metadata. Token-2022 is unsupported until a reviewed design needs it.
 - **Escrow token account.** Deterministically derived from the bounty PDA authority;
   validate mint, authority, token program, derivation. Never caller-supplied.
 - **Scout payout account.** Derived from the cryptographically bound Scout wallet;
