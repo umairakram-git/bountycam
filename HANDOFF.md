@@ -2,7 +2,7 @@
 
 **Date:** 16 September 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b (complete)
-**Next session:** 8 — Escrow: `accept`, `submit_attestation`, challenge nonce issuance (BACKLOG)
+**Next session:** 8 — Escrow: `accept`, `submit_attestation`, capture nonce issuance (BACKLOG)
 **Deadline:** 8 October 2026 (22 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
