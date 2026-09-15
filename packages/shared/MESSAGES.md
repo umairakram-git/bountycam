@@ -69,6 +69,13 @@ Total length **261 bytes**.
 | 252 | 1 | `achieved_assurance` | u8 | caller |
 | 253 | 8 | `issued_at` | i64 | caller |
 
+`deadline` is the submission deadline the program computes and stores at `accept`
+as the Clock time plus `completion_window_secs` (D81). It has no meaningful value
+before acceptance and is read only from `Accepted` onward. The acceptance and
+completion windows are stored on-chain but are deliberately not in this layout:
+the attester verifies both against the policy (D84), and `deadline` is the signed
+consequence of the completion window.
+
 Domain tag value: the ASCII text `BOUNTYCAM_ATTESTATION_V1`, which is exactly 24
 bytes.
 
@@ -113,7 +120,7 @@ Four sources, and the distinction is load-bearing for D71's
 reconstruct-then-compare.
 
 - **const** — compiled into the program.
-- **config** — program or configuration state.
+- **config** — the immutable configuration account (D83).
 - **state** — read from the bounty account.
 - **caller** — supplied as an instruction argument and spliced in.
 
@@ -132,13 +139,14 @@ supplied suffix.
 
 ## 6. Validity model
 
-There is no attestation expiry field in V1. The signed bytes carry `issued_at`,
+There is no attestation expiry field in V1 (D82). The signed bytes carry `issued_at`,
 which the program does not compare against the Clock.
 
 An attestation is valid while all of the following hold:
 
 1. The bounty is in a state that permits attestation submission.
-2. The current on-chain time is not later than the bounty's committed `deadline`.
+2. The current on-chain time is not later than the bounty's `deadline`, the
+   submission deadline set at `accept` (D81).
 3. The signature verifies under the **currently configured** attester authority.
 4. Every state-derived field still matches the bounty account (D77).
 
@@ -157,11 +165,13 @@ nonce and the evidence policy (D72, D73), not by how recently the attester signe
 its conclusion.
 
 **Rotation is semantics, not a button.** Bounties do not snapshot the attester
-authority; the currently configured authority governs at submission time, so
-rotation reaches outstanding attestations. But following D74, no broadly callable
-rotation instruction exists. Revoking a compromised attester key in the MVP
-requires the authorised configuration mechanism or a program upgrade, not a
-runtime call. Any future rotation instruction needs its own decision covering who
+authority (D82); the currently configured authority governs at submission time,
+so rotation reaches outstanding attestations. But following D74, no broadly
+callable rotation instruction exists. The configuration account is immutable
+after initialisation (D83), and upgrading program code does not change an
+existing account's data, so revoking a compromised attester key in the MVP
+requires a program upgrade that itself introduces a configuration migration, not
+a runtime call. Any future rotation mechanism needs its own decision covering who
 may rotate, recovery, tests and auditability.
 
 ---
@@ -199,6 +209,11 @@ every offset and invalidates every vector, so it is a last resort.
 `submit_attestation` does not yet exist, so the eight-account figure is an
 estimate. Step 3 must check its real account list against the eighteen-account
 ceiling rather than re-deriving the budget.
+
+After D85, `submit_attestation` requires only the fee payer's signature, so the
+two-signature row makes 881 an upper bound; the budget is not re-derived. D83
+adds the configuration account to the account list, which the escrow
+specification counts against the ceiling.
 
 ---
 
@@ -246,7 +261,9 @@ Cross-type and authority:
 - An eligibility message presented to the attestation path is rejected.
 - An attestation message presented to the eligibility path is rejected.
 - An attestation signed by the eligibility authority is rejected.
-- An attestation signed by a former, non-current authority is rejected.
+- An attestation signed by a former, non-current authority is rejected. With the
+  configuration immutable (D83), this is exercised as a key other than the one
+  configured.
 
 Temporal:
 
@@ -264,6 +281,10 @@ rather than duplicated here. Appending or truncating bytes fails the length chec
 This layout cannot be implemented until step 3 resolves the following. Each is an
 implementation discrepancy under D80, to be fixed rather than specified around.
 
+Status after step 3: item 1 is ruled by D84, item 2 by D82 and D83, item 3 by D74
+and D83, items 4 and 5 by D81, item 6 by D67, item 7 by D76. Each remains an
+implementation task in `programs/escrow/SPEC.md`.
+
 1. **`eligibility_profile_hash` is not stored on-chain.** The bounty account must
    carry it as `[u8; 32]`, and `create_and_fund` must receive and store it.
    Without it the attestation cannot be reconstructed.
@@ -280,8 +301,10 @@ implementation discrepancy under D80, to be fixed rather than specified around.
 6. **D67 has not landed.** `PLATFORM_FEE_BPS` still exists, the fee arithmetic
    still runs, and funding still transfers reward plus fee. It is harmless only
    because the constant is zero.
-7. **The `Cancelled` enum variant is still present** and there is no `Available`
-   variant.
+7. **The `Cancelled` enum variant is still present** (D76). An earlier version of
+   this item also listed a missing `Available` variant. That was unsupported: D68
+   and D76 name on-chain `Funded` as the state a bounty is accepted or cancelled
+   from, and `AVAILABLE` is the database projection (D79).
 
 Also open, and not this document's to settle: `CAPTURE_START_DEADLINE_BUFFER_SECS`,
 the nonce-service rule that stops a Scout beginning work too close to the deadline
