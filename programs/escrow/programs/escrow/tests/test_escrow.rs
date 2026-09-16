@@ -52,9 +52,12 @@ struct Setup {
     usdc_mint: Pubkey,
     requester_ata: Pubkey,
     config: Pubkey,
-    eligibility: Pubkey,
-    attester: Pubkey,
-    arbiter: Pubkey,
+    /// The three configured authorities, generated per run (SECURITY.md
+    /// section 7). Only their public keys reach `initialize`; the secret
+    /// halves sign vouchers and attestations from the `accept` tests onward.
+    eligibility: Keypair,
+    attester: Keypair,
+    arbiter: Keypair,
 }
 
 fn program_data_address(program_id: &Pubkey) -> Pubkey {
@@ -178,9 +181,9 @@ fn setup_bare() -> Setup {
         usdc_mint,
         requester_ata,
         config: config_pda(),
-        eligibility: Pubkey::new_unique(),
-        attester: Pubkey::new_unique(),
-        arbiter: Pubkey::new_unique(),
+        eligibility: Keypair::new(),
+        attester: Keypair::new(),
+        arbiter: Keypair::new(),
     }
 }
 
@@ -207,7 +210,7 @@ fn initialize_ix(s: &Setup, authority: Pubkey, usdc_mint: Pubkey) -> Instruction
         authority,
         usdc_mint,
         program_data_address(&escrow::id()),
-        [s.eligibility, s.attester, s.arbiter],
+        [s.eligibility.pubkey(), s.attester.pubkey(), s.arbiter.pubkey()],
     )
 }
 
@@ -1096,9 +1099,9 @@ fn t01_initialize_stores_supplied_values() {
     let config = read_config(&s.svm, &s.config);
     assert_eq!(config.deployment_id, DEPLOYMENT_ID);
     assert_eq!(config.usdc_mint, s.usdc_mint);
-    assert_eq!(config.eligibility_authority, s.eligibility);
-    assert_eq!(config.attester_authority, s.attester);
-    assert_eq!(config.arbiter_authority, s.arbiter);
+    assert_eq!(config.eligibility_authority, s.eligibility.pubkey());
+    assert_eq!(config.attester_authority, s.attester.pubkey());
+    assert_eq!(config.arbiter_authority, s.arbiter.pubkey());
     assert_eq!(config.bump, expected_bump);
 }
 
@@ -1129,7 +1132,7 @@ fn t03_initialize_with_other_programs_program_data_fails() {
         authority,
         s.usdc_mint,
         program_data_address(&other_program),
-        [s.eligibility, s.attester, s.arbiter],
+        [s.eligibility.pubkey(), s.attester.pubkey(), s.arbiter.pubkey()],
     );
     let res = send(&mut s.svm, &s.upgrade_authority, &[ix], &[&s.upgrade_authority]);
     assert_named_error(res, "InvalidProgramData");
