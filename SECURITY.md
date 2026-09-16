@@ -306,8 +306,11 @@ teaching material, not a complete audit checklist.
 - **Fee.** Exactly 0 (D24). A non-zero fee needs a spec, a D-entry, a destination, an
   authorisation model, arithmetic and overflow tests, and UI disclosure. No dormant
   "future fee wallet" authority in the program.
-- **Account closure.** Explicit state and recipient rules; no reinitialisation into a
-  financially meaningful state in the same transaction. Test close-then-reinit.
+- **Account closure.** Explicit state and recipient rules. No revival: a closed account is
+  never used again with its prior data, lamports or tokens, and nothing keeps it funded after
+  closure. Re-creation at the same address, including in the same transaction, happens only
+  through `init` and must be indistinguishable from a first creation (D88). Test
+  close-then-reinit.
 - **Duplicate accounts.** Reject aliasing where two roles must be distinct accounts.
 - **Remaining accounts.** Never consumed for financial logic. If introduced, every
   account has documented type, owner and relationship validation.
