@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, CloseAccount, Mint, Token, TokenAccount, TransferChecked};
 
-use crate::{constants::*, error::EscrowError, state::*};
+use crate::{constants::*, error::EscrowError, events::BountyCancelled, state::*};
 
 #[derive(Accounts)]
 pub struct Cancel<'info> {
@@ -36,10 +36,24 @@ pub struct Cancel<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+/// SPEC 7.3. One handler check, then D76's effect order: refund the entire
+/// vault balance, emit, close the vault, close the bounty.
 pub fn handle_cancel(ctx: Context<Cancel>) -> Result<()> {
-    let requester_key = ctx.accounts.bounty.requester;
-    let bounty_id = ctx.accounts.bounty.bounty_id;
-    let bump = ctx.accounts.bounty.bump;
+    let now = Clock::get()?.unix_timestamp;
+    let bounty = &ctx.accounts.bounty;
+    let refunded_amount = ctx.accounts.bounty_vault.amount;
+
+    // Check 1: the vault holds at least reward_amount. Unreachable by
+    // construction, since only the bounty PDA can move vault tokens; checked
+    // to fail closed (SPEC 7.3).
+    require!(
+        refunded_amount >= bounty.reward_amount,
+        EscrowError::VaultBalanceBelowReward
+    );
+
+    let requester_key = bounty.requester;
+    let bounty_id = bounty.bounty_id;
+    let bump = bounty.bump;
     let seeds: &[&[u8]] = &[
         BOUNTY_SEED,
         requester_key.as_ref(),
@@ -48,6 +62,8 @@ pub fn handle_cancel(ctx: Context<Cancel>) -> Result<()> {
     ];
     let signer_seeds = &[seeds];
 
+    // Effect 1: the vault's entire balance to requester_ata, signed by the
+    // bounty PDA. Donated tokens return with the reward (SPEC 7.3).
     token::transfer_checked(
         CpiContext::new_with_signer(
             ctx.accounts.token_program.key(),
@@ -59,10 +75,22 @@ pub fn handle_cancel(ctx: Context<Cancel>) -> Result<()> {
             },
             signer_seeds,
         ),
-        ctx.accounts.bounty_vault.amount,
+        refunded_amount,
         ctx.accounts.usdc_mint.decimals,
     )?;
 
+    // Effect 2: emit, before the accounts close (D76).
+    emit!(BountyCancelled {
+        bounty: bounty.key(),
+        bounty_id,
+        requester: requester_key,
+        usdc_mint: ctx.accounts.config.usdc_mint,
+        reward_amount: bounty.reward_amount,
+        refunded_amount,
+        cancelled_at: now,
+    });
+
+    // Effect 3: close the vault, lamports to the requester.
     token::close_account(CpiContext::new_with_signer(
         ctx.accounts.token_program.key(),
         CloseAccount {
@@ -73,7 +101,7 @@ pub fn handle_cancel(ctx: Context<Cancel>) -> Result<()> {
         signer_seeds,
     ))?;
 
-    // The Bounty PDA itself is closed to the requester by the `close`
+    // Effect 4: the bounty is closed to the requester by the `close`
     // constraint after this handler returns.
     Ok(())
 }

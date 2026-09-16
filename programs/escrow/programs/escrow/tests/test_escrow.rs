@@ -1,11 +1,15 @@
 use {
     anchor_lang::{
+        // base64 through anchor-lang's private re-export: acceptable because
+        // anchor-lang is pinned =1.1.2, so the re-export cannot drift.
+        __private::base64::{engine::general_purpose::STANDARD, Engine},
         prelude::{Clock, ProgramData, Pubkey},
         solana_program::{
             bpf_loader_upgradeable, instruction::Instruction, program_pack::Pack,
             system_instruction, system_program,
         },
-        AccountDeserialize, AccountSerialize, InstructionData, Space, ToAccountMetas,
+        AccountDeserialize, AccountSerialize, AnchorDeserialize, Discriminator,
+        InstructionData, Space, ToAccountMetas,
     },
     anchor_spl::{
         associated_token::{self, spl_associated_token_account},
@@ -14,6 +18,7 @@ use {
     },
     escrow::{
         constants::{BOUNTY_SEED, CONFIG_SEED},
+        events::BountyCancelled,
         state::{Bounty, BountyState, Config},
     },
     litesvm::{
@@ -485,30 +490,185 @@ fn t18_create_with_max_reward_succeeds() {
     assert_eq!(token_balance(&s.svm, &s.requester_ata), 0);
 }
 
-#[test]
-fn cancel_succeeds() {
-    let mut s = setup();
-    let bounty_id = [2u8; 16];
-    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, s.requester_ata);
-    send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
-
-    let requester = s.requester.pubkey();
-    let bounty_key = bounty_pda(&requester, &bounty_id);
-    let vault = associated_token::get_associated_token_address(&bounty_key, &s.usdc_mint);
-
-    let ix = cancel_ix(&s, requester, bounty_key, s.requester_ata);
-    send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
-
-    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE);
-    assert!(s.svm.get_account(&vault).is_none_or(|a| a.lamports == 0));
-    assert!(s
-        .svm
-        .get_account(&bounty_key)
-        .is_none_or(|a| a.lamports == 0));
+/// The one `BountyCancelled` in a transaction's logs. Decodes every
+/// `Program data:` line, keeps those whose first eight bytes are Anchor's
+/// discriminator for the event, and requires exactly one.
+fn cancelled_event(meta: &TransactionMetadata) -> BountyCancelled {
+    let events: Vec<BountyCancelled> = meta
+        .logs
+        .iter()
+        .filter_map(|line| line.strip_prefix("Program data: "))
+        .map(|b64| STANDARD.decode(b64).unwrap())
+        .filter(|bytes| bytes.starts_with(BountyCancelled::DISCRIMINATOR))
+        .map(|bytes| BountyCancelled::deserialize(&mut &bytes[8..]).unwrap())
+        .collect();
+    assert_eq!(events.len(), 1, "exactly one BountyCancelled; logs:\n{:#?}", meta.logs);
+    events.into_iter().next().unwrap()
 }
 
+fn is_closed(svm: &LiteSVM, key: &Pubkey) -> bool {
+    svm.get_account(key)
+        .is_none_or(|a| a.lamports == 0 && a.data.is_empty())
+}
+
+// SPEC test 29: balance restored; vault and bounty closed; rent to the
+// requester; BountyCancelled fields exact. A separate fee payer signs as
+// payer so the requester's lamport delta is exactly the two rents.
 #[test]
-fn cancel_by_non_requester_fails() {
+fn t29_cancel_succeeds() {
+    let mut s = setup();
+    let bounty_id = [2u8; 16];
+    let bounty_key = fund_bounty(&mut s, bounty_id);
+    let requester = s.requester.pubkey();
+    let vault = associated_token::get_associated_token_address(&bounty_key, &s.usdc_mint);
+
+    let relayer = Keypair::new();
+    s.svm.airdrop(&relayer.pubkey(), 1_000_000_000).unwrap();
+    let vault_rent = s.svm.get_account(&vault).unwrap().lamports;
+    let bounty_rent = s.svm.get_account(&bounty_key).unwrap().lamports;
+    let requester_before = s.svm.get_balance(&requester).unwrap();
+
+    let ix = cancel_ix(&s, requester, bounty_key, s.requester_ata);
+    let meta = send(&mut s.svm, &relayer, &[ix], &[&relayer, &s.requester]).unwrap();
+
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE);
+    assert!(is_closed(&s.svm, &vault), "vault closed");
+    assert!(is_closed(&s.svm, &bounty_key), "bounty closed");
+    let requester_after = s.svm.get_balance(&requester).unwrap();
+    assert_eq!(requester_after - requester_before, vault_rent + bounty_rent);
+
+    let event = cancelled_event(&meta);
+    assert_eq!(event.bounty, bounty_key);
+    assert_eq!(event.bounty_id, bounty_id);
+    assert_eq!(event.requester, requester);
+    assert_eq!(event.usdc_mint, s.usdc_mint);
+    assert_eq!(event.reward_amount, REWARD);
+    assert_eq!(event.refunded_amount, REWARD);
+    assert_eq!(event.cancelled_at, NOW);
+}
+
+// SPEC test 38: tokens donated to the vault by a third party. Cancel
+// succeeds; the requester receives reward plus donation; the vault closes;
+// refunded_amount equals reward plus donation.
+#[test]
+fn t38_cancel_refunds_donated_tokens() {
+    let mut s = setup();
+    let bounty_key = fund_bounty(&mut s, [38u8; 16]);
+    let vault = associated_token::get_associated_token_address(&bounty_key, &s.usdc_mint);
+
+    const DONATION: u64 = 1_234_567;
+    let donor = Keypair::new();
+    s.svm.airdrop(&donor.pubkey(), 1_000_000_000).unwrap();
+    let donor_ata =
+        create_funded_ata(&mut s.svm, &s.requester, &donor.pubkey(), &s.usdc_mint, DONATION);
+    let donate = spl_token::instruction::transfer_checked(
+        &spl_token::id(),
+        &donor_ata,
+        &s.usdc_mint,
+        &vault,
+        &donor.pubkey(),
+        &[],
+        DONATION,
+        DECIMALS,
+    )
+    .unwrap();
+    send(&mut s.svm, &donor, &[donate], &[&donor]).unwrap();
+    assert_eq!(token_balance(&s.svm, &vault), REWARD + DONATION);
+
+    let ix = cancel_ix(&s, s.requester.pubkey(), bounty_key, s.requester_ata);
+    let meta = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
+
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE + DONATION);
+    assert!(is_closed(&s.svm, &vault), "vault closed");
+    let event = cancelled_event(&meta);
+    assert_eq!(event.reward_amount, REWARD);
+    assert_eq!(event.refunded_amount, REWARD + DONATION);
+}
+
+// SPEC test 41: a same-layout bounty owned by another program, planted
+// (exploit test). One fault: the owner. The account is a byte-identical copy
+// at the canonical address; Anchor's owner check fires in the field phase.
+#[test]
+fn t41_cancel_with_bounty_owned_by_other_program_fails() {
+    let mut s = setup();
+    let bounty_key = fund_bounty(&mut s, [41u8; 16]);
+    let mut planted = s.svm.get_account(&bounty_key).unwrap();
+    planted.owner = spl_token::id();
+    s.svm.set_account(bounty_key, planted).unwrap();
+
+    let ix = cancel_ix(&s, s.requester.pubkey(), bounty_key, s.requester_ata);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error(res, "AccountOwnedByWrongProgram");
+}
+
+/// A valid PDA for the bounty seeds at a bump other than the canonical one.
+fn non_canonical_bounty_pda(requester: &Pubkey, bounty_id: &[u8; 16]) -> Pubkey {
+    let seeds: &[&[u8]] = &[BOUNTY_SEED, requester.as_ref(), bounty_id.as_ref()];
+    let (_, canonical) = Pubkey::find_program_address(seeds, &escrow::id());
+    (0..canonical)
+        .rev()
+        .find_map(|bump| {
+            Pubkey::create_program_address(&[seeds[0], seeds[1], seeds[2], &[bump]], &escrow::id())
+                .ok()
+        })
+        .expect("a lower bump yields a valid PDA")
+}
+
+// SPEC test 94: a program-owned bounty at a non-canonical PDA address,
+// planted (exploit test). One fault: the address. The copy keeps its stored
+// canonical bump, as every program-created bounty does; Anchor re-derives
+// with that bump and the address differs. The real vault is passed: `bounty`
+// is declared before `bounty_vault`, so the seeds check fires before the
+// vault's authority constraint could see the substitute.
+//
+// Limit stated: a plant that also rewrote the stored bump to the
+// non-canonical one would pass Anchor's explicit-bump check. It is
+// unreachable, because only `init` at the canonical bump creates an
+// escrow-owned bounty, and no outsider can sign for a PDA.
+#[test]
+fn t94_cancel_with_bounty_at_non_canonical_pda_fails() {
+    let mut s = setup();
+    let bounty_id = [94u8; 16];
+    let bounty_key = fund_bounty(&mut s, bounty_id);
+    let fake = non_canonical_bounty_pda(&s.requester.pubkey(), &bounty_id);
+    assert_ne!(fake, bounty_key);
+    let planted = s.svm.get_account(&bounty_key).unwrap();
+    s.svm.set_account(fake, planted).unwrap();
+
+    let accounts = token_accounts(&s, &bounty_key, s.requester_ata);
+    let ix = cancel_ix_with(s.requester.pubkey(), fake, accounts);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error(res, "ConstraintSeeds");
+}
+
+// SPEC test 91: missing signer. Part 1 covers the create_and_fund requester
+// and the cancel requester; part 2 adds the accept Scout as the third case.
+// A relayer pays and is the only signer; the requester's meta is demoted.
+#[test]
+fn t91_missing_signer_fails() {
+    let mut s = setup();
+    let requester = s.requester.pubkey();
+    let relayer = Keypair::new();
+    s.svm.airdrop(&relayer.pubkey(), 1_000_000_000).unwrap();
+    let funded = fund_bounty(&mut s, [91u8; 16]);
+
+    let cases: [Instruction; 2] = [
+        create_and_fund_ix(&s, [92u8; 16], REWARD, 3, s.requester_ata),
+        cancel_ix(&s, requester, funded, s.requester_ata),
+    ];
+    assert_eq!(cases.len(), 2);
+    for mut ix in cases {
+        let meta = ix.accounts.iter_mut().find(|m| m.pubkey == requester).unwrap();
+        assert!(meta.is_signer);
+        meta.is_signer = false;
+        let res = send(&mut s.svm, &relayer, &[ix], &[&relayer]);
+        assert_named_error(res, "AccountNotSigner");
+    }
+}
+
+// SPEC test 30.
+#[test]
+fn t30_cancel_by_non_requester_fails() {
     let mut s = setup();
     let bounty_id = [3u8; 16];
     let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, s.requester_ata);
@@ -595,8 +755,9 @@ fn t19_create_twice_with_same_bounty_id_fails() {
     );
 }
 
+// SPEC test 33.
 #[test]
-fn cancel_twice_fails() {
+fn t33_cancel_twice_fails() {
     let mut s = setup();
     let bounty_id = [9u8; 16];
     let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, s.requester_ata);
