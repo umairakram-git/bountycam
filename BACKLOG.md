@@ -47,11 +47,12 @@ codes are the API surface the mobile app reads.~~ Decided 14 September (D75):
 `TokenAccountOwnerMismatch` is appended; error variants are append-only. Code
 change owed by the escrow implementation.
 
-**`SPEC.md` for the escrow was written after implementation.** It documents
+~~**`SPEC.md` for the escrow was written after implementation.** It documents
 what was built rather than constraining it, and recorded the invented fee
-constant as though intended. Reconcile against the original Session 4 prompt.
-Ruled 14 September (D80): replaced wholesale, not reconciled. Replacement in
-progress as spec session step 3; this item closes when it lands.
+constant as though intended. Reconcile against the original Session 4 prompt.~~
+Ruled 14 September (D80): replaced wholesale, not reconciled. Done 16 September
+(dfd821b): `programs/escrow/SPEC.md` replaced wholesale, stating its supersession
+and authority order. Its section 13 lists the implementation tasks.
 
 **`anchor deploy` is deprecated** in favour of `anchor program deploy`. Switch
 before it is removed.
@@ -224,6 +225,20 @@ find the parent; decide whether it matters (Session 7).
   Scout is paid without real work; D12's review window still lets the requester
   dispute before release. Tighten when Session 9 fixes the release and dispute
   rules.
+- **`MESSAGES.md` never states `schema_version`'s value in prose.** Sections 3
+  and 4 give it only as a `u16` constant; the value exists only in the published
+  vectors. The escrow spec (section 9) defers to the vectors. Add the value to the
+  prose at the next `MESSAGES.md` edit; no vector changes.
+- **`MESSAGES.md` section 7's `submit_attestation` row omits the index field.**
+  Its 60 bytes reproduce only without the two-byte
+  `verification_instruction_index`; with it the row is 62. Harmless, because the
+  total is a declared upper bound that still counts a second signature. The real
+  counts are in `programs/escrow/SPEC.md` section 14: 780 bytes for
+  `submit_attestation`, 795 for `accept`. Correct the row at the next
+  `MESSAGES.md` edit.
+- **The remaining plan still uses D72 non-terms.** Its rows for Sessions 8 and 9
+  say "challenge nonce" and "challenge window", and Session 16's says "challenge
+  window". Replace with capture nonce and review window in a wording-only edit.
 
 ---
 
