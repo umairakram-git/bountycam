@@ -1582,3 +1582,23 @@ artefact, not a key in SECURITY.md section 7's inventory, and is never used.
 
 Tests, at minimum: tests 55 and 69 load `target/deploy/cpi_caller.so` at the caller's ID; every
 counted run shows the caller's binaries, and an `anchor build` output that names no `cpi_caller`.
+
+**D91 — The escrow program depends directly on `solana-instructions-sysvar` `=3.0.1`.** SPEC
+section 6.2 loads the current instruction index and the designated instruction from the
+Instructions sysvar. `anchor-lang` 1.1.2 depends on `solana-instructions-sysvar` 3.0.1 but does
+not re-export `load_current_index_checked` or `load_instruction_at_checked`, and a crate cannot
+name a dependency it does not declare. The alternative, parsing the sysvar's serialised format in
+the program, would be a second implementation of a runtime format on the money path.
+
+Ruling. `programs/escrow/programs/escrow/Cargo.toml` gains `solana-instructions-sysvar = "=3.0.1"`
+under `[dependencies]`, with no features; the crate declares no default features. It is already
+compiled into the program at exactly that version through `anchor-lang`, so no package enters
+`Cargo.lock` and no version moves: the lock changes only by listing the crate among escrow's
+dependencies, and the program graph's resolved features are unchanged. This entry is SECURITY.md
+section 17's deliberate review of a new dependency. It is not a new major version, so section
+10's deadline rule does not apply. An `anchor-lang` upgrade re-checks this pin against the
+version `anchor-lang` then requires.
+
+Tests, at minimum: `cargo tree -e normal,features` for the escrow package is identical before and
+after the manifest change; the lock diff is that one line; the counted run shows 44 integration
+and 2 escrow unit tests.
