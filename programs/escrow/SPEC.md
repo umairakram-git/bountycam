@@ -604,7 +604,7 @@ Each SECURITY.md section 8 invariant, its mechanism here, and its tests (section
 | | `ScoutIsRequester` | |
 | Remaining accounts | never read | review item |
 
-D71's invariant is section 6, tested by 55, 69 and 70 to 90.
+D71's invariant is section 6, tested by 55, 69, 70 to 90 and 95.
 
 SECURITY-PRODUCTION.md section 8 classes in scope for these instructions:
 
@@ -613,7 +613,7 @@ SECURITY-PRODUCTION.md section 8 classes in scope for these instructions:
 - wrong PDA or non-canonical derivation — 25, 94
 - wrong mint, fake USDC, wrong token program — 10, 20, 21, 26, 35, 36
 - attacker escrow account; duplicate account aliasing — 37, 39
-- modified attestation — 65
+- modified attestation — 65, 95
 - attestation for another bounty, Scout or evidence root — 63, 65, 68
 - insufficient assurance — 59
 - expired or replayed attestation — 58, 66
@@ -630,7 +630,7 @@ are Session 9's.
 
 ## 12. Tests
 
-Gate: **94 tests**, counted from the raw summary (D36). A test iterating cases asserts its case
+Gate: **95 tests**, counted from the raw summary (D36). A test iterating cases asserts its case
 count first, so an empty case list fails.
 
 Harness rules:
@@ -639,6 +639,13 @@ Harness rules:
   lines 857 and 931). Positive `initialize` tests overwrite ProgramData first, stated in the test
   as harness setup (D83). Confirm the locked litesvm version with `cargo tree` before relying on
   this.
+- The native ed25519 verifier runs only when litesvm is built with its `precompiles` feature
+  (litesvm 0.10.0 `src/callback.rs`); the dev-dependency enables it (D89). Well-formed
+  designated instructions are built by `solana-ed25519-program` 3.0.0, and malformed variants
+  are derived from its output, so test and program cannot share one misreading of section 6.1.
+  Confirm with `cargo tree` that `agave-precompiles` resolves to 3.1.14; if it does not, re-read
+  section 6.1's statements about the native verifier from the resolved source before writing
+  tests 75, 77, 81 and 82.
 - Keys are generated per run, except where a test reproduces published `MESSAGES.md` vectors
   with their fixed test seeds (SECURITY.md section 7).
 - The clock is set through the Clock sysvar.
@@ -782,6 +789,11 @@ Harness rules:
 89. Compute-budget instructions between the verification and the program instruction succeed.
 90. Unit test: the program's message builders reproduce all 17 published message vectors byte
     for byte (D78's vectors, consumed by the program).
+95. Guard, on each path, two cases: a designated instruction canonical in shape, naming the
+    expected authority and carrying the expected message, with one signature bit flipped. The
+    transaction fails at the designated instruction's index, not the escrow instruction's, and
+    the bounty account is byte-identical (D89). The check runs in the native verifier, outside
+    the program, so no runtime red is possible.
 
 ### 12.7 Cross-cutting and layout
 
@@ -826,6 +838,8 @@ Each is a difference between current source and this document (D80).
     `cargo tree` (SECURITY.md section 10; BACKLOG).
 18. Review items with no single test: every check precedes the token CPI; no instruction reads
     remaining accounts; no dependence on recursion behaviour.
+19. Enable litesvm's `precompiles` feature and add `solana-ed25519-program` `=3.0.0` as a
+    dev-dependency; confirm `agave-precompiles` 3.1.14 with `cargo tree` (D89).
 
 Operational, before any devnet deployment of this layout (BACKLOG):
 
@@ -886,10 +900,11 @@ OPEN-1 profiles below A4 (BACKLOG); the policy binding register (POLICY.md, D84)
 | Every enum state reachable with exits | section 5.1 and 5.3 |
 | Every authority defined and enforced | section 2 |
 | Every money path has preconditions and destination | section 5.2; sections 7.2 and 7.3 |
-| D67 to D86 reflected | D67 7.2; D68 7.4; D69 via D84; D70 and D71 6; D72 1.3; |
+| D67 to D89 reflected | D67 7.2; D68 7.4; D69 via D84; D70 and D71 6; D72 1.3; |
 | | D73 off-chain, no program surface; D74 3; D75 10; D76 5.1, 7.3, 8; |
 | | D77 7.2, 15; D78 test 90; D79 5.4; D80 this document; D81 4.1, 7.2, 7.4; |
-| | D82 2, 7.5; D83 3, 7.1; D84 7.2; D85 7.5; D86 tests 52, 53, 54 |
+| | D82 2, 7.5; D83 3, 7.1; D84 7.2; D85 7.5; D86 tests 52, 53, 54; |
+| | D87 10, 11, test 39; D88 test 40; D89 11, 12, 13, test 95 |
 | Existing tests checked | nine kept or modified as tests 12, 13, 14, 19, 21, 29, 30, 31, 33; |
 | | `create_with_past_deadline_fails` replaced (task 15) |
 | Source differences are tasks | section 13 |
