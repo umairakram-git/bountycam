@@ -410,3 +410,90 @@ fn create_with_wrong_mint_fails() {
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
     assert_named_error(res, "MintMismatch");
 }
+
+// SPEC test 22: correct mint, token account owned by another wallet.
+// One fault: the token account's owner. The requester signs and the mint is the
+// configured one, so only the owner constraint can fire.
+#[test]
+fn t22_create_with_token_account_owned_by_other_wallet_fails() {
+    let mut s = setup();
+    let mallory = Keypair::new();
+    let mallory_ata = create_funded_ata(
+        &mut s.svm,
+        &s.requester,
+        &mallory.pubkey(),
+        &s.usdc_mint,
+        INITIAL_BALANCE,
+    );
+
+    let ix = create_and_fund_ix(&s, [22u8; 16], REWARD, 3, NOW + 86_400, mallory_ata);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error(res, "TokenAccountOwnerMismatch");
+}
+
+// SPEC test 34: cancel with a token account owned by another wallet.
+// One fault: the token account's owner. The requester signs, the bounty is
+// Funded, the vault is the bounty's own ATA and the mint is correct.
+#[test]
+fn t34_cancel_with_token_account_owned_by_other_wallet_fails() {
+    let mut s = setup();
+    let bounty_id = [34u8; 16];
+    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, NOW + 86_400, s.requester_ata);
+    send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
+
+    let mallory = Keypair::new();
+    let mallory_ata =
+        create_funded_ata(&mut s.svm, &s.requester, &mallory.pubkey(), &s.usdc_mint, 0);
+
+    let bounty_key = bounty_pda(&s.requester.pubkey(), &bounty_id);
+    let ix = cancel_ix(&s, s.requester.pubkey(), bounty_key, mallory_ata);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error(res, "TokenAccountOwnerMismatch");
+}
+
+// SPEC test 28: every section 10 variant has its listed code (D75). The table
+// is the section 10 table; Anchor's own conversion supplies the on-chain code.
+#[test]
+fn t28_every_error_variant_has_its_listed_code() {
+    use escrow::error::EscrowError as E;
+    let table: [(E, u32); 34] = [
+        (E::InvalidRewardAmount, 6000),
+        (E::DeadlineInPast, 6001),
+        (E::AssuranceTooHigh, 6002),
+        (E::MintMismatch, 6003),
+        (E::UnauthorizedRequester, 6004),
+        (E::BountyNotCancellable, 6005),
+        (E::AmountOverflow, 6006),
+        (E::TokenAccountOwnerMismatch, 6007),
+        (E::InvalidAcceptanceWindow, 6008),
+        (E::InvalidCompletionWindow, 6009),
+        (E::InvalidReviewWindow, 6010),
+        (E::TimestampOverflow, 6011),
+        (E::InvalidProgramData, 6012),
+        (E::ProgramNotUpgradeable, 6013),
+        (E::UnauthorizedInitializer, 6014),
+        (E::AuthoritiesNotDistinct, 6015),
+        (E::InvalidAuthorityKey, 6016),
+        (E::BountyNotAcceptable, 6017),
+        (E::AcceptanceWindowClosed, 6018),
+        (E::ScoutIsRequester, 6019),
+        (E::VoucherExpired, 6020),
+        (E::BountyNotAttestable, 6021),
+        (E::SubmissionDeadlinePassed, 6022),
+        (E::AchievedAssuranceOutOfRange, 6023),
+        (E::InsufficientAssurance, 6024),
+        (E::InvocationNotTopLevel, 6025),
+        (E::InvalidInstructionsSysvar, 6026),
+        (E::VerificationIndexInvalid, 6027),
+        (E::NotEd25519Instruction, 6028),
+        (E::MalformedVerificationInstruction, 6029),
+        (E::VerificationAuthorityMismatch, 6030),
+        (E::VerificationMessageMismatch, 6031),
+        (E::VaultBalanceBelowReward, 6032),
+        (E::StateInvariantViolated, 6033),
+    ];
+    assert_eq!(table.len(), 34, "section 10 lists 34 variants");
+    for (variant, expected) in table {
+        assert_eq!(u32::from(variant), expected, "{variant:?}");
+    }
+}

@@ -30,7 +30,7 @@ pub struct CreateAndFund<'info> {
     #[account(
         mut,
         constraint = requester_ata.mint == usdc_mint.key() @ EscrowError::MintMismatch,
-        constraint = requester_ata.owner == requester.key() @ EscrowError::UnauthorizedRequester
+        constraint = requester_ata.owner == requester.key() @ EscrowError::TokenAccountOwnerMismatch
     )]
     pub requester_ata: Account<'info, TokenAccount>,
     /// CHECK: only the address is recorded as the arbiter authority

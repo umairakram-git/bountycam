@@ -27,7 +27,7 @@ pub struct Cancel<'info> {
     #[account(
         mut,
         constraint = requester_ata.mint == usdc_mint.key() @ EscrowError::MintMismatch,
-        constraint = requester_ata.owner == requester.key() @ EscrowError::UnauthorizedRequester
+        constraint = requester_ata.owner == requester.key() @ EscrowError::TokenAccountOwnerMismatch
     )]
     pub requester_ata: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
