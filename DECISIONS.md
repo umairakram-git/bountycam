@@ -1553,3 +1553,32 @@ Tests, at minimum: on each path, two cases, a designated instruction canonical i
 naming the expected authority and carrying the expected message, with one signature bit
 flipped. The transaction fails at the designated instruction's index, not the escrow
 instruction's, and the bounty account is byte-identical.
+
+**D90 — The test-only CPI caller is excluded from Anchor's workspace and built with
+`cargo build-sbf`.** SPEC task 16 adds `programs/cpi_caller`, an Anchor program that forwards one
+instruction to the escrow by CPI for tests 55 and 69. Its ID,
+`ESrpUvg2gM75m1mzoSuquCaoabs42edBCCdabdvDgJBg`, is 32 bytes of 0xC7, which is not a point on the
+ed25519 curve, so no secret key exists for it and nothing can be deployed at that address. While
+the caller sat in Anchor's workspace, `anchor build` generated
+`target/deploy/cpi_caller-keypair.json` and printed a program-ID mismatch for the caller. Anchor
+CLI 1.1.2 prints that mismatch as a warning, continues building, and reports only the first
+mismatch it finds (`src/lib.rs`, the check before building), so a permanent caller warning could
+hide a real mismatch for the escrow.
+
+Ruling. `Anchor.toml` gains `[workspace]` with `exclude = ["programs/cpi_caller"]`, which Anchor
+CLI 1.1.2 honours (`src/config.rs`, `get_program_list`); `anchor build` and its program-ID check
+then cover the escrow alone. The caller stays a Cargo workspace member and is built with
+`cargo build-sbf --manifest-path programs/cpi_caller/Cargo.toml`. A counted run is now: `anchor
+build`; that `cargo build-sbf`; the `escrow.so`, escrow IDL and `cpi_caller.so` timestamps; then
+`cargo test`, whose summary also shows the caller's unit and doc-test binaries, 1 and 0 (D36).
+
+The caller has no IDL, so tests 55 and 69 carry its `forward` discriminator as the literal
+`2d a5 c9 74 ce e1 f1 12`, the first eight bytes of sha256 of `global:forward`. A wrong literal
+fails the call with Anchor's fallback error, never with the error those tests expect.
+`--ignore-keys` and `anchor keys sync` are not used: the first would silence the escrow's check,
+and the second would replace the caller's ID. Devnet deploys name the program:
+`anchor deploy --program-name escrow`. The keypair file Anchor generated is an ignored build
+artefact, not a key in SECURITY.md section 7's inventory, and is never used.
+
+Tests, at minimum: tests 55 and 69 load `target/deploy/cpi_caller.so` at the caller's ID; every
+counted run shows the caller's binaries, and an `anchor build` output that names no `cpi_caller`.
