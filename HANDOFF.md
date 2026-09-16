@@ -1,8 +1,9 @@
 # BountyCam — Handoff
 
 **Date:** 16 September 2026
-**Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b (complete)
-**Next session:** 8 — Escrow: `accept`, `submit_attestation`, capture nonce issuance (BACKLOG)
+**Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
+spec session steps 1 to 3
+**Next session:** 8 build — escrow implementation per `programs/escrow/SPEC.md` (dfd821b)
 **Deadline:** 8 October 2026 (22 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
@@ -485,9 +486,9 @@ with `grep -n` against the file before refusing an edit on that basis.
 
 ## Spec session — steps 1 to 3 (15 and 16 September)
 
-What the spec session inherited is listed above under Session 8. Steps 1 and 2
-are done; step 3 is done except for its main deliverable, the replacement
-`programs/escrow/SPEC.md`.
+What the spec session inherited is listed above under Session 8. Steps 1 to 3
+are done; step 3's main deliverable, the replacement `programs/escrow/SPEC.md`,
+landed in dfd821b (see the completion section below).
 
 **Step 1** (e98976b, 603f168): POLICY.md amended for D79 discoverability and
 the D72 naming note; the two `assignments` schema findings recorded above.
@@ -574,6 +575,59 @@ Working practice settled this session:
   — with a one-line reason. Umair decides what changes the user experience,
   when money moves, scope, and deadline trade-offs. Per-edit approval and
   running every command stay unchanged.
+
+---
+
+## Spec session — step 3 completion (16 September)
+
+Four single-file commits, each applied by a script that replaces text matching exactly
+once, with a dry run and a result hash checked before commit:
+
+- 06548b5 — HANDOFF header: "capture nonce", replacing a D72 non-term.
+- dfd821b — `programs/escrow/SPEC.md` replaced wholesale per D80 (sha 0b7ed67e).
+- a923060 — BACKLOG: the escrow SPEC.md item closed; three findings added (sha a1e32015).
+- This commit — HANDOFF.
+
+What the new spec decides beyond D67 to D86. Each is a technical call with its reason
+written in the spec:
+
+- The on-chain enum holds only `Funded`, `Accepted` and `Submitted`. Session 9 appends
+  its states; discriminants never change (SECURITY.md section 9).
+- Bounty fields: fixed-width first, every `Option` last, so non-`Option` fields keep
+  stable offsets for account filters. `usdc_mint` is removed (configuration is the only
+  mint); `merkle_root` becomes `evidence_root`; `deadline` is an `Option`; `issued_at`
+  is not stored.
+- `accept` rejects a Scout equal to the requester (`ScoutIsRequester`).
+- `cancel` refunds the vault's entire balance, so a donated token cannot block closure.
+- Error codes 0 to 33 are fixed. 6001 and 6006 are retired, never emitted. All ed25519
+  shape failures share one code.
+- Check order: trusted state, then the signature, then signed caller values.
+- `initialize` rejects an all-zero authority key.
+- The only event is `BountyCancelled`.
+
+Facts read from crate source this session, in the spec and nowhere else:
+
+- The native ed25519 verifier (`agave-precompiles` 3.1.14 and 4.2.2) reads the signature
+  count from byte 0 only, never checks the padding byte, accepts trailing bytes, and
+  accepts a two-byte zero-signature instruction. The program must check all of these
+  itself; SPEC tests 75, 77 and 81 exist for it.
+- The off-chain `get_stack_height` stub returns 0. CPI rejection is testable only through
+  a test-only caller program under litesvm (SPEC tests 55 and 69).
+- Transaction budget, counted by the SPEC appendix script: `submit_attestation` 780 bytes
+  with 7 keys; `accept` 795 bytes with 8 keys; limit 1232.
+
+For the implementation session:
+
+- The gate is 94 tests (SPEC section 12). Tasks are SPEC section 13.
+- Rewards stay locked in `Accepted` and `Submitted` until Session 9 specifies the exits.
+  Devnet test USDC only.
+- Capture nonce issuance (D73) was in the original Session 8 scope. It is API work with
+  no endpoint specification yet: specification before code, as always.
+- The POLICY.md amendments for D82 and D84 stay blocked by OPEN-1. They do not block the
+  escrow, which stores `eligibility_profile_hash` without validating it.
+
+Working practice added: line-length limits (D31) are kept quietly for new text and not
+reported or re-checked; they break nothing.
 
 ---
 
