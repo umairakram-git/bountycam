@@ -1348,6 +1348,7 @@ dependencies = [
  "litesvm",
  "serde_json",
  "solana-ed25519-program",
+ "solana-instructions-sysvar",
  "solana-keypair",
  "solana-message",
  "solana-signer",

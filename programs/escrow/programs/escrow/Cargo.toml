@@ -23,6 +23,7 @@ custom-panic = []
 [dependencies]
 anchor-lang = "=1.1.2"
 anchor-spl = "=1.1.2"
+solana-instructions-sysvar = "=3.0.1"
 
 [dev-dependencies]
 litesvm = { version = "=0.10.0", features = ["precompiles"] }
