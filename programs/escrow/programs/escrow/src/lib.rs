@@ -2,6 +2,7 @@ pub mod constants;
 pub mod error;
 pub mod events;
 pub mod instructions;
+pub mod messages;
 pub mod state;
 
 use anchor_lang::prelude::*;
