@@ -1473,3 +1473,43 @@ code changes; only the named error moves to the layer that actually raises it.
 
 Tests, at minimum: `cancel` with `requester_ata` set to the vault address fails with
 `ConstraintDuplicateMutableAccount` caused by `requester_ata`.
+
+**D88 — Same-transaction re-creation after `cancel` is permitted; SECURITY.md section 8 forbids
+revival, not fresh creation.** SECURITY.md section 8 read "no reinitialisation into a
+financially meaningful state in the same transaction", while SPEC test 40 expects `cancel`
+followed by `create_and_fund` with the same `bounty_id` in one transaction to succeed. Read
+literally the two conflict, and SECURITY.md wins on conflict (D50), so the conflict is settled
+here rather than in either document alone.
+
+The hazard the rule targets is revival: a closed account whose old data survives, or which is
+kept funded, being used again with its prior state (`coral-xyz/sealevel-attacks`,
+`9-closing-accounts`). That does not happen here. Anchor 1.1.2's `close` moves the bounty's
+lamports to the requester, assigns the account to the system program and empties its data.
+In the next instruction, `init` recreates the bounty, and the associated token program the
+vault, through the system program's create path, which succeeds only for an empty,
+zero-lamport, system-owned account; so both closures left nothing behind. Every field is
+written from that instruction's own arguments and clock, and the requester funds the new vault
+from their own token account.
+
+Raw output (Session 8 part 1; litesvm 0.10.0, SPL Token 3.5.0 as loaded by litesvm): one
+transaction, `cancel` then `create_and_fund` with the same id. The logs show the refund, the
+event and the vault closure, then a single system-program call for the bounty and another for
+the vault; `init` and the associated token program take the create path in one call only when
+the account is empty, and otherwise make several.
+The new bounty is `Funded` with every `Option` `None` and `acceptance_cutoff` from the clock;
+the vault holds exactly `reward_amount`; the requester is down by exactly `reward_amount`.
+
+Forbidding it on-chain would need `create_and_fund` to scan the Instructions sysvar for an
+earlier `cancel` of the same address: new attack surface with no safety gain. The requester
+moves only their own funds, and re-creation in a separate transaction already carries the same
+exposure; its one known consequence, voucher replay, is D86's stated limit.
+
+SECURITY.md section 8's account-closure invariant is reworded to forbid revival and to permit
+same-transaction re-creation only through `init`, only when the result is indistinguishable
+from a first creation. SPEC test 40 stands unchanged. The test asserts freshness, not merely
+success.
+
+Tests, at minimum: `cancel` then `create_and_fund` with the same `bounty_id` in one transaction
+succeeds; the bounty is `Funded` with every `Option` `None` and `acceptance_cutoff` equal to the
+clock plus the window; the vault holds exactly `reward_amount`; the requester's token balance is
+down by exactly `reward_amount`.
