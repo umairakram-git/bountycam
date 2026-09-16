@@ -573,8 +573,9 @@ because the bounty no longer stores a mint. Its code does not change.
 
 Errors named by tests but raised outside this program, from Anchor 1.1.2 (`anchor-lang-error`)
 unless stated: `AccountNotInitialized`, `AccountNotSigner`, `AccountOwnedByWrongProgram`,
-`ConstraintAssociated`, `ConstraintSeeds`, `InvalidProgramId`; `InvalidAccountData` from the
-SPL Token mint unpack; and the system program's "already in use".
+`ConstraintAssociated`, `ConstraintDuplicateMutableAccount` (D87), `ConstraintSeeds`,
+`InvalidProgramId`; `InvalidAccountData` from the SPL Token mint unpack; and the system
+program's "already in use".
 
 ---
 
@@ -599,7 +600,8 @@ Each SECURITY.md section 8 invariant, its mechanism here, and its tests (section
 | Amount integrity | stored `reward_amount`; checked `i64` additions | 12, 18, 27 |
 | Fee | `platform_fee` 0; no fee argument | 12, 23 |
 | Account closure | `cancel` closes both; close-then-reinit | 29, 33, 40 |
-| Duplicate accounts | owner constraints; `ScoutIsRequester` | 39, 48 |
+| Duplicate accounts | Anchor duplicate-mutable check (D87); owner constraints; | 39, 48 |
+| | `ScoutIsRequester` | |
 | Remaining accounts | never read | review item |
 
 D71's invariant is section 6, tested by 55, 69 and 70 to 90.
@@ -703,7 +705,8 @@ Harness rules:
 36. Mint account other than the configured mint — `MintMismatch`.
 37. The bounty's associated token account for another mint as the vault — `ConstraintAssociated`.
 38. Tokens donated to the vault: cancel succeeds; `refunded_amount` equals reward plus donation.
-39. `requester_ata` set to the vault address — `TokenAccountOwnerMismatch`.
+39. `requester_ata` set to the vault address — `ConstraintDuplicateMutableAccount`, caused by
+    `requester_ata` (D87).
 40. Close-then-reinit: `cancel` and `create_and_fund` with the same id in one transaction produce
     a fresh `Funded` bounty; vault equals `reward_amount`; every `Option` `None`.
 41. A same-layout bounty owned by another program, planted — `AccountOwnedByWrongProgram`.
