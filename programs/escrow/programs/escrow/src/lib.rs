@@ -15,6 +15,22 @@ declare_id!("6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS");
 pub mod escrow {
     use super::*;
 
+    pub fn initialize(
+        ctx: Context<Initialize>,
+        deployment_id: u8,
+        eligibility_authority: Pubkey,
+        attester_authority: Pubkey,
+        arbiter_authority: Pubkey,
+    ) -> Result<()> {
+        instructions::initialize::handle_initialize(
+            ctx,
+            deployment_id,
+            eligibility_authority,
+            attester_authority,
+            arbiter_authority,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn create_and_fund(
         ctx: Context<CreateAndFund>,

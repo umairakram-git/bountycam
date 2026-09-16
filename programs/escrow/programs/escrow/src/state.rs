@@ -1,5 +1,19 @@
 use anchor_lang::prelude::*;
 
+/// One account per deployment (D83). PDA on `CONFIG_SEED`, canonical bump.
+/// Written only by `initialize`, once. No instruction updates or closes it.
+/// Space: 8 discriminator bytes plus 130 (SPEC section 3).
+#[account]
+#[derive(InitSpace)]
+pub struct Config {
+    pub deployment_id: u8,
+    pub usdc_mint: Pubkey,
+    pub eligibility_authority: Pubkey,
+    pub attester_authority: Pubkey,
+    pub arbiter_authority: Pubkey,
+    pub bump: u8,
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BountyState {
     Funded,

@@ -3,6 +3,9 @@ use anchor_lang::prelude::*;
 #[constant]
 pub const BOUNTY_SEED: &[u8] = b"bounty";
 
+#[constant]
+pub const CONFIG_SEED: &[u8] = b"config";
+
 /// Highest assurance level a policy may require.
 #[constant]
 pub const MAX_ASSURANCE_LEVEL: u8 = 4;
