@@ -2,8 +2,9 @@
 
 **Date:** 16 September 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
-spec session steps 1 to 3
-**Next session:** 8 build — escrow implementation per `programs/escrow/SPEC.md` (dfd821b)
+spec session steps 1 to 3; Session 8 build part 1
+**Next session:** 8 build part 2 — section 6 verification, `accept`, `submit_attestation`
+and the CPI caller program, per `programs/escrow/SPEC.md` (aac6e5b)
 **Deadline:** 8 October 2026 (22 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
@@ -66,7 +67,7 @@ hackathon202609/
 ├── packages/
 │   └── shared/       SPEC.md (normative) + implementation, 66 passing tests
 └── programs/
-    └── escrow/       Anchor 1.1.2, SPEC.md, 10 passing tests
+    └── escrow/       Anchor 1.1.2, SPEC.md, 44 integration and 1 unit test passing
 ```
 
 All work committed and pushed to `main`. History: `git log`.
@@ -631,10 +632,84 @@ reported or re-checked; they break nothing.
 
 ---
 
+## Session 8 build, part 1 — escrow accounts, `initialize`, `create_and_fund`, `cancel`
+
+Claude Code built SPEC tasks 1 to 11, 15 and 17 against `programs/escrow/SPEC.md` (dfd821b).
+The architect chat reviewed every diff and counted run; Umair ran and committed each from raw
+output. Thirteen commits on 16 September:
+
+- e6a5da4 — test dev-dependencies exact-pinned; `serde_json` =1.0.151 added (task 17).
+- e1680ff — errors 7 to 33 appended; `TokenAccountOwnerMismatch` split out (task 8, D75).
+- 21cc2fd — platform fee deleted; funding transfers exactly `reward_amount` (task 1, D67).
+- 7ee906a — configuration account and `initialize` (task 9, D83).
+- f3fec01 — mint constrained to `config.usdc_mint` in both instructions (task 10).
+- ed529c0 — bounty layout per section 4.1, three windows, `eligibility_profile_hash`, enum
+  trimmed to three variants (tasks 2 to 7 and 15).
+- 396013d — `cancel` balance check and `BountyCancelled`, in D76's order (task 11).
+- 240c955, aac6e5b — D87 and the SPEC amendment for test 39.
+- 8f70474 — test 39.
+- 94844e3, 3e2aacc — D88 and the SECURITY.md section 8 amendment.
+- d521c87 — test 40.
+
+Gate at d521c87: 44 integration tests and 1 unit test (`test_id`), counted from the raw
+summary. The 44 are SPEC tests 1 to 30, 33 to 41 and 91 to 94, plus the legacy
+`cancel_when_accepted_fails`, which still plants `Accepted` and is not SPEC test 31.
+
+Two conflicts found from raw output and ruled:
+
+- D87 — test 39, the vault passed as `requester_ata`, fails with Anchor's
+  `ConstraintDuplicateMutableAccount` (2040), not `TokenAccountOwnerMismatch`. SPEC sections
+  10, 11 and 12 amended; no `dup` constraint added.
+- D88 — SECURITY.md section 8 literally forbade the same-transaction re-creation that SPEC test
+  40 requires. Raw logs showed both accounts recreated from empty. The invariant now forbids
+  revival and permits re-creation only through `init`.
+
+Facts read from crate source or raw output this session, recorded nowhere else:
+
+- Anchor 1.1.2 validates accounts in three phases: `init` fields, then the duplicate-mutable
+  check, then per-field constraints in declaration order (`anchor-syn` `try_accounts.rs`).
+  Where two constraints raise the same error name, the negative test pins the account Anchor
+  names through `assert_named_error_at`; tests 20, 21, 35 and 36 use it.
+- Anchor's explicit-bump seeds check calls `create_program_address` with the stored bump and
+  compares addresses; it does not re-derive canonicality. Test 94 plants a copy that keeps its
+  canonical bump. A plant that also rewrote the stored bump would pass, but only `init` at the
+  canonical bump creates an escrow-owned bounty. The test states the limit.
+- `anchor build` prints `Finished` yet leaves `target/idl/escrow.json` stale when the test crate
+  fails to compile, because IDL generation compiles it. It leaves `escrow.so` untouched when
+  only tests change. Counted runs therefore show both timestamps.
+- litesvm 0.10.0 loads SPL Token 3.5.0 and Token-2022 10.0.0 by default. ProgramData metadata
+  is 45 bytes: the upgrade-authority `Option` tag at offset 12, the key at 13 to 44. The
+  harness overwrite reads its result back through Anchor's `ProgramData`.
+- anchor-lang 1.1.2 re-exports base64 0.21.7 as `anchor_lang::__private::base64`; event decoding
+  uses it under the exact pin. Borsh 1 has no `try_to_vec`. `ERROR_CODE_OFFSET` is 6000.
+- `coral-xyz/sealevel-attacks` was read at 24555d0 (July 2022); Anchor's security-exploits page
+  now only links to it.
+
+Owed, not done:
+
+- `VaultBalanceBelowReward` is unreachable by construction (SPEC section 7.3) and has no failing
+  run: review item.
+- Test 28's compile-error run and the pre-change runs of tests 12 and 18 were collapsed in
+  Claude Code's output and never shown raw. Each test's passing run is raw.
+- SPEC task 18's review items were outside part 1's scope.
+- SPEC section 16's reconciliation row names D67 to D86, not D87 or D88.
+- The devnet deployment is still the Session 4 layout. SPEC section 13's operational items come
+  before any redeploy.
+
+Part 2 scope: SPEC tasks 12, 13, 14, 16 and 18; tests 31 (replacing the legacy test), 32,
+42 to 90, and the `accept` case of test 91, raising its case count to 3.
+
+Process notes. Claude Code's footer showed auto mode once, after an interrupted request; it was
+switched back to manual before any edit. Its project memory index names a spec-editing file
+that does not exist. The repo's `.claude/settings.local.json` holds two read-only allow rules
+for `~/.claude` and is excluded by the global git ignore.
+
+---
+
 ## Working rules
 
 - Read SECURITY.md before touching the escrow, auth, verifier, or any key (D50).
-- Per-edit approval. Never blanket "allow all".
+- Per-edit approval. Never blanket "allow all". Claude Code stays in manual mode.
 - No autonomous commits or pushes. Umair pushes.
 - Single-purpose commits.
 - Verify from raw terminal output. Claude Code's self-reports are not evidence
@@ -646,6 +721,8 @@ reported or re-checked; they break nothing.
 - Start a fresh Claude Code session per numbered session. Compaction loses
   spec detail.
 - Approve a write only after seeing it.
+- A counted escrow run is `anchor build`, the `escrow.so` and IDL timestamps, then
+  `cargo test`, in one output.
 - A test pass counts only if the summary shows the expected test count. A
   green run that executed nothing looks identical from the exit banner alone
   (D36).
