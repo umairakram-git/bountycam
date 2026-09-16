@@ -1,5 +1,8 @@
 skip_local_validator = true
 
+[workspace]
+exclude = ["programs/cpi_caller"]
+
 [toolchain]
 
 [features]
