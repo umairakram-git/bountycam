@@ -11,7 +11,7 @@ use {
         token::spl_token,
     },
     escrow::{
-        constants::{BOUNTY_SEED, PLATFORM_FEE_BPS},
+        constants::BOUNTY_SEED,
         state::{Bounty, BountyState},
     },
     litesvm::{
@@ -30,10 +30,6 @@ const INITIAL_BALANCE: u64 = 1_000_000_000; // 1,000 USDC
 const REWARD: u64 = 100_000_000; // 100 USDC
 const POLICY_HASH: [u8; 32] = [7u8; 32];
 const REVIEW_WINDOW: i64 = 3_600;
-
-fn fee(reward: u64) -> u64 {
-    reward * PLATFORM_FEE_BPS / 10_000
-}
 
 struct Setup {
     svm: LiteSVM,
@@ -230,8 +226,10 @@ fn assert_named_error(
     );
 }
 
+// SPEC test 12 (fee assertions per D67; the section 4.1 field set lands in
+// commit 6).
 #[test]
-fn create_and_fund_succeeds() {
+fn t12_create_and_fund_succeeds() {
     let mut s = setup();
     let bounty_id = [1u8; 16];
     let deadline = NOW + 86_400;
@@ -246,7 +244,7 @@ fn create_and_fund_succeeds() {
     assert_eq!(bounty.scout, None);
     assert_eq!(bounty.usdc_mint, s.usdc_mint);
     assert_eq!(bounty.reward_amount, REWARD);
-    assert_eq!(bounty.platform_fee, fee(REWARD));
+    assert_eq!(bounty.platform_fee, 0);
     assert_eq!(bounty.policy_hash, POLICY_HASH);
     assert_eq!(bounty.required_assurance, 3);
     assert_eq!(bounty.attester_authority, s.attester);
@@ -259,11 +257,39 @@ fn create_and_fund_succeeds() {
     assert_eq!(bounty.state, BountyState::Funded);
 
     let vault = associated_token::get_associated_token_address(&bounty_key, &s.usdc_mint);
-    assert_eq!(token_balance(&s.svm, &vault), REWARD + fee(REWARD));
-    assert_eq!(
-        token_balance(&s.svm, &s.requester_ata),
-        INITIAL_BALANCE - REWARD - fee(REWARD)
-    );
+    assert_eq!(token_balance(&s.svm, &vault), REWARD);
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE - REWARD);
+}
+
+// SPEC test 18: reward_amount of u64::MAX with a matching balance succeeds and
+// the vault holds u64::MAX. The requester's balance is topped up to exactly
+// u64::MAX first; total supply then equals u64::MAX, which the mint permits.
+#[test]
+fn t18_create_with_max_reward_succeeds() {
+    let mut s = setup();
+    let top_up = spl_token::instruction::mint_to(
+        &spl_token::id(),
+        &s.usdc_mint,
+        &s.requester_ata,
+        &s.requester.pubkey(),
+        &[],
+        u64::MAX - INITIAL_BALANCE,
+    )
+    .unwrap();
+    send(&mut s.svm, &s.requester, &[top_up], &[&s.requester]).unwrap();
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), u64::MAX);
+
+    let bounty_id = [18u8; 16];
+    let ix = create_and_fund_ix(&s, bounty_id, u64::MAX, 3, NOW + 86_400, s.requester_ata);
+    send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
+
+    let bounty_key = bounty_pda(&s.requester.pubkey(), &bounty_id);
+    let bounty = read_bounty(&s.svm, &bounty_key);
+    assert_eq!(bounty.reward_amount, u64::MAX);
+    assert_eq!(bounty.platform_fee, 0);
+    let vault = associated_token::get_associated_token_address(&bounty_key, &s.usdc_mint);
+    assert_eq!(token_balance(&s.svm, &vault), u64::MAX);
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), 0);
 }
 
 #[test]

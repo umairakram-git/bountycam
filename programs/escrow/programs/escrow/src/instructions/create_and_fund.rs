@@ -61,21 +61,14 @@ pub fn handle_create_and_fund(
         EscrowError::AssuranceTooHigh
     );
 
-    let platform_fee = reward_amount
-        .checked_mul(PLATFORM_FEE_BPS)
-        .and_then(|v| v.checked_div(10_000))
-        .ok_or(EscrowError::AmountOverflow)?;
-    let total = reward_amount
-        .checked_add(platform_fee)
-        .ok_or(EscrowError::AmountOverflow)?;
-
     ctx.accounts.bounty.set_inner(Bounty {
         bounty_id,
         requester: ctx.accounts.requester.key(),
         scout: None,
         usdc_mint: ctx.accounts.usdc_mint.key(),
         reward_amount,
-        platform_fee,
+        // Exactly 0 (D24, D67). No fee arithmetic exists.
+        platform_fee: 0,
         policy_hash,
         required_assurance,
         attester_authority,
@@ -99,7 +92,7 @@ pub fn handle_create_and_fund(
                 authority: ctx.accounts.requester.to_account_info(),
             },
         ),
-        total,
+        reward_amount,
         ctx.accounts.usdc_mint.decimals,
     )?;
 
