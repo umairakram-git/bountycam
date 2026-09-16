@@ -681,6 +681,45 @@ fn t39_cancel_with_vault_as_requester_ata_fails() {
     assert_named_error_at(res, "ConstraintDuplicateMutableAccount", "requester_ata");
 }
 
+// SPEC test 40: close-then-reinit. cancel and create_and_fund with the same
+// bounty_id in one transaction produce a fresh Funded bounty; vault equals
+// reward_amount; every Option None; acceptance_cutoff equals clock plus window.
+#[test]
+fn t40_cancel_then_create_same_id_in_one_transaction() {
+    let mut s = setup();
+    let bounty_id = [40u8; 16];
+    let bounty_key = fund_bounty(&mut s, bounty_id);
+    let vault = associated_token::get_associated_token_address(&bounty_key, &s.usdc_mint);
+    let requester = s.requester.pubkey();
+
+    let cancel = cancel_ix(&s, requester, bounty_key, s.requester_ata);
+    let create = create_and_fund_ix(&s, bounty_id, REWARD, 3, s.requester_ata);
+    let res = send(&mut s.svm, &s.requester, &[cancel, create], &[&s.requester]);
+    let meta = match res {
+        Ok(meta) => meta,
+        Err(failed) => panic!(
+            "close-then-reinit failed: {:?}\nlogs:\n{}",
+            failed.err,
+            failed.meta.logs.join("\n")
+        ),
+    };
+    eprintln!("{}", meta.logs.join("\n"));
+
+    let bounty = read_bounty(&s.svm, &bounty_key);
+    assert_eq!(bounty.bounty_id, bounty_id);
+    assert_eq!(bounty.requester, requester);
+    assert_eq!(bounty.state, BountyState::Funded);
+    assert_eq!(bounty.reward_amount, REWARD);
+    assert_eq!(bounty.acceptance_cutoff, NOW + ACCEPTANCE_WINDOW);
+    assert_eq!(bounty.scout, None);
+    assert_eq!(bounty.deadline, None);
+    assert_eq!(bounty.submitted_at, None);
+    assert_eq!(bounty.evidence_root, None);
+    assert_eq!(bounty.achieved_assurance, None);
+    assert_eq!(token_balance(&s.svm, &vault), REWARD);
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE - REWARD);
+}
+
 // SPEC test 30.
 #[test]
 fn t30_cancel_by_non_requester_fails() {
