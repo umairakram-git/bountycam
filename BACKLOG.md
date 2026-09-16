@@ -37,15 +37,15 @@ than setting state, so the variant can never be observed. Either drop it, or
 set state before closing so an indexer can see the terminal state.
 Recommendation: drop. Dead state variants in an escrow mislead whoever adds
 `dispute` later.~~ Decided 14 September (D76): the variant is removed;
-cancellation is an event plus a database record. Code change owed by the escrow
-implementation.
+cancellation is an event plus a database record. Code change done 16 September:
+ed529c0 removes the variant; 396013d emits `BountyCancelled`.
 
 ~~**`UnauthorizedRequester` is overloaded.** It fires both for "you are not the
 requester" and for "this token account is not yours". A client cannot
 distinguish them. Add a distinct error for token-account ownership — error
 codes are the API surface the mobile app reads.~~ Decided 14 September (D75):
 `TokenAccountOwnerMismatch` is appended; error variants are append-only. Code
-change owed by the escrow implementation.
+change done 16 September (e1680ff).
 
 ~~**`SPEC.md` for the escrow was written after implementation.** It documents
 what was built rather than constraining it, and recorded the invented fee
@@ -211,11 +211,13 @@ find the parent; decide whether it matters (Session 7).
   `~/bountycam-keys/`. Generate both before `initialize`, and rehearse
   `initialize` on localnet with the exact devnet public keys first: the
   configuration is immutable, so a mistake costs an upgrade with a migration.
-- **Escrow test dev-dependencies are caret ranges.** `litesvm`,
+- ~~**Escrow test dev-dependencies are caret ranges.** `litesvm`,
   `solana-message`, `solana-transaction`, `solana-signer` and `solana-keypair`
   in `programs/escrow/programs/escrow/Cargo.toml` violate SECURITY.md section
   10's exact pins. Confirm locked versions with `cargo tree`, then pin. D83's
-  harness note relies on litesvm 0.10.0's `add_program` behaviour.
+  harness note relies on litesvm 0.10.0's `add_program` behaviour.~~ Done 16
+  September (e6a5da4): exact-pinned to the locked versions; `serde_json` =1.0.151
+  added for SPEC test 23.
 - **Devnet bounty accounts do not survive the layout change.** D74 and D81 to
   D84 change the bounty account, so accounts created under the Session 4
   program become unreadable after the redeploy. List program-owned accounts on
@@ -239,6 +241,28 @@ find the parent; decide whether it matters (Session 7).
 - **The remaining plan still uses D72 non-terms.** Its rows for Sessions 8 and 9
   say "challenge nonce" and "challenge window", and Session 16's says "challenge
   window". Replace with capture nonce and review window in a wording-only edit.
+
+---
+
+## Open items from Session 8 build part 1 (16 September)
+
+- **Legacy `cancel_when_accepted_fails` still plants `Accepted`.** It rewrites the
+  bounty account, which SPEC section 12's harness rules forbid, and is kept only so
+  D49's cancel-after-accept rejection stays covered. Part 2 replaces it with SPEC
+  test 31 through a real `accept` (task 14) and removes it in the same commit.
+- **Test 91 has two of its three cases.** Part 2 adds the `accept` Scout case and
+  raises the asserted case count to 3.
+- **`VaultBalanceBelowReward` has no failing run.** SPEC section 7.3 makes it
+  unreachable by construction. Review item: confirm by reading that only the bounty
+  PDA can move vault tokens and that the check precedes the transfer.
+- **SPEC task 18 review items are owed.** Every check precedes the token CPI; no
+  instruction reads remaining accounts; no dependence on recursion. Part 2 records
+  each against the final source.
+- **SPEC section 16's reconciliation row stops at D86.** Add D87 (sections 10, 11
+  and 12) and D88 (test 40) at the next SPEC edit; wording only.
+- **Claude Code's project memory index names a missing file.** `MEMORY.md` lists
+  `feedback_spec_editing.md`, which does not exist. Restore the file or remove the
+  line, at the next D32 inspection.
 
 ---
 
@@ -307,6 +331,19 @@ find the parent; decide whether it matters (Session 7).
 - Mobile pulls `@noble/hashes` 1.8.0 while `apps/api` and `packages/shared`
   pin 2.4.0. Not a spike problem, but `packages/shared` is the only place
   hashing logic may live and mobile depends on it. Reconcile in Session 10.
+- `anchor build` prints `Finished` yet leaves the IDL stale when the test crate
+  fails to compile, because IDL generation compiles it. It leaves the program `.so`
+  untouched when only tests change. Show both timestamps in any counted run.
+- Anchor 1.1.2 validates accounts as `init` fields, then the duplicate-mutable-account
+  check, then per-field constraints in declaration order. A test expecting a
+  per-field error on an aliased mutable account gets
+  `ConstraintDuplicateMutableAccount` instead (D87).
+- Anchor's explicit-bump `seeds` check uses the stored bump with
+  `create_program_address`; it does not re-derive the canonical bump. Store a bump
+  only from `init`.
+- litesvm 0.10.0 `add_program` records no upgrade authority. To test an
+  upgrade-authority gate, overwrite ProgramData: the `Option` tag at offset 12, the
+  key at 13 to 44.
 
 ---
 
