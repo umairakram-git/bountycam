@@ -666,6 +666,21 @@ fn t91_missing_signer_fails() {
     }
 }
 
+// SPEC test 39: requester_ata set to the vault address. One fault: the token
+// account. Anchor's duplicate-mutable-account check runs before per-field
+// constraints (anchor-syn try_accounts: init, then duplicates, then access
+// checks), so it names the fault first (D87).
+#[test]
+fn t39_cancel_with_vault_as_requester_ata_fails() {
+    let mut s = setup();
+    let bounty = fund_bounty(&mut s, [39u8; 16]);
+    let vault = associated_token::get_associated_token_address(&bounty, &s.usdc_mint);
+
+    let ix = cancel_ix(&s, s.requester.pubkey(), bounty, vault);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error_at(res, "ConstraintDuplicateMutableAccount", "requester_ata");
+}
+
 // SPEC test 30.
 #[test]
 fn t30_cancel_by_non_requester_fails() {
