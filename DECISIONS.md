@@ -1443,3 +1443,33 @@ uniqueness.
 Tests, at minimum: an unexpired voucher replayed after cancel and identical re-creation
 succeeds, documenting the limit; the same replay with any one bound field changed fails, one
 case per field; the replay after voucher expiry fails.
+
+---
+
+## Session 8 build rulings (16 September)
+
+Rulings made while implementing `programs/escrow/SPEC.md` in Session 8 part 1, where raw test
+output contradicted the specification.
+
+**D87 — Anchor's duplicate-mutable-account check rejects a vault passed as `requester_ata`;
+SPEC test 39 names that error.** SPEC test 39 passes the bounty vault's address as
+`requester_ata` to `cancel` and expected `TokenAccountOwnerMismatch`. Raw output shows
+`ConstraintDuplicateMutableAccount`, Anchor error 2040, caused by `requester_ata`. Anchor 1.1.2
+validates accounts in three phases: `init` accounts, then a check that no two mutable accounts
+share an address unless marked `dup`, then per-field constraints in declaration order
+(`anchor-syn` 1.1.2, `codegen/accounts/try_accounts.rs`). `bounty_vault` and `requester_ata`
+are both mutable, so the duplicate check fires before the owner constraint can run. The
+specification was wrong about which layer rejects the input, not about whether it is rejected.
+
+The test expects `ConstraintDuplicateMutableAccount` caused by `requester_ata`. Anchor's default
+check stays in force: no `dup` constraint is added, and adding one to any money-moving
+instruction needs its own D-entry. For mutable accounts that check is the mechanism for
+SECURITY.md section 8's duplicate-accounts invariant; owner constraints and `ScoutIsRequester`
+remain the mechanism elsewhere. The client receives code 2040, not 6007, for this input, so
+SPEC section 10 lists the error among those raised outside the program.
+
+This does not widen the specification. The set of rejected inputs is unchanged and no program
+code changes; only the named error moves to the layer that actually raises it.
+
+Tests, at minimum: `cancel` with `requester_ata` set to the vault address fails with
+`ConstraintDuplicateMutableAccount` caused by `requester_ata`.
