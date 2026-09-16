@@ -7,6 +7,8 @@ use crate::{constants::*, error::EscrowError, state::*};
 pub struct Cancel<'info> {
     #[account(mut)]
     pub requester: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
     #[account(
         mut,
         close = requester,
@@ -17,6 +19,8 @@ pub struct Cancel<'info> {
         bump = bounty.bump
     )]
     pub bounty: Account<'info, Bounty>,
+    /// The configured mint by address (D83); `Account<Mint>` enforces the owner.
+    #[account(address = config.usdc_mint @ EscrowError::MintMismatch)]
     pub usdc_mint: Account<'info, Mint>,
     #[account(
         mut,
@@ -26,7 +30,7 @@ pub struct Cancel<'info> {
     pub bounty_vault: Account<'info, TokenAccount>,
     #[account(
         mut,
-        constraint = requester_ata.mint == usdc_mint.key() @ EscrowError::MintMismatch,
+        constraint = requester_ata.mint == config.usdc_mint @ EscrowError::MintMismatch,
         constraint = requester_ata.owner == requester.key() @ EscrowError::TokenAccountOwnerMismatch
     )]
     pub requester_ata: Account<'info, TokenAccount>,

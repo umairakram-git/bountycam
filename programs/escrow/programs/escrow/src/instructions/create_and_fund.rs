@@ -11,6 +11,8 @@ use crate::{constants::*, error::EscrowError, state::*};
 pub struct CreateAndFund<'info> {
     #[account(mut)]
     pub requester: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
     #[account(
         init,
         payer = requester,
@@ -19,6 +21,8 @@ pub struct CreateAndFund<'info> {
         bump
     )]
     pub bounty: Account<'info, Bounty>,
+    /// The configured mint by address (D83); `Account<Mint>` enforces the owner.
+    #[account(address = config.usdc_mint @ EscrowError::MintMismatch)]
     pub usdc_mint: Account<'info, Mint>,
     #[account(
         init,
@@ -29,7 +33,7 @@ pub struct CreateAndFund<'info> {
     pub bounty_vault: Account<'info, TokenAccount>,
     #[account(
         mut,
-        constraint = requester_ata.mint == usdc_mint.key() @ EscrowError::MintMismatch,
+        constraint = requester_ata.mint == config.usdc_mint @ EscrowError::MintMismatch,
         constraint = requester_ata.owner == requester.key() @ EscrowError::TokenAccountOwnerMismatch
     )]
     pub requester_ata: Account<'info, TokenAccount>,

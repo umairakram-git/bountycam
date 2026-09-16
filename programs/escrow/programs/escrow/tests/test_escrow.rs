@@ -242,6 +242,26 @@ fn bounty_pda(requester: &Pubkey, bounty_id: &[u8; 16]) -> Pubkey {
     .0
 }
 
+/// The token-side accounts of `create_and_fund` and `cancel`. Tests that
+/// substitute one account build the default and replace one field.
+struct TokenAccounts {
+    config: Pubkey,
+    usdc_mint: Pubkey,
+    bounty_vault: Pubkey,
+    requester_ata: Pubkey,
+    token_program: Pubkey,
+}
+
+fn token_accounts(s: &Setup, bounty: &Pubkey, requester_ata: Pubkey) -> TokenAccounts {
+    TokenAccounts {
+        config: s.config,
+        usdc_mint: s.usdc_mint,
+        bounty_vault: associated_token::get_associated_token_address(bounty, &s.usdc_mint),
+        requester_ata,
+        token_program: spl_token::id(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn create_and_fund_ix(
     s: &Setup,
@@ -251,9 +271,21 @@ fn create_and_fund_ix(
     deadline: i64,
     requester_ata: Pubkey,
 ) -> Instruction {
+    let bounty = bounty_pda(&s.requester.pubkey(), &bounty_id);
+    let accounts = token_accounts(s, &bounty, requester_ata);
+    create_and_fund_ix_with(s, bounty_id, reward_amount, required_assurance, deadline, accounts)
+}
+
+fn create_and_fund_ix_with(
+    s: &Setup,
+    bounty_id: [u8; 16],
+    reward_amount: u64,
+    required_assurance: u8,
+    deadline: i64,
+    accounts: TokenAccounts,
+) -> Instruction {
     let requester = s.requester.pubkey();
     let bounty = bounty_pda(&requester, &bounty_id);
-    let bounty_vault = associated_token::get_associated_token_address(&bounty, &s.usdc_mint);
     Instruction::new_with_bytes(
         escrow::id(),
         &escrow::instruction::CreateAndFund {
@@ -268,12 +300,13 @@ fn create_and_fund_ix(
         .data(),
         escrow::accounts::CreateAndFund {
             requester,
+            config: accounts.config,
             bounty,
-            usdc_mint: s.usdc_mint,
-            bounty_vault,
-            requester_ata,
+            usdc_mint: accounts.usdc_mint,
+            bounty_vault: accounts.bounty_vault,
+            requester_ata: accounts.requester_ata,
             arbiter_authority: s.arbiter,
-            token_program: spl_token::id(),
+            token_program: accounts.token_program,
             associated_token_program: associated_token::ID,
             system_program: system_program::ID,
         }
@@ -282,17 +315,22 @@ fn create_and_fund_ix(
 }
 
 fn cancel_ix(s: &Setup, signer: Pubkey, bounty: Pubkey, requester_ata: Pubkey) -> Instruction {
-    let bounty_vault = associated_token::get_associated_token_address(&bounty, &s.usdc_mint);
+    let accounts = token_accounts(s, &bounty, requester_ata);
+    cancel_ix_with(signer, bounty, accounts)
+}
+
+fn cancel_ix_with(signer: Pubkey, bounty: Pubkey, accounts: TokenAccounts) -> Instruction {
     Instruction::new_with_bytes(
         escrow::id(),
         &escrow::instruction::Cancel {}.data(),
         escrow::accounts::Cancel {
             requester: signer,
+            config: accounts.config,
             bounty,
-            usdc_mint: s.usdc_mint,
-            bounty_vault,
-            requester_ata,
-            token_program: spl_token::id(),
+            usdc_mint: accounts.usdc_mint,
+            bounty_vault: accounts.bounty_vault,
+            requester_ata: accounts.requester_ata,
+            token_program: accounts.token_program,
         }
         .to_account_metas(None),
     )
@@ -323,6 +361,28 @@ fn assert_named_error(
         "expected named error {name}; got err {:?} with logs:\n{logs}",
         failed.err,
     );
+}
+
+/// Like `assert_named_error`, but pins the account Anchor names as the cause.
+/// Used where two constraints share an error name, so deleting one of them
+/// cannot leave the test green. Echoes the matched line for `--nocapture`.
+#[track_caller]
+fn assert_named_error_at(
+    res: Result<TransactionMetadata, FailedTransactionMetadata>,
+    name: &str,
+    account: &str,
+) {
+    let failed = match res {
+        Ok(meta) => panic!("expected {name} at {account}, but succeeded: {:?}", meta.logs),
+        Err(failed) => failed,
+    };
+    let needle = format!("caused by account: {account}. Error Code: {name}");
+    let line = failed.meta.logs.iter().find(|l| l.contains(&needle));
+    let logs = failed.meta.logs.join("\n");
+    let line = line.unwrap_or_else(|| {
+        panic!("expected \"{needle}\"; got err {:?} with logs:\n{logs}", failed.err)
+    });
+    eprintln!("{line}");
 }
 
 // SPEC test 12 (fee assertions per D67; the section 4.1 field set lands in
@@ -519,8 +579,10 @@ fn cancel_twice_fails() {
     assert_named_error(res, "AccountNotInitialized");
 }
 
+// SPEC test 21: correct mint, token account of another mint. One fault: the
+// token account's mint.
 #[test]
-fn create_with_wrong_mint_fails() {
+fn t21_create_with_token_account_of_other_mint_fails() {
     let mut s = setup();
     let wrong_mint = create_mint(&mut s.svm, &s.requester);
     let wrong_ata = create_funded_ata(
@@ -533,7 +595,146 @@ fn create_with_wrong_mint_fails() {
 
     let ix = create_and_fund_ix(&s, [10u8; 16], REWARD, 3, NOW + 86_400, wrong_ata);
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error_at(res, "MintMismatch", "requester_ata");
+}
+
+// SPEC test 20: a second real mint, with the requester's token account for it.
+// One fault: the mint is not the configured one. The token account and the
+// vault address are both derived from the substitute, so their own
+// constraints hold and only the mint's address can fail.
+#[test]
+fn t20_create_with_other_mint_fails() {
+    let mut s = setup();
+    let other_mint = create_mint(&mut s.svm, &s.requester);
+    let other_ata = create_funded_ata(
+        &mut s.svm,
+        &s.requester,
+        &s.requester.pubkey(),
+        &other_mint,
+        INITIAL_BALANCE,
+    );
+
+    let bounty_id = [20u8; 16];
+    let bounty = bounty_pda(&s.requester.pubkey(), &bounty_id);
+    let accounts = TokenAccounts {
+        usdc_mint: other_mint,
+        bounty_vault: associated_token::get_associated_token_address(&bounty, &other_mint),
+        ..token_accounts(&s, &bounty, other_ata)
+    };
+    let ix = create_and_fund_ix_with(&s, bounty_id, REWARD, 3, NOW + 86_400, accounts);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    // Pinned to usdc_mint: requester_ata's mint check shares the error name.
+    assert_named_error_at(res, "MintMismatch", "usdc_mint");
+}
+
+// SPEC test 25: configuration substitutes, two cases, planted (exploit test).
+// Case 1 plants, at the canonical config address, a byte-identical copy owned
+// by the SPL Token program: one fault, the owner. Case 2 plants a
+// byte-identical escrow-owned copy at a random address: one fault, the
+// derivation. Anchor deserialises non-init accounts in the field phase, so
+// the owner check fires before the bounty's init CPI; the seeds check is an
+// access check, run after init, and the whole transaction reverts.
+#[test]
+fn t25_create_with_planted_config_fails() {
+    // Case 1: same layout, owned by another program.
+    let mut s = setup();
+    let mut planted = s.svm.get_account(&s.config).unwrap();
+    planted.owner = spl_token::id();
+    s.svm.set_account(s.config, planted).unwrap();
+    let ix = create_and_fund_ix(&s, [25u8; 16], REWARD, 3, NOW + 86_400, s.requester_ata);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error(res, "AccountOwnedByWrongProgram");
+
+    // Case 2: program-owned, at a non-PDA address.
+    let mut s = setup();
+    let fake_config = Pubkey::new_unique();
+    let planted = s.svm.get_account(&s.config).unwrap();
+    s.svm.set_account(fake_config, planted).unwrap();
+    let bounty_id = [26u8; 16];
+    let bounty = bounty_pda(&s.requester.pubkey(), &bounty_id);
+    let accounts = TokenAccounts {
+        config: fake_config,
+        ..token_accounts(&s, &bounty, s.requester_ata)
+    };
+    let ix = create_and_fund_ix_with(&s, bounty_id, REWARD, 3, NOW + 86_400, accounts);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error(res, "ConstraintSeeds");
+}
+
+// SPEC test 26: the Token-2022 program ID as `token_program`. One fault: the
+// program account. `Program<Token>` checks the key in the field phase.
+#[test]
+fn t26_create_with_token_2022_program_fails() {
+    let mut s = setup();
+    let bounty_id = [27u8; 16];
+    let bounty = bounty_pda(&s.requester.pubkey(), &bounty_id);
+    let accounts = TokenAccounts {
+        token_program: spl_token_2022::id(),
+        ..token_accounts(&s, &bounty, s.requester_ata)
+    };
+    let ix = create_and_fund_ix_with(&s, bounty_id, REWARD, 3, NOW + 86_400, accounts);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error(res, "InvalidProgramId");
+}
+
+/// A funded bounty for the cancel tests; returns its PDA.
+fn fund_bounty(s: &mut Setup, bounty_id: [u8; 16]) -> Pubkey {
+    let ix = create_and_fund_ix(s, bounty_id, REWARD, 3, NOW + 86_400, s.requester_ata);
+    send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
+    bounty_pda(&s.requester.pubkey(), &bounty_id)
+}
+
+// SPEC test 35: cancel with a token account of another mint. One fault: the
+// token account's mint; its owner is the requester.
+#[test]
+fn t35_cancel_with_token_account_of_other_mint_fails() {
+    let mut s = setup();
+    let bounty = fund_bounty(&mut s, [35u8; 16]);
+    let other_mint = create_mint(&mut s.svm, &s.requester);
+    let other_ata =
+        create_funded_ata(&mut s.svm, &s.requester, &s.requester.pubkey(), &other_mint, 0);
+
+    let ix = cancel_ix(&s, s.requester.pubkey(), bounty, other_ata);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error_at(res, "MintMismatch", "requester_ata");
+}
+
+// SPEC test 36: a mint account other than the configured mint. One fault: the
+// mint. The real vault and token account are passed; `usdc_mint` is declared
+// before `bounty_vault`, so its address constraint fires before the vault's
+// associated-token constraint could see the substitute.
+#[test]
+fn t36_cancel_with_other_mint_fails() {
+    let mut s = setup();
+    let bounty = fund_bounty(&mut s, [36u8; 16]);
+    let other_mint = create_mint(&mut s.svm, &s.requester);
+
+    let accounts = TokenAccounts {
+        usdc_mint: other_mint,
+        ..token_accounts(&s, &bounty, s.requester_ata)
+    };
+    let ix = cancel_ix_with(s.requester.pubkey(), bounty, accounts);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
     assert_named_error(res, "MintMismatch");
+}
+
+// SPEC test 37: the bounty's associated token account for another mint as the
+// vault. One fault: the vault. It is a real, existing ATA whose authority is
+// the bounty; only its mint differs.
+#[test]
+fn t37_cancel_with_vault_of_other_mint_fails() {
+    let mut s = setup();
+    let bounty = fund_bounty(&mut s, [37u8; 16]);
+    let other_mint = create_mint(&mut s.svm, &s.requester);
+    let other_vault = create_funded_ata(&mut s.svm, &s.requester, &bounty, &other_mint, 0);
+
+    let accounts = TokenAccounts {
+        bounty_vault: other_vault,
+        ..token_accounts(&s, &bounty, s.requester_ata)
+    };
+    let ix = cancel_ix_with(s.requester.pubkey(), bounty, accounts);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error(res, "ConstraintAssociated");
 }
 
 // SPEC test 22: correct mint, token account owned by another wallet.
