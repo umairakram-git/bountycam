@@ -31,6 +31,9 @@ const DECIMALS: u8 = 6;
 const INITIAL_BALANCE: u64 = 1_000_000_000; // 1,000 USDC
 const REWARD: u64 = 100_000_000; // 100 USDC
 const POLICY_HASH: [u8; 32] = [7u8; 32];
+const PROFILE_HASH: [u8; 32] = [9u8; 32];
+const ACCEPTANCE_WINDOW: i64 = 86_400;
+const COMPLETION_WINDOW: i64 = 172_800;
 const REVIEW_WINDOW: i64 = 3_600;
 const DEPLOYMENT_ID: u8 = 1;
 const PROGRAM_BYTES: &[u8] =
@@ -262,40 +265,59 @@ fn token_accounts(s: &Setup, bounty: &Pubkey, requester_ata: Pubkey) -> TokenAcc
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// The eight `create_and_fund` arguments (SPEC 7.2). Tests that vary one
+/// argument build the default and replace one field.
+#[derive(Clone, Copy)]
+struct CreateArgs {
+    bounty_id: [u8; 16],
+    reward_amount: u64,
+    policy_hash: [u8; 32],
+    eligibility_profile_hash: [u8; 32],
+    required_assurance: u8,
+    acceptance_window_secs: i64,
+    completion_window_secs: i64,
+    review_window_secs: i64,
+}
+
+fn create_args(bounty_id: [u8; 16], reward_amount: u64, required_assurance: u8) -> CreateArgs {
+    CreateArgs {
+        bounty_id,
+        reward_amount,
+        policy_hash: POLICY_HASH,
+        eligibility_profile_hash: PROFILE_HASH,
+        required_assurance,
+        acceptance_window_secs: ACCEPTANCE_WINDOW,
+        completion_window_secs: COMPLETION_WINDOW,
+        review_window_secs: REVIEW_WINDOW,
+    }
+}
+
 fn create_and_fund_ix(
     s: &Setup,
     bounty_id: [u8; 16],
     reward_amount: u64,
     required_assurance: u8,
-    deadline: i64,
     requester_ata: Pubkey,
 ) -> Instruction {
     let bounty = bounty_pda(&s.requester.pubkey(), &bounty_id);
     let accounts = token_accounts(s, &bounty, requester_ata);
-    create_and_fund_ix_with(s, bounty_id, reward_amount, required_assurance, deadline, accounts)
+    create_and_fund_ix_with(s, create_args(bounty_id, reward_amount, required_assurance), accounts)
 }
 
-fn create_and_fund_ix_with(
-    s: &Setup,
-    bounty_id: [u8; 16],
-    reward_amount: u64,
-    required_assurance: u8,
-    deadline: i64,
-    accounts: TokenAccounts,
-) -> Instruction {
+fn create_and_fund_ix_with(s: &Setup, args: CreateArgs, accounts: TokenAccounts) -> Instruction {
     let requester = s.requester.pubkey();
-    let bounty = bounty_pda(&requester, &bounty_id);
+    let bounty = bounty_pda(&requester, &args.bounty_id);
     Instruction::new_with_bytes(
         escrow::id(),
         &escrow::instruction::CreateAndFund {
-            bounty_id,
-            reward_amount,
-            policy_hash: POLICY_HASH,
-            required_assurance,
-            attester_authority: s.attester,
-            deadline,
-            review_window_secs: REVIEW_WINDOW,
+            bounty_id: args.bounty_id,
+            reward_amount: args.reward_amount,
+            policy_hash: args.policy_hash,
+            eligibility_profile_hash: args.eligibility_profile_hash,
+            required_assurance: args.required_assurance,
+            acceptance_window_secs: args.acceptance_window_secs,
+            completion_window_secs: args.completion_window_secs,
+            review_window_secs: args.review_window_secs,
         }
         .data(),
         escrow::accounts::CreateAndFund {
@@ -305,13 +327,19 @@ fn create_and_fund_ix_with(
             usdc_mint: accounts.usdc_mint,
             bounty_vault: accounts.bounty_vault,
             requester_ata: accounts.requester_ata,
-            arbiter_authority: s.arbiter,
             token_program: accounts.token_program,
             associated_token_program: associated_token::ID,
             system_program: system_program::ID,
         }
         .to_account_metas(None),
     )
+}
+
+/// `create_and_fund` with one argument varied and the default accounts.
+fn create_and_fund_ix_args(s: &Setup, args: CreateArgs) -> Instruction {
+    let bounty = bounty_pda(&s.requester.pubkey(), &args.bounty_id);
+    let accounts = token_accounts(s, &bounty, s.requester_ata);
+    create_and_fund_ix_with(s, args, accounts)
 }
 
 fn cancel_ix(s: &Setup, signer: Pubkey, bounty: Pubkey, requester_ata: Pubkey) -> Instruction {
@@ -385,14 +413,14 @@ fn assert_named_error_at(
     eprintln!("{line}");
 }
 
-// SPEC test 12 (fee assertions per D67; the section 4.1 field set lands in
-// commit 6).
+// SPEC test 12: every section 4.1 field; vault equals reward_amount;
+// platform_fee 0; requester down by exactly reward_amount; acceptance_cutoff
+// equals clock plus window; every Option None; state Funded.
 #[test]
 fn t12_create_and_fund_succeeds() {
     let mut s = setup();
     let bounty_id = [1u8; 16];
-    let deadline = NOW + 86_400;
-    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, deadline, s.requester_ata);
+    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, s.requester_ata);
     let requester = s.requester.pubkey();
     send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
 
@@ -400,20 +428,26 @@ fn t12_create_and_fund_succeeds() {
     let bounty = read_bounty(&s.svm, &bounty_key);
     assert_eq!(bounty.bounty_id, bounty_id);
     assert_eq!(bounty.requester, requester);
-    assert_eq!(bounty.scout, None);
-    assert_eq!(bounty.usdc_mint, s.usdc_mint);
     assert_eq!(bounty.reward_amount, REWARD);
     assert_eq!(bounty.platform_fee, 0);
     assert_eq!(bounty.policy_hash, POLICY_HASH);
+    assert_eq!(bounty.eligibility_profile_hash, PROFILE_HASH);
     assert_eq!(bounty.required_assurance, 3);
-    assert_eq!(bounty.attester_authority, s.attester);
-    assert_eq!(bounty.arbiter_authority, s.arbiter);
-    assert_eq!(bounty.deadline, deadline);
+    assert_eq!(bounty.acceptance_window_secs, ACCEPTANCE_WINDOW);
+    assert_eq!(bounty.completion_window_secs, COMPLETION_WINDOW);
     assert_eq!(bounty.review_window_secs, REVIEW_WINDOW);
-    assert_eq!(bounty.submitted_at, None);
-    assert_eq!(bounty.merkle_root, None);
-    assert_eq!(bounty.achieved_assurance, None);
+    assert_eq!(bounty.acceptance_cutoff, NOW + ACCEPTANCE_WINDOW);
     assert_eq!(bounty.state, BountyState::Funded);
+    let (_, expected_bump) = Pubkey::find_program_address(
+        &[BOUNTY_SEED, requester.as_ref(), bounty_id.as_ref()],
+        &escrow::id(),
+    );
+    assert_eq!(bounty.bump, expected_bump);
+    assert_eq!(bounty.scout, None);
+    assert_eq!(bounty.deadline, None);
+    assert_eq!(bounty.submitted_at, None);
+    assert_eq!(bounty.evidence_root, None);
+    assert_eq!(bounty.achieved_assurance, None);
 
     let vault = associated_token::get_associated_token_address(&bounty_key, &s.usdc_mint);
     assert_eq!(token_balance(&s.svm, &vault), REWARD);
@@ -439,7 +473,7 @@ fn t18_create_with_max_reward_succeeds() {
     assert_eq!(token_balance(&s.svm, &s.requester_ata), u64::MAX);
 
     let bounty_id = [18u8; 16];
-    let ix = create_and_fund_ix(&s, bounty_id, u64::MAX, 3, NOW + 86_400, s.requester_ata);
+    let ix = create_and_fund_ix(&s, bounty_id, u64::MAX, 3, s.requester_ata);
     send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
 
     let bounty_key = bounty_pda(&s.requester.pubkey(), &bounty_id);
@@ -455,7 +489,7 @@ fn t18_create_with_max_reward_succeeds() {
 fn cancel_succeeds() {
     let mut s = setup();
     let bounty_id = [2u8; 16];
-    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, NOW + 86_400, s.requester_ata);
+    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, s.requester_ata);
     send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
 
     let requester = s.requester.pubkey();
@@ -477,7 +511,7 @@ fn cancel_succeeds() {
 fn cancel_by_non_requester_fails() {
     let mut s = setup();
     let bounty_id = [3u8; 16];
-    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, NOW + 86_400, s.requester_ata);
+    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, s.requester_ata);
     send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
 
     let mallory = Keypair::new();
@@ -495,7 +529,7 @@ fn cancel_by_non_requester_fails() {
 fn cancel_when_accepted_fails() {
     let mut s = setup();
     let bounty_id = [4u8; 16];
-    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, NOW + 86_400, s.requester_ata);
+    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, s.requester_ata);
     send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
 
     // No accept instruction exists yet, so force the state transition directly.
@@ -516,35 +550,35 @@ fn cancel_when_accepted_fails() {
     assert_named_error(res, "BountyNotCancellable");
 }
 
+// SPEC test 13.
 #[test]
-fn create_with_zero_reward_fails() {
+fn t13_create_with_zero_reward_fails() {
     let mut s = setup();
-    let ix = create_and_fund_ix(&s, [5u8; 16], 0, 3, NOW + 86_400, s.requester_ata);
+    let ix = create_and_fund_ix(&s, [5u8; 16], 0, 3, s.requester_ata);
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
     assert_named_error(res, "InvalidRewardAmount");
 }
 
+// SPEC test 14: 5 gives AssuranceTooHigh; 4 succeeds.
 #[test]
-fn create_with_past_deadline_fails() {
+fn t14_create_with_assurance_above_max_fails() {
     let mut s = setup();
-    let ix = create_and_fund_ix(&s, [6u8; 16], REWARD, 3, NOW - 100, s.requester_ata);
-    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
-    assert_named_error(res, "DeadlineInPast");
-}
-
-#[test]
-fn create_with_assurance_above_max_fails() {
-    let mut s = setup();
-    let ix = create_and_fund_ix(&s, [7u8; 16], REWARD, 5, NOW + 86_400, s.requester_ata);
+    let ix = create_and_fund_ix(&s, [7u8; 16], REWARD, 5, s.requester_ata);
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
     assert_named_error(res, "AssuranceTooHigh");
+
+    let ix = create_and_fund_ix(&s, [8u8; 16], REWARD, 4, s.requester_ata);
+    send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
+    let bounty = read_bounty(&s.svm, &bounty_pda(&s.requester.pubkey(), &[8u8; 16]));
+    assert_eq!(bounty.required_assurance, 4);
 }
 
+// SPEC test 19.
 #[test]
-fn create_twice_with_same_bounty_id_fails() {
+fn t19_create_twice_with_same_bounty_id_fails() {
     let mut s = setup();
     let bounty_id = [8u8; 16];
-    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, NOW + 86_400, s.requester_ata);
+    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, s.requester_ata);
     send(&mut s.svm, &s.requester, &[ix.clone()], &[&s.requester]).unwrap();
 
     s.svm.expire_blockhash();
@@ -565,7 +599,7 @@ fn create_twice_with_same_bounty_id_fails() {
 fn cancel_twice_fails() {
     let mut s = setup();
     let bounty_id = [9u8; 16];
-    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, NOW + 86_400, s.requester_ata);
+    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, s.requester_ata);
     send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
 
     let bounty_key = bounty_pda(&s.requester.pubkey(), &bounty_id);
@@ -593,7 +627,7 @@ fn t21_create_with_token_account_of_other_mint_fails() {
         INITIAL_BALANCE,
     );
 
-    let ix = create_and_fund_ix(&s, [10u8; 16], REWARD, 3, NOW + 86_400, wrong_ata);
+    let ix = create_and_fund_ix(&s, [10u8; 16], REWARD, 3, wrong_ata);
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
     assert_named_error_at(res, "MintMismatch", "requester_ata");
 }
@@ -621,7 +655,7 @@ fn t20_create_with_other_mint_fails() {
         bounty_vault: associated_token::get_associated_token_address(&bounty, &other_mint),
         ..token_accounts(&s, &bounty, other_ata)
     };
-    let ix = create_and_fund_ix_with(&s, bounty_id, REWARD, 3, NOW + 86_400, accounts);
+    let ix = create_and_fund_ix_with(&s, create_args(bounty_id, REWARD, 3), accounts);
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
     // Pinned to usdc_mint: requester_ata's mint check shares the error name.
     assert_named_error_at(res, "MintMismatch", "usdc_mint");
@@ -641,7 +675,7 @@ fn t25_create_with_planted_config_fails() {
     let mut planted = s.svm.get_account(&s.config).unwrap();
     planted.owner = spl_token::id();
     s.svm.set_account(s.config, planted).unwrap();
-    let ix = create_and_fund_ix(&s, [25u8; 16], REWARD, 3, NOW + 86_400, s.requester_ata);
+    let ix = create_and_fund_ix(&s, [25u8; 16], REWARD, 3, s.requester_ata);
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
     assert_named_error(res, "AccountOwnedByWrongProgram");
 
@@ -656,7 +690,7 @@ fn t25_create_with_planted_config_fails() {
         config: fake_config,
         ..token_accounts(&s, &bounty, s.requester_ata)
     };
-    let ix = create_and_fund_ix_with(&s, bounty_id, REWARD, 3, NOW + 86_400, accounts);
+    let ix = create_and_fund_ix_with(&s, create_args(bounty_id, REWARD, 3), accounts);
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
     assert_named_error(res, "ConstraintSeeds");
 }
@@ -672,14 +706,14 @@ fn t26_create_with_token_2022_program_fails() {
         token_program: spl_token_2022::id(),
         ..token_accounts(&s, &bounty, s.requester_ata)
     };
-    let ix = create_and_fund_ix_with(&s, bounty_id, REWARD, 3, NOW + 86_400, accounts);
+    let ix = create_and_fund_ix_with(&s, create_args(bounty_id, REWARD, 3), accounts);
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
     assert_named_error(res, "InvalidProgramId");
 }
 
 /// A funded bounty for the cancel tests; returns its PDA.
 fn fund_bounty(s: &mut Setup, bounty_id: [u8; 16]) -> Pubkey {
-    let ix = create_and_fund_ix(s, bounty_id, REWARD, 3, NOW + 86_400, s.requester_ata);
+    let ix = create_and_fund_ix(s, bounty_id, REWARD, 3, s.requester_ata);
     send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
     bounty_pda(&s.requester.pubkey(), &bounty_id)
 }
@@ -715,7 +749,8 @@ fn t36_cancel_with_other_mint_fails() {
     };
     let ix = cancel_ix_with(s.requester.pubkey(), bounty, accounts);
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
-    assert_named_error(res, "MintMismatch");
+    // Pinned to usdc_mint: requester_ata's mint check shares the error name.
+    assert_named_error_at(res, "MintMismatch", "usdc_mint");
 }
 
 // SPEC test 37: the bounty's associated token account for another mint as the
@@ -752,7 +787,7 @@ fn t22_create_with_token_account_owned_by_other_wallet_fails() {
         INITIAL_BALANCE,
     );
 
-    let ix = create_and_fund_ix(&s, [22u8; 16], REWARD, 3, NOW + 86_400, mallory_ata);
+    let ix = create_and_fund_ix(&s, [22u8; 16], REWARD, 3, mallory_ata);
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
     assert_named_error(res, "TokenAccountOwnerMismatch");
 }
@@ -764,7 +799,7 @@ fn t22_create_with_token_account_owned_by_other_wallet_fails() {
 fn t34_cancel_with_token_account_owned_by_other_wallet_fails() {
     let mut s = setup();
     let bounty_id = [34u8; 16];
-    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, NOW + 86_400, s.requester_ata);
+    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, s.requester_ata);
     send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
 
     let mallory = Keypair::new();
@@ -1011,8 +1046,10 @@ fn t11_initialize_with_token_account_as_mint_fails() {
 // SPEC 12.7: layout
 // ---------------------------------------------------------------------------
 
-// SPEC test 92, configuration half (section 3): fixed offsets and 138 bytes.
-// The bounty half lands with the section 4.1 layout.
+// SPEC test 92: serialised layouts match sections 3 and 4.1. Configuration:
+// fixed offsets, 138 bytes. Bounty: fixed offsets, `None` as one byte (176
+// bytes all-None), each `Option` tag at its computed offset when all-Some
+// (257 bytes), and the on-chain account is 257 bytes.
 #[test]
 fn t92_serialised_layouts_match_spec() {
     let keys: [Pubkey; 4] = std::array::from_fn(|_| Pubkey::new_unique());
@@ -1035,6 +1072,245 @@ fn t92_serialised_layouts_match_spec() {
     assert_eq!(&buf[105..137], keys[3].as_ref());
     assert_eq!(buf[137], 250);
 
-    let s = setup();
+    let mut s = setup();
     assert_eq!(s.svm.get_account(&s.config).unwrap().data.len(), 138);
+
+    // Bounty, all-None.
+    let requester = Pubkey::new_unique();
+    let mut bounty = Bounty {
+        bounty_id: [1u8; 16],
+        requester,
+        reward_amount: 2,
+        platform_fee: 0,
+        policy_hash: [3u8; 32],
+        eligibility_profile_hash: [4u8; 32],
+        required_assurance: 5,
+        acceptance_window_secs: 6,
+        completion_window_secs: 7,
+        review_window_secs: 8,
+        acceptance_cutoff: 9,
+        state: BountyState::Submitted,
+        bump: 251,
+        scout: None,
+        deadline: None,
+        submitted_at: None,
+        evidence_root: None,
+        achieved_assurance: None,
+    };
+    let mut buf = Vec::new();
+    bounty.try_serialize(&mut buf).unwrap();
+    assert_eq!(Bounty::INIT_SPACE, 249);
+    assert_eq!(buf.len(), 176);
+    assert_eq!(&buf[8..24], &[1u8; 16]);
+    assert_eq!(&buf[24..56], requester.as_ref());
+    assert_eq!(&buf[56..64], &2u64.to_le_bytes());
+    assert_eq!(&buf[64..72], &0u64.to_le_bytes());
+    assert_eq!(&buf[72..104], &[3u8; 32]);
+    assert_eq!(&buf[104..136], &[4u8; 32]);
+    assert_eq!(buf[136], 5);
+    assert_eq!(&buf[137..145], &6i64.to_le_bytes());
+    assert_eq!(&buf[145..153], &7i64.to_le_bytes());
+    assert_eq!(&buf[153..161], &8i64.to_le_bytes());
+    assert_eq!(&buf[161..169], &9i64.to_le_bytes());
+    assert_eq!(buf[169], 2, "state Submitted");
+    assert_eq!(buf[170], 251, "bump");
+    assert_eq!(&buf[171..176], &[0u8; 5], "five None tags");
+
+    // Bounty, all-Some: tags at 171, 204, 213, 222, 255.
+    let scout = Pubkey::new_unique();
+    bounty.scout = Some(scout);
+    bounty.deadline = Some(10);
+    bounty.submitted_at = Some(11);
+    bounty.evidence_root = Some([12u8; 32]);
+    bounty.achieved_assurance = Some(13);
+    let mut buf = Vec::new();
+    bounty.try_serialize(&mut buf).unwrap();
+    assert_eq!(buf.len(), 257);
+    assert_eq!(buf[171], 1);
+    assert_eq!(&buf[172..204], scout.as_ref());
+    assert_eq!(buf[204], 1);
+    assert_eq!(&buf[205..213], &10i64.to_le_bytes());
+    assert_eq!(buf[213], 1);
+    assert_eq!(&buf[214..222], &11i64.to_le_bytes());
+    assert_eq!(buf[222], 1);
+    assert_eq!(&buf[223..255], &[12u8; 32]);
+    assert_eq!(buf[255], 1);
+    assert_eq!(buf[256], 13);
+
+    // On-chain: the account is allocated at the maximum size.
+    let bounty_key = fund_bounty(&mut s, [92u8; 16]);
+    assert_eq!(s.svm.get_account(&bounty_key).unwrap().data.len(), 257);
+}
+
+// SPEC test 93: BountyState discriminants Funded 0, Accepted 1, Submitted 2,
+// both as the Rust discriminant and as the serialised byte.
+#[test]
+fn t93_bounty_state_discriminants() {
+    use anchor_lang::AnchorSerialize;
+    let cases = [
+        (BountyState::Funded, 0u8),
+        (BountyState::Accepted, 1u8),
+        (BountyState::Submitted, 2u8),
+    ];
+    assert_eq!(cases.len(), 3);
+    for (state, expected) in cases {
+        assert_eq!(state as u8, expected, "{state:?}");
+        let mut buf = Vec::new();
+        state.serialize(&mut buf).unwrap();
+        assert_eq!(buf, vec![expected], "{state:?}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SPEC 12.2: create_and_fund, windows and arguments (D81, D84)
+// ---------------------------------------------------------------------------
+
+/// Tests 15 to 17. `set` writes the window under test into the arguments.
+/// Failing cases: 0, minus 1, ceiling plus 1. Passing cases: 1 and the
+/// ceiling. Each case funds its own bounty_id.
+fn window_cases(
+    set: fn(&mut CreateArgs, i64),
+    read: fn(&Bounty) -> i64,
+    ceiling: i64,
+    error: &str,
+    id_base: u8,
+) {
+    let mut s = setup();
+    let failing = [0, -1, ceiling + 1];
+    let passing = [1, ceiling];
+    assert_eq!(failing.len(), 3);
+    assert_eq!(passing.len(), 2);
+
+    for (i, value) in failing.into_iter().enumerate() {
+        let mut args = create_args([id_base + i as u8; 16], REWARD, 3);
+        set(&mut args, value);
+        let ix = create_and_fund_ix_args(&s, args);
+        let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+        assert_named_error(res, error);
+    }
+    for (i, value) in passing.into_iter().enumerate() {
+        let bounty_id = [id_base + 3 + i as u8; 16];
+        let mut args = create_args(bounty_id, REWARD, 3);
+        set(&mut args, value);
+        let ix = create_and_fund_ix_args(&s, args);
+        send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
+        let bounty = read_bounty(&s.svm, &bounty_pda(&s.requester.pubkey(), &bounty_id));
+        assert_eq!(read(&bounty), value);
+    }
+}
+
+// SPEC test 15: acceptance window at 0, minus 1 and 2592001 fail; 1 and
+// 2592000 succeed.
+#[test]
+fn t15_acceptance_window_bounds() {
+    window_cases(
+        |a, v| a.acceptance_window_secs = v,
+        |b| b.acceptance_window_secs,
+        2_592_000,
+        "InvalidAcceptanceWindow",
+        150,
+    );
+}
+
+// SPEC test 16: completion window, the same cases.
+#[test]
+fn t16_completion_window_bounds() {
+    window_cases(
+        |a, v| a.completion_window_secs = v,
+        |b| b.completion_window_secs,
+        2_592_000,
+        "InvalidCompletionWindow",
+        160,
+    );
+}
+
+// SPEC test 17: review window at 0, minus 1 and 86401 fail; 1 and 86400
+// succeed.
+#[test]
+fn t17_review_window_bounds() {
+    window_cases(
+        |a, v| a.review_window_secs = v,
+        |b| b.review_window_secs,
+        86_400,
+        "InvalidReviewWindow",
+        170,
+    );
+}
+
+// SPEC test 23: the generated IDL lists exactly the eight section 7.2
+// arguments, in order (D67, D74, D82). Read from the build output at run
+// time, so it is the file `anchor build` wrote in the same run; a missing
+// file is a failure, never a skip.
+#[test]
+fn t23_idl_lists_exactly_the_eight_arguments() {
+    let path = concat!(env!("CARGO_TARGET_TMPDIR"), "/../idl/escrow.json");
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("IDL missing at {path}: {e}; run anchor build"));
+    let idl: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let ix = idl["instructions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|ix| ix["name"] == "create_and_fund")
+        .expect("create_and_fund in IDL");
+    let args: Vec<&str> = ix["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        args,
+        [
+            "bounty_id",
+            "reward_amount",
+            "policy_hash",
+            "eligibility_profile_hash",
+            "required_assurance",
+            "acceptance_window_secs",
+            "completion_window_secs",
+            "review_window_secs",
+        ]
+    );
+    let accounts: Vec<&str> = ix["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
+    for removed in ["arbiter_authority", "attester_authority"] {
+        assert!(!accounts.contains(&removed), "{removed} still in accounts");
+    }
+}
+
+// SPEC test 24: eligibility_profile_hash stored byte for byte, including
+// all-zero and all-ones (D84). Each case funds its own bounty_id.
+#[test]
+fn t24_eligibility_profile_hash_stored_byte_for_byte() {
+    let mut s = setup();
+    let cases: [[u8; 32]; 3] = [[0u8; 32], [0xffu8; 32], std::array::from_fn(|i| i as u8)];
+    assert_eq!(cases.len(), 3);
+    for (i, hash) in cases.into_iter().enumerate() {
+        let bounty_id = [240 + i as u8; 16];
+        let mut args = create_args(bounty_id, REWARD, 3);
+        args.eligibility_profile_hash = hash;
+        let ix = create_and_fund_ix_args(&s, args);
+        send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
+        let bounty = read_bounty(&s.svm, &bounty_pda(&s.requester.pubkey(), &bounty_id));
+        assert_eq!(bounty.eligibility_profile_hash, hash);
+    }
+}
+
+// SPEC test 27: clock set so clock plus acceptance window exceeds i64::MAX.
+// One fault: the clock. The window itself is within bounds.
+#[test]
+fn t27_create_with_timestamp_overflow_fails() {
+    let mut s = setup();
+    let mut clock = s.svm.get_sysvar::<Clock>();
+    clock.unix_timestamp = i64::MAX - 10;
+    s.svm.set_sysvar::<Clock>(&clock);
+
+    let ix = create_and_fund_ix(&s, [27u8; 16], REWARD, 3, s.requester_ata);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error(res, "TimestampOverflow");
 }

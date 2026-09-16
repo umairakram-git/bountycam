@@ -13,7 +13,6 @@ pub struct Cancel<'info> {
         mut,
         close = requester,
         has_one = requester @ EscrowError::UnauthorizedRequester,
-        has_one = usdc_mint @ EscrowError::MintMismatch,
         constraint = bounty.state == BountyState::Funded @ EscrowError::BountyNotCancellable,
         seeds = [BOUNTY_SEED, bounty.requester.as_ref(), bounty.bounty_id.as_ref()],
         bump = bounty.bump

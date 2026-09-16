@@ -37,55 +37,77 @@ pub struct CreateAndFund<'info> {
         constraint = requester_ata.owner == requester.key() @ EscrowError::TokenAccountOwnerMismatch
     )]
     pub requester_ata: Account<'info, TokenAccount>,
-    /// CHECK: only the address is recorded as the arbiter authority
-    pub arbiter_authority: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
 
+/// SPEC 7.2. No attester, arbiter, fee, mint or absolute-deadline argument
+/// (D67, D74, D81, D82, D83).
 #[allow(clippy::too_many_arguments)]
 pub fn handle_create_and_fund(
     ctx: Context<CreateAndFund>,
     bounty_id: [u8; 16],
     reward_amount: u64,
     policy_hash: [u8; 32],
+    eligibility_profile_hash: [u8; 32],
     required_assurance: u8,
-    attester_authority: Pubkey,
-    deadline: i64,
+    acceptance_window_secs: i64,
+    completion_window_secs: i64,
     review_window_secs: i64,
 ) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+
+    // Check 1.
     require!(reward_amount > 0, EscrowError::InvalidRewardAmount);
-    require!(
-        deadline > Clock::get()?.unix_timestamp,
-        EscrowError::DeadlineInPast
-    );
+    // Check 2.
     require!(
         required_assurance <= MAX_ASSURANCE_LEVEL,
         EscrowError::AssuranceTooHigh
     );
+    // Checks 3 to 5: each window in 1 to its compiled ceiling (D81).
+    require!(
+        (1..=MAX_ACCEPTANCE_WINDOW_SECS).contains(&acceptance_window_secs),
+        EscrowError::InvalidAcceptanceWindow
+    );
+    require!(
+        (1..=MAX_COMPLETION_WINDOW_SECS).contains(&completion_window_secs),
+        EscrowError::InvalidCompletionWindow
+    );
+    require!(
+        (1..=MAX_REVIEW_WINDOW_SECS).contains(&review_window_secs),
+        EscrowError::InvalidReviewWindow
+    );
+    // Check 6: the cutoff must not overflow i64.
+    let acceptance_cutoff = now
+        .checked_add(acceptance_window_secs)
+        .ok_or(EscrowError::TimestampOverflow)?;
 
+    // Effect 1: write the bounty. `eligibility_profile_hash` is stored without
+    // validation (D84); policy agreement is enforced off-chain.
     ctx.accounts.bounty.set_inner(Bounty {
         bounty_id,
         requester: ctx.accounts.requester.key(),
-        scout: None,
-        usdc_mint: ctx.accounts.usdc_mint.key(),
         reward_amount,
         // Exactly 0 (D24, D67). No fee arithmetic exists.
         platform_fee: 0,
         policy_hash,
+        eligibility_profile_hash,
         required_assurance,
-        attester_authority,
-        arbiter_authority: ctx.accounts.arbiter_authority.key(),
-        deadline,
+        acceptance_window_secs,
+        completion_window_secs,
         review_window_secs,
-        submitted_at: None,
-        merkle_root: None,
-        achieved_assurance: None,
+        acceptance_cutoff,
         state: BountyState::Funded,
         bump: ctx.bumps.bounty,
+        scout: None,
+        deadline: None,
+        submitted_at: None,
+        evidence_root: None,
+        achieved_assurance: None,
     });
 
+    // Effect 2: exactly reward_amount, checked against the mint's decimals.
     token::transfer_checked(
         CpiContext::new(
             ctx.accounts.token_program.key(),

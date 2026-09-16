@@ -37,9 +37,10 @@ pub mod escrow {
         bounty_id: [u8; 16],
         reward_amount: u64,
         policy_hash: [u8; 32],
+        eligibility_profile_hash: [u8; 32],
         required_assurance: u8,
-        attester_authority: Pubkey,
-        deadline: i64,
+        acceptance_window_secs: i64,
+        completion_window_secs: i64,
         review_window_secs: i64,
     ) -> Result<()> {
         instructions::create_and_fund::handle_create_and_fund(
@@ -47,9 +48,10 @@ pub mod escrow {
             bounty_id,
             reward_amount,
             policy_hash,
+            eligibility_profile_hash,
             required_assurance,
-            attester_authority,
-            deadline,
+            acceptance_window_secs,
+            completion_window_secs,
             review_window_secs,
         )
     }
