@@ -1513,3 +1513,43 @@ Tests, at minimum: `cancel` then `create_and_fund` with the same `bounty_id` in 
 succeeds; the bounty is `Funded` with every `Option` `None` and `acceptance_cutoff` equal to the
 clock plus the window; the vault holds exactly `reward_amount`; the requester's token balance is
 down by exactly `reward_amount`.
+
+**D89 — The escrow test harness runs the native ed25519 verifier; a forged signature is
+tested.** SPEC section 6 checks the designated instruction's shape, key and message, never its
+signature. A wrong signature is rejected only because the runtime runs the native ed25519
+verifier on that instruction before the program executes. litesvm 0.10.0 does so only when
+built with its `precompiles` feature (`src/callback.rs`); without it, `is_precompile` takes
+`solana-svm-callback` 3.1.14's default of false and the ed25519 program account is never
+loaded. The escrow tests enable no litesvm features, and neither `agave-precompiles` nor
+`solana-ed25519-program`, both cited in SPEC section 6.1, is in `Cargo.lock`. The harness
+could not execute tests 42 to 89 as written, and no test varied the signature alone.
+
+Ruling. The litesvm dev-dependency enables `precompiles`. `solana-ed25519-program` is added
+as a dev-dependency pinned `=3.0.0`, publisher and repository verified (D19); it builds every
+well-formed designated instruction, and malformed variants are derived from its output, so
+test and program cannot share one misreading of the offset table. Resolution is confirmed
+with `cargo tree`. If `agave-precompiles` resolves to other than 3.1.14, section 6.1's
+statements about the native verifier are re-read from the resolved source before tests 75,
+77, 81 and 82 are written.
+
+SPEC test 95 is added to section 12.6. Numbering it 95 keeps 91 to 94, which other documents
+cite, unchanged. It is a guard: the check runs outside the program, so no runtime red is
+possible by withholding program code.
+
+Dependencies. The feature and the builder add 19 packages to `Cargo.lock` and move no existing
+version. Each is new to the lock and reachable only through these two dev-dependency edges, so
+none can enter the program build; `cargo tree -e normal,build` finds none of them.
+`agave-precompiles` 3.1.14 builds OpenSSL 3.6.3 from source (`openssl-src`) for its secp256r1
+verifier, a one-time cost per clean test build. Checked against `rustsec/advisory-db` at
+e2e6404, two carry advisories: `ed25519-dalek` 1.0.1, RUSTSEC-2022-0093, a signing oracle when
+a public key is supplied apart from its secret key; and `curve25519-dalek` 3.2.0,
+RUSTSEC-2024-0344, timing variability in scalar subtraction. Both are accepted for tests only.
+`ed25519-dalek` 1.0.1 is the version `agave-precompiles` 3.1.14 depends on, which the harness
+must run, and tests hold only per-run keys or the published test seeds, so neither advisory
+exposes a secret. The acceptance extends to no crate built into the program, the API or a
+client.
+
+Tests, at minimum: on each path, two cases, a designated instruction canonical in shape,
+naming the expected authority and carrying the expected message, with one signature bit
+flipped. The transaction fails at the designated instruction's index, not the escrow
+instruction's, and the bounty account is byte-identical.
