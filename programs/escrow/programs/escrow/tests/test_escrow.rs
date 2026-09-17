@@ -2869,3 +2869,64 @@ fn t89_compute_budget_between_succeeds() {
     send_relayed(&mut s, &ixs).unwrap();
     assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Submitted);
 }
+
+// SPEC test 95, guard (D89): a designated instruction canonical in shape,
+// naming the expected authority and carrying the expected message, with one
+// signature bit flipped, on each path. The check runs in the native verifier,
+// outside the program, so no runtime red is possible. Bit 0 of byte 48, the
+// first signature byte, is flipped; agave-precompiles 3.1.14 ed25519.rs
+// returns InvalidSignature for an unparseable signature (lines 51 to 52) and
+// for a non-verifying one (lines 75 to 83), which litesvm reports as
+// InstructionError(index, Custom(2)). The transaction fails at the designated
+// index 0, the program never runs, and the bounty is byte-identical. The
+// same transaction with the bit unflipped then succeeds, so the flipped bit
+// was the only fault.
+#[test]
+fn t95_flipped_signature_bit_fails_in_native_verifier() {
+    let cases: [&str; 2] = ["accept path", "submit_attestation path"];
+    assert_eq!(cases.len(), 2);
+    for name in cases {
+        eprintln!("case: {name}");
+        let mut s = setup();
+        let (bounty, designated, escrow_ix, payer, expected_state) = match name {
+            "accept path" => {
+                let bounty = fund_bounty(&mut s, [95u8; 16]);
+                let scout = new_scout(&mut s);
+                let expires_at = NOW + VOUCHER_TTL;
+                let voucher =
+                    voucher_ix(&s.svm, &s.eligibility, &bounty, &scout.pubkey(), expires_at);
+                let accept = accept_ix(scout.pubkey(), bounty, expires_at, 0);
+                (bounty, voucher, accept, scout, BountyState::Accepted)
+            }
+            "submit_attestation path" => {
+                let (bounty, _scout) = accepted_bounty(&mut s, [96u8; 16]);
+                let attestation = default_attestation_ix(&s, &bounty);
+                let relayer = new_scout(&mut s);
+                let submit = default_submit_ix(bounty, 0);
+                (bounty, attestation, submit, relayer, BountyState::Submitted)
+            }
+            other => panic!("unknown case {other}"),
+        };
+
+        let mut flipped = designated.clone();
+        flipped.data[SIG_OFF] ^= 0x01;
+        assert_ne!(flipped.data, designated.data);
+        let snapshot = s.svm.get_account(&bounty).unwrap().data;
+
+        let res = send(&mut s.svm, &payer, &[flipped, escrow_ix.clone()], &[&payer]);
+        let failed = res.expect_err("expected the native verifier to reject the signature");
+        assert_eq!(format!("{:?}", failed.err), "InstructionError(0, Custom(2))");
+        let logs = failed.meta.logs.join("\n");
+        assert!(!logs.contains("Instruction: Accept"), "program ran:\n{logs}");
+        assert!(!logs.contains("Instruction: SubmitAttestation"), "program ran:\n{logs}");
+        assert_eq!(s.svm.get_account(&bounty).unwrap().data, snapshot, "byte-identical");
+        eprintln!(
+            "native verifier rejected the designated instruction at index 0 with \
+             InvalidSignature (Custom(2)); the program did not run"
+        );
+
+        s.svm.expire_blockhash();
+        send(&mut s.svm, &payer, &[designated, escrow_ix], &[&payer]).unwrap();
+        assert_eq!(read_bounty(&s.svm, &bounty).state, expected_state);
+    }
+}
