@@ -526,45 +526,53 @@ Session 4 fee-constant incident as a column.
 
 ### 7.2 States
 
-`bounty_state` keeps all thirteen values; the enum is not narrowed. Session 7 code
-produces exactly two:
+`bounty_state` keeps all thirteen values; the enum is not narrowed (D56). Session 7 code
+produces exactly two: `DRAFT`, and `CANCELLED` for an unfunded bounty.
+
+The mapping below is normative (D97). The database tracks confirmed chain state (D79). Apart
+from `DRAFT` and unfunded `CANCELLED`, every value is written only on confirmation of the named
+transaction, never from voucher issuance, a database reservation, or a submission response
+(SECURITY.md section 12). Session 15 reconciliation is the backstop that repairs missed or
+inconsistent projections, not the mechanism by which the application discovers what happened
+(D79).
 
 | State | Produced by |
 |---|---|
 | `DRAFT` | creation (section 8.3) |
-| `CANCELLED` | unfunded cancellation (section 8.7) |
+| `CANCELLED` | unfunded cancellation (section 8.7); or confirmed `cancel` of a funded bounty, |
+| | with its transaction signature and `BountyCancelled` event recorded (D76) |
+| `AVAILABLE` | confirmed `create_and_fund` with every binding agreeing (D79, D84) |
+| `ACCEPTED` | confirmed `accept` (D79) |
+| `SUBMITTED` | confirmed `submit_attestation` |
+| `DISPUTED` | confirmed `reject`; the `decisions` row's `failed_requirement_id` matches the chain |
+| `PAID` | confirmed `approve`, `release`, or `resolve` paying the Scout |
+| `REFUNDED` | confirmed `expire_accepted`, or `resolve` refunding the requester |
+| `EXPIRED` | confirmed `expire_unaccepted`; the account is closed, so its transaction signature |
+| | and `BountyExpired` event are recorded, as for a funded cancellation |
 
-**`CANCELLED` means unfunded cancellation, only.** It is reached from `DRAFT` alone,
-so a `CANCELLED` row has `program_account` null and no on-chain account was ever
-created for it; there is no escrow to refund and no on-chain state to reconcile.
-Cancellation after funding — where USDC is refunded on-chain — is Session 9's to
-define during the enum reconciliation (BACKLOG), including whether such a row ends
-`CANCELLED` or `REFUNDED`. Until then no code path maps a funded bounty to
-`CANCELLED`.
+An unfunded `CANCELLED` row has `program_account` null: no on-chain account was ever created,
+there is no escrow to refund and nothing to reconcile. A funded cancellation ends `CANCELLED`,
+not `REFUNDED` (D76, D97).
 
-The remaining eleven values are unreachable in Session 7 code: no statement writes
-them, and reads treat them as opaque display values. The normative assignment of each
-value to a producing transition is the Session 9 enum reconciliation, except the two
-D79 fixes: confirmed on-chain `create_and_fund` produces `AVAILABLE`, and confirmed
-on-chain `accept` produces `ACCEPTED` — both only on chain confirmation, never from
-voucher issuance, a database reservation, or a submission response. Session 15
-reconciliation is the backstop that repairs missed or inconsistent projections, not
-the mechanism by which the application discovers what happened (D79).
+Retained without a producer and never written (D97); reads treat them as opaque display values:
 
-The table below is informative expectation only, recorded so a later session's claim
-to a value is checked against a written plan rather than memory:
+- `FUNDED` — its use for a malformed funded bounty remains Session 15's (D77, D84).
+- `IN_REVIEW` — the same chain state as `SUBMITTED`; the review window is derived from
+  `submitted_at` and `review_window_secs`.
+- `APPROVED`, `REJECTED` — each is confirmed in the same transaction as `PAID` or `DISPUTED`, so
+  no confirmed chain state corresponds to it.
 
-| State | Expected first producer (informative) |
+Where each producer's code path ships is informative, recorded so a later session's claim to a
+value is checked against a written plan rather than memory:
+
+| State | Code path expected in (informative) |
 |---|---|
-| `AVAILABLE` | the D79 prose above — confirmed `create_and_fund`, projected immediately |
-| `FUNDED` | Session 9 enum reconciliation to define; D79 assigns it no producer |
-| `ACCEPTED` | the D79 prose above — confirmed `accept`; Session 11 ships the path |
+| `AVAILABLE` | the funding confirmation path |
+| `ACCEPTED` | Session 11 |
 | `SUBMITTED` | Session 13 — evidence upload and submission |
-| `IN_REVIEW`, `APPROVED`, `REJECTED`, `DISPUTED` | Session 16 — requester review, dispute |
+| `DISPUTED` | Session 16 — requester review, dispute |
 | `PAID`, `REFUNDED`, `EXPIRED` | Session 15 — reconciliation of settlement confirmations |
-
-`SUBMITTED` is likewise expected from confirmed on-chain `submit_attestation`; its
-normative assignment remains Session 9's.
+| funded `CANCELLED` | not yet scheduled |
 
 Decided now, so nobody reads a scheduling conflict into the table: Session 11's
 assignment race test targets the `assignments` unique partial index, not the funding
