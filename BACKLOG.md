@@ -76,9 +76,10 @@ is built (Session 7).~~ Decided 12 September (Session 7a): `numeric(20, 0)`
 with a CHECK for the u64 bounds; base-unit integer string on the wire
 (POLICY.md section 6, D57). Migration lands in Session 7b.
 
-**DB `bounty_state` vs program state enums to reconcile.** The database
+~~**DB `bounty_state` vs program state enums to reconcile.** The database
 enum and the on-chain state machine must not drift; reconcile when the
-escrow state instructions land (Session 9).
+escrow state instructions land (Session 9).~~ Closed 655262b: D97's mapping
+in POLICY.md section 7.2.
 
 **`apps/mobile/.claude` expo plugin decision.** Decide whether the
 template-supplied plugin configuration stays (Session 10).
@@ -206,7 +207,8 @@ find the parent; decide whether it matters (Session 7).
   stated limit until any of: a supported client path reuses bounty ids;
   voucher validity becomes long-lived; a Session 9 path closes an account that
   can hold a valid attestation. Any one requires a program-bound bounty
-  incarnation identifier.
+  incarnation identifier. Session 9 assessment (D96): the third trigger is not
+  tripped; only `expire_unaccepted` closes a bounty, from `Funded`.
 - **Eligibility and arbiter development keys (D83).** Neither exists in
   `~/bountycam-keys/`. Generate both before `initialize`, and rehearse
   `initialize` on localnet with the exact devnet public keys first: the
@@ -223,10 +225,10 @@ find the parent; decide whether it matters (Session 7).
   program become unreadable after the redeploy. List program-owned accounts on
   devnet before redeploying and cancel any holding test USDC while the old
   program can still read them.
-- **SECURITY.md section 7's attester leak line overstates.** It says a colluding
+- ~~**SECURITY.md section 7's attester leak line overstates.** It says a colluding
   Scout is paid without real work; D12's review window still lets the requester
   dispute before release. Tighten when Session 9 fixes the release and dispute
-  rules.
+  rules.~~ Closed eecf47c (D93).
 - **`MESSAGES.md` never states `schema_version`'s value in prose.** Sections 3
   and 4 give it only as a `u16` constant; the value exists only in the published
   vectors. The escrow spec (section 9) defers to the vectors. Add the value to the
@@ -276,24 +278,57 @@ find the parent; decide whether it matters (Session 7).
 
 ## Open items from Session 8 build part 2 (17 September)
 
-- **Two checks are implemented with no test.** `accept` check 7 (`TimestampOverflow`)
+- ~~**Two checks are implemented with no test.** `accept` check 7 (`TimestampOverflow`)
   needs a funding clock within 30 days of `i64::MAX`, which no real chain reaches, and a
   test would change the 95-test gate. `submit_attestation` check 2
   (`StateInvariantViolated`) is unreachable without planting: only `accept` writes `scout`
   and `deadline`, always together, and only `accept` sets `Accepted`. Both are task 18
-  review items in HANDOFF; revisit only if a Session 9 instruction can clear either field.
-- **SPEC wording, owed at the next SPEC edit.** Section 4.1's sentence "An instruction
+  review items in HANDOFF; revisit only if a Session 9 instruction can clear either field.~~
+  Closed e5bab87: no Session 9 instruction clears either field (D96); both stay review items.
+- ~~**SPEC wording, owed at the next SPEC edit.** Section 4.1's sentence "An instruction
   finding the invariant broken fails with `StateInvariantViolated`" reads as binding on
   every instruction, but section 7.4 gives `accept` no such check and the build followed
   7.4; tighten 4.1 to name `submit_attestation`. Section 16's reconciliation row stops at
   D89; extend it to D90 and D91; the exact wording is settled at that edit. Wording only,
-  no behaviour change.
+  no behaviour change.~~ Closed e5bab87: section 4.1 names the instructions that check the
+  invariant; section 16 runs through D98.
 - **RUSTSEC acceptances need an allowlist entry, not silent removal.** `ed25519-dalek`
   1.0.1 (RUSTSEC-2022-0093) and `curve25519-dalek` 3.2.0 (RUSTSEC-2024-0344) are accepted
   for tests only (D89): they enter through the two dev-dependency edges and never the
   program build. When the CI dependency review of SECURITY-PRODUCTION.md section 7 exists,
   its allowlist carries both ids citing D89, so a future audit run fails loudly on any
   third advisory rather than on these two.
+
+---
+
+## Open items from Session 9 specification (17 September)
+
+- **Funded `CANCELLED` projection is unscheduled.** POLICY.md section 7.2 (D97) maps a
+  confirmed funded `cancel` to `CANCELLED`, but no session is named to build that path.
+  Assign it when Sessions 15 and 16 are planned in detail.
+- **Clients must create destination token accounts.** The program never creates the Scout
+  payout or requester refund account (D92, D95). Every client or relayer path that submits
+  `approve`, `release`, `resolve` or either expiry places the Associated Token program's
+  idempotent create first. Owed by Sessions 15 and 16.
+- **Nothing settles on its own.** `release` after the review window and both expiries are
+  permissionless, but the chain acts only when someone submits them (D92, D95). The Session 15
+  relayer needs a job that finds due bounties and submits them; until then funds wait in the
+  vault.
+- **Arbiter liveness.** A dispute has no timeout (D94). Before mainnet, decide an operational
+  response time or rule on a timeout; SECURITY-PRODUCTION.md section 11's arbiter item does not
+  cover it.
+- **Vault pre-creation blocks funding.** Pre-existing since Session 8, found while reading
+  Anchor's source. `create_and_fund` initialises the vault with `init`, which calls the
+  Associated Token program's non-idempotent `create`, so anyone who first creates the associated
+  token account at a bounty's vault address makes funding fail for that requester and
+  `bounty_id`. No funds are at risk. Exposure depends on whether a `bounty_id` is visible to
+  anyone but its requester before funding, and on same-id re-creation, which D86 already treats
+  as unsupported. Needs a ruling before the funding path ships.
+- **Tokens sent to a settled bounty's vault are unrecoverable.** Stated limit in SPEC section 15
+  (D96). Revisit only if a client ever shows vault addresses, or if a recovery instruction is
+  wanted, which needs its own D-entry.
+- **Rent in settled bounty accounts.** 2797920 lamports per `Paid` or `Refunded` bounty stay
+  locked (D96). Reclaiming them needs its own D-entry and must not reopen D86's replay trigger.
 
 ---
 
@@ -390,7 +425,7 @@ find the parent; decide whether it matters (Session 7).
 
 Revised from the original four-week plan after the D10 positioning change.
 Sessions 1 to 6, 7a and 7b complete; Session 8's escrow build complete, its capture nonce
-issuance not built.
+issuance not built; Session 9's specification complete, its build open.
 
 ### Week 1 remainder
 
@@ -405,7 +440,7 @@ issuance not built.
 | # | Scope |
 |---|---|
 | 8 | Escrow — `accept`, `submit_attestation` **done 17 Sep**; capture nonce issuance open |
-| 9 | Escrow — `approve`, `reject`, `resolve`, `expire`, review window |
+| 9 | Escrow — spec **done 17 Sep** (D92 to D98); build six instructions, tests 96 to 140 |
 | 10 | Mobile — MWA sign-in, SIWS on device, SGT verification |
 | 11 | Mobile — discovery, bounty detail, accept, assignment race test |
 | 12 | Mobile — guided capture via c2pa-android |
@@ -438,8 +473,10 @@ issuance not built.
 
 ## Contingencies
 
-**If Session 8 or 9 slips past day 14** — drop to a three-instruction escrow
-(fund / release / refund) and move dispute entirely off-chain.
+~~**If Session 8 or 9 slips past day 14** — drop to a three-instruction escrow
+(fund / release / refund) and move dispute entirely off-chain.~~ Replaced for Session 9 by
+D98: if no committed build shows every Session 9 SPEC test passing by the end of 22 September,
+Sydney time, Umair rules on this contingency before further build work.
 
 ~~**If MWA misbehaves in Session 10** — stop everything. It blocks the whole
 mobile path.~~ Answered 12 September (MWA spike): all three MWA questions pass
