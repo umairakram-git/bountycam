@@ -1582,6 +1582,14 @@ fn layout(name: &str) -> (Vec<(String, usize, usize)>, usize) {
     (fields, table["total_bytes"].as_u64().unwrap() as usize)
 }
 
+fn hex(s: &str) -> Vec<u8> {
+    assert_eq!(s.len() % 2, 0, "odd hex length");
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+        .collect()
+}
+
 /// Test-side `BOUNTYCAM_ELIGIBILITY_V1`: every field placed at the published
 /// table's offset with the table's width, from bounty state and the given
 /// Scout and expiry. Independent of the program's builder, which test 90
@@ -2008,4 +2016,856 @@ fn t55_accept_through_cpi_fails() {
 
     let res = send(&mut s.svm, &scout, &[voucher, via_cpi(inner)], &[&scout]);
     assert_named_error(res, "InvocationNotTopLevel");
+}
+
+// ---------------------------------------------------------------------------
+// SPEC 12.5 and 12.6: submit_attestation and designated verification
+// (D71, D77, D82, D85, D89)
+// ---------------------------------------------------------------------------
+
+const EVIDENCE_ROOT_T: [u8; 32] = [0x0e; 32];
+/// Equal to the funded requirement, 3.
+const ACHIEVED: u8 = 3;
+const ISSUED_AT: i64 = NOW - 60;
+/// The compute-budget program: the literal of solana-sdk-ids 3.1.0
+/// `compute_budget`, re-exported by solana-compute-budget-interface 3.1.0 and
+/// not by anchor-lang.
+const COMPUTE_BUDGET_ID: Pubkey =
+    Pubkey::from_str_const("ComputeBudget111111111111111111111111111111");
+/// Section 6.1 offsets, restated for the variant builders (SPEC section 9).
+const KEY_OFF: usize = 16;
+const SIG_OFF: usize = 48;
+const MSG_OFF: usize = 112;
+
+/// Test-side `BOUNTYCAM_ATTESTATION_V1`, placed by the published layout
+/// table. `scout` and `deadline` are explicit so a message can be built for
+/// a bounty that was never accepted (test 67).
+fn attestation_message_with(
+    bounty: &Bounty,
+    scout: &Pubkey,
+    deadline: i64,
+    evidence_root: &[u8; 32],
+    achieved: u8,
+    issued_at: i64,
+) -> Vec<u8> {
+    let (fields, total) = layout("BOUNTYCAM_ATTESTATION_V1");
+    let mut out = vec![0u8; total];
+    for (name, offset, width) in &fields {
+        let bytes: Vec<u8> = match name.as_str() {
+            "domain_tag" => b"BOUNTYCAM_ATTESTATION_V1".to_vec(),
+            "schema_version" => 1u16.to_le_bytes().to_vec(),
+            "deployment_id" => vec![DEPLOYMENT_ID],
+            "program_id" => escrow::id().to_bytes().to_vec(),
+            "bounty_id" => bounty.bounty_id.to_vec(),
+            "requester" => bounty.requester.to_bytes().to_vec(),
+            "scout" => scout.to_bytes().to_vec(),
+            "policy_hash" => bounty.policy_hash.to_vec(),
+            "eligibility_profile_hash" => bounty.eligibility_profile_hash.to_vec(),
+            "required_assurance" => vec![bounty.required_assurance],
+            "deadline" => deadline.to_le_bytes().to_vec(),
+            "review_window_secs" => bounty.review_window_secs.to_le_bytes().to_vec(),
+            "evidence_root" => evidence_root.to_vec(),
+            "achieved_assurance" => vec![achieved],
+            "issued_at" => issued_at.to_le_bytes().to_vec(),
+            other => panic!("unknown attestation field {other}"),
+        };
+        assert_eq!(bytes.len(), *width, "{name}");
+        out[*offset..*offset + *width].copy_from_slice(&bytes);
+    }
+    out
+}
+
+/// The attestation for an accepted bounty: Scout and deadline from state.
+fn attestation_message(
+    bounty: &Bounty,
+    evidence_root: &[u8; 32],
+    achieved: u8,
+    issued_at: i64,
+) -> Vec<u8> {
+    let scout = bounty.scout.expect("accepted bounty has a scout");
+    let deadline = bounty.deadline.expect("accepted bounty has a deadline");
+    attestation_message_with(bounty, &scout, deadline, evidence_root, achieved, issued_at)
+}
+
+fn attestation_ix(
+    svm: &LiteSVM,
+    signer: &Keypair,
+    bounty: &Pubkey,
+    evidence_root: &[u8; 32],
+    achieved: u8,
+    issued_at: i64,
+) -> Instruction {
+    let state = read_bounty(svm, bounty);
+    ed25519_ix(signer, &attestation_message(&state, evidence_root, achieved, issued_at))
+}
+
+fn default_attestation_ix(s: &Setup, bounty: &Pubkey) -> Instruction {
+    attestation_ix(&s.svm, &s.attester, bounty, &EVIDENCE_ROOT_T, ACHIEVED, ISSUED_AT)
+}
+
+fn submit_ix_with_sysvar(
+    bounty: Pubkey,
+    evidence_root: [u8; 32],
+    achieved_assurance: u8,
+    issued_at: i64,
+    index: u16,
+    instructions_sysvar: Pubkey,
+) -> Instruction {
+    Instruction::new_with_bytes(
+        escrow::id(),
+        &escrow::instruction::SubmitAttestation {
+            evidence_root,
+            achieved_assurance,
+            issued_at,
+            verification_instruction_index: index,
+        }
+        .data(),
+        escrow::accounts::SubmitAttestation {
+            config: config_pda(),
+            bounty,
+            instructions_sysvar,
+        }
+        .to_account_metas(None),
+    )
+}
+
+fn submit_ix(
+    bounty: Pubkey,
+    evidence_root: [u8; 32],
+    achieved_assurance: u8,
+    issued_at: i64,
+    index: u16,
+) -> Instruction {
+    let sysvar = solana_instructions_sysvar::ID;
+    submit_ix_with_sysvar(bounty, evidence_root, achieved_assurance, issued_at, index, sysvar)
+}
+
+fn default_submit_ix(bounty: Pubkey, index: u16) -> Instruction {
+    submit_ix(bounty, EVIDENCE_ROOT_T, ACHIEVED, ISSUED_AT, index)
+}
+
+/// Fund and accept: the state every submit test starts from.
+fn accepted_bounty(s: &mut Setup, bounty_id: [u8; 16]) -> (Pubkey, Keypair) {
+    let bounty = fund_bounty(s, bounty_id);
+    let scout = new_scout(s);
+    accept_with_voucher(s, &scout, bounty, NOW + VOUCHER_TTL).unwrap();
+    (bounty, scout)
+}
+
+/// Sends `ixs` with a fresh wallet as payer and only signer: the relayer of
+/// D85, which is any fee payer. No Scout signature anywhere.
+fn send_relayed(
+    s: &mut Setup,
+    ixs: &[Instruction],
+) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+    let relayer = new_scout(s);
+    send(&mut s.svm, &relayer, ixs, &[&relayer])
+}
+
+/// The default submission: `[attestation, submit(index 0)]`, relayed.
+fn submit_default(
+    s: &mut Setup,
+    bounty: Pubkey,
+) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+    let attestation = default_attestation_ix(s, &bounty);
+    send_relayed(s, &[attestation, default_submit_ix(bounty, 0)])
+}
+
+/// A submission whose attested level is `achieved`, validly signed.
+fn submit_with_achieved(
+    s: &mut Setup,
+    bounty: Pubkey,
+    achieved: u8,
+) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+    let attestation =
+        attestation_ix(&s.svm, &s.attester, &bounty, &EVIDENCE_ROOT_T, achieved, ISSUED_AT);
+    let submit = submit_ix(bounty, EVIDENCE_ROOT_T, achieved, ISSUED_AT, 0);
+    send_relayed(s, &[attestation, submit])
+}
+
+/// `SetComputeUnitLimit`: discriminator 2, then the u32 little-endian
+/// (solana-compute-budget-interface 3.1.0 `to_instruction!`). No accounts.
+fn cb_limit(units: u32) -> Instruction {
+    let mut data = vec![2u8];
+    data.extend(units.to_le_bytes());
+    Instruction {
+        program_id: COMPUTE_BUDGET_ID,
+        accounts: vec![],
+        data,
+    }
+}
+
+/// `SetComputeUnitPrice`: discriminator 3, then the u64 little-endian.
+fn cb_price(micro_lamports: u64) -> Instruction {
+    let mut data = vec![3u8];
+    data.extend(micro_lamports.to_le_bytes());
+    Instruction {
+        program_id: COMPUTE_BUDGET_ID,
+        accounts: vec![],
+        data,
+    }
+}
+
+fn put_u16(data: &mut [u8], at: usize, value: u16) {
+    data[at..at + 2].copy_from_slice(&value.to_le_bytes());
+}
+
+#[derive(Clone, Copy)]
+enum Part {
+    Key,
+    Sig,
+    Msg,
+}
+
+/// `base` with its key, signature and message re-laid in `order` and the
+/// three offset fields rewritten to match. Header fields other than the
+/// offsets, and the total length, are unchanged, so the offsets are the only
+/// deviation from section 6.1.
+fn relaid(base: &Instruction, order: [Part; 3]) -> Instruction {
+    let key = &base.data[KEY_OFF..SIG_OFF];
+    let sig = &base.data[SIG_OFF..MSG_OFF];
+    let msg = &base.data[MSG_OFF..];
+    let mut data = base.data[..16].to_vec();
+    for part in order {
+        let (bytes, field_at) = match part {
+            Part::Key => (key, 6),
+            Part::Sig => (sig, 2),
+            Part::Msg => (msg, 10),
+        };
+        let at = data.len() as u16;
+        put_u16(&mut data, field_at, at);
+        data.extend_from_slice(bytes);
+    }
+    assert_eq!(data.len(), base.data.len());
+    Instruction {
+        data,
+        ..base.clone()
+    }
+}
+
+/// Like `assert_named_error`, and also pins the failing top-level
+/// instruction index. Used where the designated instruction is malformed
+/// for the program but valid for the native verifier: the failure must come
+/// from the escrow instruction, which shows the native verifier accepted the
+/// form.
+#[track_caller]
+fn assert_named_error_at_index(
+    res: Result<TransactionMetadata, FailedTransactionMetadata>,
+    name: &str,
+    index: u8,
+) {
+    let failed = match res {
+        Ok(meta) => panic!(
+            "expected {name} at instruction {index}, but succeeded: {:?}",
+            meta.logs
+        ),
+        Err(failed) => failed,
+    };
+    let logs = failed.meta.logs.join("\n");
+    assert!(
+        logs.contains(&format!("Error Code: {name}")),
+        "expected named error {name}; got err {:?} with logs:\n{logs}",
+        failed.err,
+    );
+    let err = format!("{:?}", failed.err);
+    assert!(
+        err.starts_with(&format!("InstructionError({index}, ")),
+        "expected the failure at instruction {index}; got {err}"
+    );
+    eprintln!("{name} at instruction {index}: {err}");
+}
+
+// SPEC test 32: cancel after a real submit_attestation. One fault: the
+// state. Guard of the existing state constraint.
+#[test]
+fn t32_cancel_when_submitted_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [32u8; 16]);
+    submit_default(&mut s, bounty).unwrap();
+
+    let ix = cancel_ix(&s, s.requester.pubkey(), bounty, s.requester_ata);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error(res, "BountyNotCancellable");
+}
+
+// SPEC test 56: submitted by an arbitrary fee payer with no Scout signature;
+// fields written; submitted_at equals the clock; state Submitted; the
+// accept-written fields and every fixed field unchanged; no token movement.
+#[test]
+fn t56_submit_attestation_succeeds() {
+    let mut s = setup();
+    let (bounty, scout) = accepted_bounty(&mut s, [56u8; 16]);
+    let before = read_bounty(&s.svm, &bounty);
+    let vault = associated_token::get_associated_token_address(&bounty, &s.usdc_mint);
+
+    submit_default(&mut s, bounty).unwrap();
+
+    let after = read_bounty(&s.svm, &bounty);
+    assert_eq!(after.evidence_root, Some(EVIDENCE_ROOT_T));
+    assert_eq!(after.achieved_assurance, Some(ACHIEVED));
+    assert_eq!(after.submitted_at, Some(NOW));
+    assert_eq!(after.state, BountyState::Submitted);
+    assert_eq!(after.scout, Some(scout.pubkey()));
+    assert_eq!(after.deadline, before.deadline);
+    assert_fixed_fields_equal(&before, &after);
+    assert_eq!(token_balance(&s.svm, &vault), REWARD);
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE - REWARD);
+}
+
+// SPEC test 57: at exactly deadline succeeds (D81).
+#[test]
+fn t57_submit_at_exactly_deadline_succeeds() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [57u8; 16]);
+    let deadline = read_bounty(&s.svm, &bounty).deadline.unwrap();
+    set_clock(&mut s.svm, deadline);
+
+    submit_default(&mut s, bounty).unwrap();
+    let after = read_bounty(&s.svm, &bounty);
+    assert_eq!(after.state, BountyState::Submitted);
+    assert_eq!(after.submitted_at, Some(deadline));
+}
+
+// SPEC test 58: one second after deadline. One fault: the clock.
+#[test]
+fn t58_submit_one_second_after_deadline_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [58u8; 16]);
+    let deadline = read_bounty(&s.svm, &bounty).deadline.unwrap();
+    set_clock(&mut s.svm, deadline + 1);
+
+    let res = submit_default(&mut s, bounty);
+    assert_named_error(res, "SubmissionDeadlinePassed");
+}
+
+// SPEC test 59: achieved below required, validly signed. One fault: the
+// attested level. The bounty account is byte-identical afterwards (D85).
+#[test]
+fn t59_submit_with_achieved_below_required_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [59u8; 16]);
+    let snapshot = s.svm.get_account(&bounty).unwrap().data;
+
+    let res = submit_with_achieved(&mut s, bounty, 2);
+    assert_named_error(res, "InsufficientAssurance");
+    assert_eq!(s.svm.get_account(&bounty).unwrap().data, snapshot, "byte-identical");
+}
+
+// SPEC test 60: achieved equal to required succeeds.
+#[test]
+fn t60_submit_with_achieved_equal_to_required_succeeds() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [60u8; 16]);
+    submit_with_achieved(&mut s, bounty, 3).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).achieved_assurance, Some(3));
+}
+
+// SPEC test 61: achieved above required succeeds.
+#[test]
+fn t61_submit_with_achieved_above_required_succeeds() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [61u8; 16]);
+    submit_with_achieved(&mut s, bounty, 4).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).achieved_assurance, Some(4));
+}
+
+// SPEC test 62: achieved 5, validly signed. One fault: the range; check 6
+// precedes check 7.
+#[test]
+fn t62_submit_with_achieved_above_max_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [62u8; 16]);
+    let res = submit_with_achieved(&mut s, bounty, 5);
+    assert_named_error(res, "AchievedAssuranceOutOfRange");
+}
+
+// SPEC test 63: an attestation naming another Scout, signed by the attester.
+// One fault: the Scout; the reconstruction uses the stored one (D85).
+#[test]
+fn t63_attestation_naming_other_scout_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [63u8; 16]);
+    let state = read_bounty(&s.svm, &bounty);
+    let other = Pubkey::new_unique();
+    let message = attestation_message_with(
+        &state,
+        &other,
+        state.deadline.unwrap(),
+        &EVIDENCE_ROOT_T,
+        ACHIEVED,
+        ISSUED_AT,
+    );
+    let ix = ed25519_ix(&s.attester, &message);
+
+    let res = send_relayed(&mut s, &[ix, default_submit_ix(bounty, 0)]);
+    assert_named_error(res, "VerificationMessageMismatch");
+}
+
+// SPEC test 64: the correct attestation signed by the eligibility key, the
+// arbiter and a fresh key, three cases. One fault: the verifying key.
+#[test]
+fn t64_attestation_signed_by_non_attester_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [64u8; 16]);
+    let state = read_bounty(&s.svm, &bounty);
+    let message = attestation_message(&state, &EVIDENCE_ROOT_T, ACHIEVED, ISSUED_AT);
+
+    let signers: [(&str, Keypair); 3] = [
+        ("eligibility", s.eligibility.insecure_clone()),
+        ("arbiter", s.arbiter.insecure_clone()),
+        ("fresh key", Keypair::new()),
+    ];
+    assert_eq!(signers.len(), 3);
+    for (name, signer) in &signers {
+        eprintln!("case: signed by the {name}");
+        let ix = ed25519_ix(signer, &message);
+        let res = send_relayed(&mut s, &[ix, default_submit_ix(bounty, 0)]);
+        assert_named_error(res, "VerificationAuthorityMismatch");
+    }
+}
+
+// SPEC test 65: the fifteen published attestation mutation vectors, each.
+// A published vector carries fixed requester, Scout and program bytes no live
+// bounty can match without planting, so each mutation is consumed as a byte
+// delta against the published nominal message and replayed onto the live
+// message. Before any case runs: 15 entries; their fields equal the
+// published table's 15 names in order; each differs from the nominal message
+// only inside its field's offset range.
+#[test]
+fn t65_published_attestation_mutations_fail() {
+    let doc: serde_json::Value = serde_json::from_str(VECTORS).unwrap();
+    let mutations = doc["mutations_attestation"].as_array().unwrap();
+    assert_eq!(mutations.len(), 15, "MESSAGES.md section 8: 15 mutation vectors");
+    let (fields, _) = layout("BOUNTYCAM_ATTESTATION_V1");
+    assert_eq!(fields.len(), 15);
+    let names: Vec<&str> = mutations.iter().map(|m| m["field"].as_str().unwrap()).collect();
+    let table_names: Vec<&str> = fields.iter().map(|f| f.0.as_str()).collect();
+    assert_eq!(names, table_names, "mutation fields equal the layout table's fields");
+    assert_eq!(doc["vectors"][0]["name"], "ATT-01");
+    let nominal = hex(doc["vectors"][0]["message_hex"].as_str().unwrap());
+
+    let mut deltas: Vec<(String, Vec<u8>)> = Vec::new();
+    for (m, (name, offset, width)) in mutations.iter().zip(&fields) {
+        let mutated = hex(m["message_hex"].as_str().unwrap());
+        assert_eq!(mutated.len(), nominal.len(), "{name}");
+        assert_ne!(mutated, nominal, "{name}: mutation differs from the nominal message");
+        assert_eq!(m["offset"].as_u64().unwrap() as usize, *offset, "{name}");
+        assert_eq!(m["width"].as_u64().unwrap() as usize, *width, "{name}");
+        let delta: Vec<u8> = nominal.iter().zip(&mutated).map(|(a, b)| a ^ b).collect();
+        assert!(delta.iter().any(|b| *b != 0), "{name}: non-empty delta");
+        for (i, b) in delta.iter().enumerate() {
+            if *b != 0 {
+                assert!(
+                    (*offset..offset + width).contains(&i),
+                    "{name}: delta byte {i} outside the field"
+                );
+            }
+        }
+        deltas.push((name.clone(), delta));
+    }
+    assert_eq!(deltas.len(), 15);
+
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [65u8; 16]);
+    let state = read_bounty(&s.svm, &bounty);
+    let live = attestation_message(&state, &EVIDENCE_ROOT_T, ACHIEVED, ISSUED_AT);
+    for (name, delta) in &deltas {
+        eprintln!("case: {name}");
+        let mutated: Vec<u8> = live.iter().zip(delta).map(|(a, b)| a ^ b).collect();
+        assert_ne!(mutated, live);
+        let ix = ed25519_ix(&s.attester, &mutated);
+        let res = send_relayed(&mut s, &[ix, default_submit_ix(bounty, 0)]);
+        assert_named_error(res, "VerificationMessageMismatch");
+    }
+}
+
+// SPEC test 66: a second submission of the same attestation. One fault: the
+// state is Submitted. The same two instructions are sent twice.
+#[test]
+fn t66_second_submission_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [66u8; 16]);
+    let ixs = [default_attestation_ix(&s, &bounty), default_submit_ix(bounty, 0)];
+    send_relayed(&mut s, &ixs).unwrap();
+
+    s.svm.expire_blockhash();
+    let res = send_relayed(&mut s, &ixs);
+    assert_named_error(res, "BountyNotAttestable");
+}
+
+// SPEC test 67: before accept. One fault: the state is Funded. The
+// attestation is well-formed and attester-signed, with an explicit Scout and
+// deadline because the account holds neither.
+#[test]
+fn t67_submit_before_accept_fails() {
+    let mut s = setup();
+    let bounty = fund_bounty(&mut s, [67u8; 16]);
+    let state = read_bounty(&s.svm, &bounty);
+    let message = attestation_message_with(
+        &state,
+        &Pubkey::new_unique(),
+        NOW + COMPLETION_WINDOW,
+        &EVIDENCE_ROOT_T,
+        ACHIEVED,
+        ISSUED_AT,
+    );
+    let ix = ed25519_ix(&s.attester, &message);
+
+    let res = send_relayed(&mut s, &[ix, default_submit_ix(bounty, 0)]);
+    assert_named_error(res, "BountyNotAttestable");
+}
+
+// SPEC test 68: a valid attestation for another bounty. One fault: the
+// bounty. Both bounties are accepted; A's attestation is submitted against B.
+#[test]
+fn t68_attestation_for_other_bounty_fails() {
+    let mut s = setup();
+    let (a, _) = accepted_bounty(&mut s, [68u8; 16]);
+    let (b, _) = accepted_bounty(&mut s, [69u8; 16]);
+    let attestation_for_a = default_attestation_ix(&s, &a);
+
+    let res = send_relayed(&mut s, &[attestation_for_a, default_submit_ix(b, 0)]);
+    assert_named_error(res, "VerificationMessageMismatch");
+}
+
+// SPEC test 69: submit_attestation through CPI. One fault: the stack height.
+#[test]
+fn t69_submit_through_cpi_fails() {
+    let mut s = setup();
+    s.svm.add_program(CPI_CALLER_ID, CPI_CALLER_BYTES).unwrap();
+    let (bounty, _scout) = accepted_bounty(&mut s, [70u8; 16]);
+    let attestation = default_attestation_ix(&s, &bounty);
+    let inner = default_submit_ix(bounty, 0);
+
+    let res = send_relayed(&mut s, &[attestation, via_cpi(inner)]);
+    assert_named_error(res, "InvocationNotTopLevel");
+}
+
+// SPEC test 70: a fake account as the Instructions sysvar. One fault: the
+// sysvar address.
+#[test]
+fn t70_fake_instructions_sysvar_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [71u8; 16]);
+    let attestation = default_attestation_ix(&s, &bounty);
+    let fake = Pubkey::new_unique();
+    let submit =
+        submit_ix_with_sysvar(bounty, EVIDENCE_ROOT_T, ACHIEVED, ISSUED_AT, 0, fake);
+
+    let res = send_relayed(&mut s, &[attestation, submit]);
+    assert_named_error(res, "InvalidInstructionsSysvar");
+}
+
+// SPEC test 71: index equal to the current instruction.
+#[test]
+fn t71_index_equal_to_current_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [72u8; 16]);
+    let attestation = default_attestation_ix(&s, &bounty);
+    let res = send_relayed(&mut s, &[attestation, default_submit_ix(bounty, 1)]);
+    assert_named_error(res, "VerificationIndexInvalid");
+}
+
+// SPEC test 72: index after the current instruction, at a valid ed25519
+// instruction that has not yet run.
+#[test]
+fn t72_index_after_current_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [73u8; 16]);
+    let attestation = default_attestation_ix(&s, &bounty);
+    let ixs = [attestation.clone(), default_submit_ix(bounty, 2), attestation];
+    let res = send_relayed(&mut s, &ixs);
+    assert_named_error(res, "VerificationIndexInvalid");
+}
+
+// SPEC test 73: index beyond the instruction count.
+#[test]
+fn t73_index_beyond_count_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [74u8; 16]);
+    let attestation = default_attestation_ix(&s, &bounty);
+    let res = send_relayed(&mut s, &[attestation, default_submit_ix(bounty, 7)]);
+    assert_named_error(res, "VerificationIndexInvalid");
+}
+
+// SPEC test 74: index at a compute-budget instruction. The real attestation
+// sits at index 1; the designated index 0 is the compute-budget instruction.
+#[test]
+fn t74_index_at_compute_budget_instruction_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [75u8; 16]);
+    let attestation = default_attestation_ix(&s, &bounty);
+    let ixs = [cb_limit(400_000), attestation, default_submit_ix(bounty, 0)];
+    let res = send_relayed(&mut s, &ixs);
+    assert_named_error(res, "NotEd25519Instruction");
+}
+
+// SPEC test 75: the two-byte zero-signature instruction, which the native
+// verifier accepts (agave-precompiles 3.1.14 ed25519.rs lines 16 to 22).
+// One fault: the shape. The failure index 1 is the escrow instruction.
+#[test]
+fn t75_zero_signature_instruction_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [76u8; 16]);
+    let base = default_attestation_ix(&s, &bounty);
+    let variant = Instruction {
+        data: vec![0, 0],
+        accounts: vec![],
+        ..base
+    };
+    let res = send_relayed(&mut s, &[variant, default_submit_ix(bounty, 0)]);
+    assert_named_error_at_index(res, "MalformedVerificationInstruction", 1);
+}
+
+// SPEC test 76: a valid two-signature instruction: count 2, two identical
+// offset structures each raised by 14 to skip the second header entry, then
+// the same key, signature and message. The native verifier checks both.
+#[test]
+fn t76_two_signature_instruction_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [77u8; 16]);
+    let base = default_attestation_ix(&s, &bounty);
+    let mut offsets = base.data[2..16].to_vec();
+    for at in [0, 4, 8] {
+        let value = u16::from_le_bytes([offsets[at], offsets[at + 1]]) + 14;
+        put_u16(&mut offsets, at, value);
+    }
+    let mut data = vec![2u8, 0];
+    data.extend(&offsets);
+    data.extend(&offsets);
+    data.extend(&base.data[16..]);
+    let variant = Instruction { data, ..base };
+    let res = send_relayed(&mut s, &[variant, default_submit_ix(bounty, 0)]);
+    assert_named_error_at_index(res, "MalformedVerificationInstruction", 1);
+}
+
+// SPEC test 77: padding byte non-zero, which the native verifier never reads
+// (ed25519.rs line 26).
+#[test]
+fn t77_non_zero_padding_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [78u8; 16]);
+    let mut variant = default_attestation_ix(&s, &bounty);
+    variant.data[1] = 1;
+    let res = send_relayed(&mut s, &[variant, default_submit_ix(bounty, 0)]);
+    assert_named_error_at_index(res, "MalformedVerificationInstruction", 1);
+}
+
+// SPEC test 78: each of the three instruction-index fields pointed at
+// instruction 0, a valid copy holding the same bytes at the same offsets,
+// three cases. The designated instruction is index 1; the escrow is index 2.
+#[test]
+fn t78_index_fields_pointing_elsewhere_fail() {
+    let cases: [(&str, usize); 3] = [
+        ("signature instruction index", 4),
+        ("public key instruction index", 8),
+        ("message instruction index", 14),
+    ];
+    assert_eq!(cases.len(), 3);
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [79u8; 16]);
+    let base = default_attestation_ix(&s, &bounty);
+    for (name, at) in cases {
+        eprintln!("case: {name} at bytes {at} to {}", at + 1);
+        let mut variant = base.clone();
+        put_u16(&mut variant.data, at, 0);
+        let ixs = [base.clone(), variant, default_submit_ix(bounty, 1)];
+        let res = send_relayed(&mut s, &ixs);
+        assert_named_error_at_index(res, "MalformedVerificationInstruction", 2);
+    }
+}
+
+// SPEC test 79: key, signature and message moved to a valid alternative
+// layout, three cases: each is a permutation with the offsets rewritten and
+// the total length unchanged, so the offsets are the only deviation.
+#[test]
+fn t79_alternative_layouts_fail() {
+    let cases: [(&str, [Part; 3]); 3] = [
+        ("signature first", [Part::Sig, Part::Key, Part::Msg]),
+        ("message first", [Part::Msg, Part::Key, Part::Sig]),
+        ("key, message, signature", [Part::Key, Part::Msg, Part::Sig]),
+    ];
+    assert_eq!(cases.len(), 3);
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [80u8; 16]);
+    let base = default_attestation_ix(&s, &bounty);
+    for (name, order) in cases {
+        eprintln!("case: {name}");
+        let variant = relaid(&base, order);
+        let res = send_relayed(&mut s, &[variant, default_submit_ix(bounty, 0)]);
+        assert_named_error_at_index(res, "MalformedVerificationInstruction", 1);
+    }
+}
+
+// SPEC test 80: the message size field one short. The signature is made
+// over the shorter message so the native verifier accepts it; the final
+// message byte is still present, so the total length is canonical.
+#[test]
+fn t80_wrong_message_size_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [81u8; 16]);
+    let base = default_attestation_ix(&s, &bounty);
+    let message = attestation_message(
+        &read_bounty(&s.svm, &bounty),
+        &EVIDENCE_ROOT_T,
+        ACHIEVED,
+        ISSUED_AT,
+    );
+    let mut variant = ed25519_ix(&s.attester, &message[..message.len() - 1]);
+    variant.data.push(message[message.len() - 1]);
+    assert_eq!(variant.data.len(), base.data.len());
+    let res = send_relayed(&mut s, &[variant, default_submit_ix(bounty, 0)]);
+    assert_named_error_at_index(res, "MalformedVerificationInstruction", 1);
+}
+
+// SPEC test 81: trailing bytes after the message, which the native verifier
+// accepts (ed25519.rs line 27 is a lower bound only).
+#[test]
+fn t81_trailing_bytes_fail() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [82u8; 16]);
+    let mut variant = default_attestation_ix(&s, &bounty);
+    variant.data.push(0);
+    let res = send_relayed(&mut s, &[variant, default_submit_ix(bounty, 0)]);
+    assert_named_error_at_index(res, "MalformedVerificationInstruction", 1);
+}
+
+// SPEC test 82: truncated offsets. The data ends inside the 14-byte offset
+// structure, so the native verifier rejects it (ed25519.rs line 27,
+// InvalidInstructionDataSize) at the designated index 0 and the program
+// never runs. Guard: the check is outside the program (D89). A precompile
+// error reaches litesvm as InstructionError(index, Custom(variant)), variant
+// 4 being InvalidInstructionDataSize in solana-precompile-error 3.0.0.
+#[test]
+fn t82_truncated_offsets_fail_in_native_verifier() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [83u8; 16]);
+    let mut variant = default_attestation_ix(&s, &bounty);
+    variant.data.truncate(10);
+    let res = send_relayed(&mut s, &[variant, default_submit_ix(bounty, 0)]);
+    let failed = res.expect_err("expected the native verifier to reject the truncated data");
+    let err = format!("{:?}", failed.err);
+    assert_eq!(err, "InstructionError(0, Custom(4))");
+    let logs = failed.meta.logs.join("\n");
+    assert!(!logs.contains("Instruction: SubmitAttestation"), "program ran:\n{logs}");
+    eprintln!(
+        "native verifier rejected the designated instruction at index 0 with \
+         InvalidInstructionDataSize (Custom(4)); the program did not run"
+    );
+}
+
+// SPEC test 83: the designated instruction carrying one account, which the
+// native verifier ignores.
+#[test]
+fn t83_designated_instruction_with_account_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [84u8; 16]);
+    let mut variant = default_attestation_ix(&s, &bounty);
+    variant.accounts = vec![AccountMeta::new_readonly(config_pda(), false)];
+    let res = send_relayed(&mut s, &[variant, default_submit_ix(bounty, 0)]);
+    assert_named_error_at_index(res, "MalformedVerificationInstruction", 1);
+}
+
+// SPEC test 84: a valid attester signature over a different message of the
+// right length. One fault: the content.
+#[test]
+fn t84_valid_signature_over_other_message_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [85u8; 16]);
+    let other = ed25519_ix(&s.attester, &[0xab; 261]);
+    let res = send_relayed(&mut s, &[other, default_submit_ix(bounty, 0)]);
+    assert_named_error(res, "VerificationMessageMismatch");
+}
+
+// SPEC test 85: a voucher on the attestation path and an attestation on the
+// accept path, two cases, each signed by that path's expected authority so
+// the message type is the only fault; rejected by length (212 against 261)
+// before any authority or content comparison. The failure index 1 is the
+// escrow instruction on both paths.
+#[test]
+fn t85_cross_type_messages_fail() {
+    let cases: [&str; 2] = [
+        "voucher on the attestation path",
+        "attestation on the accept path",
+    ];
+    assert_eq!(cases.len(), 2);
+    let mut s = setup();
+    for name in cases {
+        eprintln!("case: {name}");
+        let res = match name {
+            "voucher on the attestation path" => {
+                let (bounty, scout) = accepted_bounty(&mut s, [86u8; 16]);
+                let state = read_bounty(&s.svm, &bounty);
+                let voucher = eligibility_message(&state, &scout.pubkey(), NOW + VOUCHER_TTL);
+                let ix = ed25519_ix(&s.attester, &voucher);
+                send_relayed(&mut s, &[ix, default_submit_ix(bounty, 0)])
+            }
+            "attestation on the accept path" => {
+                let bounty = fund_bounty(&mut s, [87u8; 16]);
+                let scout = new_scout(&mut s);
+                let state = read_bounty(&s.svm, &bounty);
+                let attestation = attestation_message_with(
+                    &state,
+                    &scout.pubkey(),
+                    NOW + COMPLETION_WINDOW,
+                    &EVIDENCE_ROOT_T,
+                    ACHIEVED,
+                    ISSUED_AT,
+                );
+                let ix = ed25519_ix(&s.eligibility, &attestation);
+                accept_tx(&mut s.svm, &scout, bounty, NOW + VOUCHER_TTL, ix)
+            }
+            other => panic!("unknown case {other}"),
+        };
+        assert_named_error_at_index(res, "MalformedVerificationInstruction", 1);
+    }
+}
+
+// SPEC test 86: two identical valid ed25519 instructions, the first
+// designated, succeeds.
+#[test]
+fn t86_duplicate_verification_first_designated_succeeds() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [88u8; 16]);
+    let attestation = default_attestation_ix(&s, &bounty);
+    let ixs = [attestation.clone(), attestation, default_submit_ix(bounty, 0)];
+    send_relayed(&mut s, &ixs).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Submitted);
+}
+
+// SPEC test 87: the same, the second designated, succeeds.
+#[test]
+fn t87_duplicate_verification_second_designated_succeeds() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [89u8; 16]);
+    let attestation = default_attestation_ix(&s, &bounty);
+    let ixs = [attestation.clone(), attestation, default_submit_ix(bounty, 1)];
+    send_relayed(&mut s, &ixs).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Submitted);
+}
+
+// SPEC test 88: a valid matching ed25519 instruction elsewhere while the
+// designated one, signed by the attester over other bytes of the right
+// length, does not match. Only the designated instruction binds (D71).
+#[test]
+fn t88_matching_verification_elsewhere_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [90u8; 16]);
+    let designated = ed25519_ix(&s.attester, &[0xab; 261]);
+    let matching = default_attestation_ix(&s, &bounty);
+    let ixs = [designated, matching, default_submit_ix(bounty, 0)];
+    let res = send_relayed(&mut s, &ixs);
+    assert_named_error(res, "VerificationMessageMismatch");
+}
+
+// SPEC test 89: compute-budget instructions between the verification and the
+// program instruction succeed; adjacency is not required (D71).
+#[test]
+fn t89_compute_budget_between_succeeds() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [95u8; 16]);
+    let attestation = default_attestation_ix(&s, &bounty);
+    let ixs = [attestation, cb_limit(400_000), cb_price(1), default_submit_ix(bounty, 0)];
+    send_relayed(&mut s, &ixs).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Submitted);
 }

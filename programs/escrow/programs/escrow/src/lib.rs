@@ -71,4 +71,20 @@ pub mod escrow {
     ) -> Result<()> {
         instructions::accept::handle_accept(ctx, expires_at, verification_instruction_index)
     }
+
+    pub fn submit_attestation(
+        ctx: Context<SubmitAttestation>,
+        evidence_root: [u8; 32],
+        achieved_assurance: u8,
+        issued_at: i64,
+        verification_instruction_index: u16,
+    ) -> Result<()> {
+        instructions::submit_attestation::handle_submit_attestation(
+            ctx,
+            evidence_root,
+            achieved_assurance,
+            issued_at,
+            verification_instruction_index,
+        )
+    }
 }
