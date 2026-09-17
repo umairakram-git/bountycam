@@ -1,11 +1,11 @@
 # BountyCam — Handoff
 
-**Date:** 16 September 2026
+**Date:** 17 September 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
-spec session steps 1 to 3; Session 8 build part 1
-**Next session:** 8 build part 2 — section 6 verification, `accept`, `submit_attestation`
-and the CPI caller program, per `programs/escrow/SPEC.md` (aac6e5b)
-**Deadline:** 8 October 2026 (22 days remaining)
+spec session steps 1 to 3; Session 8 build parts 1 and 2
+**Next session:** Session 8 build part 2 complete; next is Session 9 — `approve`, `reject`,
+`resolve` and `expire`
+**Deadline:** 8 October 2026 (21 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
 
@@ -706,6 +706,119 @@ for `~/.claude` and is excluded by the global git ignore.
 
 ---
 
+## Session 8 build, part 2 — designated verification, `accept`, `submit_attestation`
+
+Claude Code built SPEC tasks 12, 13, 14, 16, 18 and 19 against `programs/escrow/SPEC.md`
+(c2f74c9). The architect chat reviewed shapes and diffs before each commit; Umair ran the
+counted runs and committed each from raw output. Twelve commits since 1c18dac, all pushed;
+origin/main is 0297dce:
+
+- 3b0c851 — D89: the escrow tests run the native ed25519 verifier; test 95; dev dependencies.
+- c2f74c9 — SPEC: precompiles harness rule, test 95, task 19; sections 11 and 16 through D89.
+- 93cc024 — litesvm `precompiles` feature; `solana-ed25519-program` =3.0.0 (task 19).
+- a54447d — message builders; unit test 90 reproduces the 17 published vectors (task 12a).
+- 542b16b — harness: `Setup`'s three authorities become per-run keypairs.
+- a695ccc — D90: the CPI caller is excluded from Anchor's workspace; counted run gains
+  `cargo build-sbf`.
+- 9b25c69 — test-only `cpi_caller` for tests 55 and 69 (task 16, D90).
+- aee46f2 — D91: the escrow depends directly on `solana-instructions-sysvar` =3.0.1.
+- 90ae536 — that dependency; program graph unchanged (D91).
+- 97f0732 — verification routine and `accept`; tests 31, 42 to 55, 91 at three cases
+  (tasks 12b, 13a, 14).
+- b4e1f26 — `submit_attestation`; tests 32 and 56 to 89 (task 13b).
+- 0297dce — test 95, a flipped signature bit rejected by the native verifier on both paths.
+
+Gate at 0297dce: 95 SPEC tests plus `test_id`, counted per binary from the raw summary:
+`test_escrow` 94, escrow unit 2 (`test_id`, test 90), `cpi_caller` unit 1 (its own `test_id`).
+The legacy `cancel_when_accepted_fails`, which planted `Accepted`, was removed in 97f0732;
+test 31 reaches `Accepted` through a real `accept`.
+
+Every negative test whose check lives in the program was shown red at runtime first: the
+instruction landed with its checks absent and the transaction succeeding, then the checks
+landed and the run went green (47 passed, 11 failed before `accept`'s checks; 67 passed,
+26 failed before `submit_attestation`'s). Test 91's third case went red at its
+`assert!(meta.is_signer)` precondition, because the red form declared no Scout signer. Tests
+82 and 95 fail in the native verifier, outside the program, and are guards shown passing.
+Tests 31 and 32 guard `cancel`'s existing state constraint, reached through real `accept` and
+`submit_attestation` calls, and were shown passing.
+
+Task 18 review, against the source at 0297dce:
+
+- Every check precedes any CPI. The program makes exactly three CPIs, all token program calls:
+  `create_and_fund.rs` line 111 (`transfer_checked`), `cancel.rs` lines 67 and 94
+  (`transfer_checked`, `close_account`). In `create_and_fund.rs` the last check is line 84;
+  in `cancel.rs` line 49. `initialize`, `accept` and `submit_attestation` make no CPI; their
+  last checks are lines 60, 85 and 100, and every write follows them.
+- No instruction reads remaining accounts: `remaining_accounts` does not occur in the escrow
+  program source. The test-only `cpi_caller` forwards them by design and is never deployed.
+- No dependence on recursion: no instruction invokes any program but the token program, and
+  none invokes the escrow. `accept` and `submit_attestation` reject any non-top-level
+  invocation before reading state (tests 55 and 69).
+- Every builder call site passes `crate::ID`: the program's only calls of
+  `eligibility_message` and `attestation_message` are `accept.rs` line 70 and
+  `submit_attestation.rs` line 76, whose prefixes set `program_id` to `crate::ID` at lines 62
+  and 68. Test 90 calls them at `messages.rs` lines 211 and 220 with the vectors'
+  fill-pattern program id, by design.
+- Untested checks, each implemented per the SPEC with no runtime red: `accept` check 7
+  (`TimestampOverflow`) needs a funding clock within 30 days of `i64::MAX`, which no real
+  chain reaches, and a test would change the 95-test gate; `submit_attestation` check 2
+  (`StateInvariantViolated`) is unreachable without planting, since only `accept` writes
+  `scout` and `deadline`, always together; the seeds constraints on `accept` and
+  `submit_attestation` have the same form as `cancel`'s, which tests 25 and 94 exercise.
+- `VaultBalanceBelowReward` (part 1's open item): `cancel.rs` line 49 checks it before the
+  transfer at line 67, and only the bounty PDA can sign for the vault.
+
+Facts read from crate source or raw output this session:
+
+- anchor-lang 1.1.2 re-exports neither `load_current_index_checked` nor
+  `load_instruction_at_checked` (its `solana_program::sysvar::instructions` holds only the
+  `BorrowedInstruction` types and, off-chain, `construct_instructions_data`), nor the ed25519
+  or compute-budget program ids. Hence D91's direct dependency. The ed25519 id is a
+  `Pubkey::from_str_const` literal in `constants.rs`; the compute-budget id is a literal in the
+  tests only; both are solana-sdk-ids 3.1.0 values. `TRANSACTION_LEVEL_STACK_HEIGHT` and
+  `get_stack_height` are re-exported.
+- litesvm 0.10.0 runs precompiles only with its `precompiles` feature (`src/callback.rs`);
+  without it the ed25519 program account is never loaded (D89). agave-precompiles resolves to
+  3.1.14; section 6.1's four statements about the verifier were re-read from its
+  `src/ed25519.rs` lines 19, 26, 27 and 16 to 22.
+- A precompile failure reaches litesvm as `TransactionError::InstructionError(index,
+  Custom(n))`, n being the `PrecompileError` variant index (solana-precompile-error 3.0.0;
+  program-runtime 3.1.14 `invoke_context.rs` line 502; instruction-error 2.5.0 lines 371 to
+  412): `InvalidSignature` is `Custom(2)`, `InvalidInstructionDataSize` `Custom(4)`. Tests 82
+  and 95 assert these.
+- Anchor CLI 1.1.2's program-ID check is a warning: it prints the first mismatch it finds and
+  continues building, so an included test program with an unmatchable id would hide an
+  escrow mismatch. `[workspace] exclude` in Anchor.toml removes the caller from the check
+  (D90). `cargo build-sbf` writes to the same `target/deploy`.
+- RUSTSEC acceptances for tests only (D89): `ed25519-dalek` 1.0.1 (RUSTSEC-2022-0093) and
+  `curve25519-dalek` 3.2.0 (RUSTSEC-2024-0344), reachable only through the two dev
+  dependency edges; `cargo tree -e normal,build` finds neither.
+- The 0xC7 fill pattern is off the ed25519 curve, verified by an RFC 8032 decompression
+  check validated against the escrow id (on curve) and the native ed25519 program id (off);
+  0xCC, 0xC1 and 0xAA fills are on curve and were rejected.
+
+Process facts:
+
+- D89 was applied by an unbriefed Claude Code session that had started in auto mode, then
+  verified and committed from Umair's terminal. New Claude Code sessions start in auto mode:
+  check the footer before the opening prompt.
+- Read-only phases may use plan mode; every write phase uses manual mode with per-edit
+  approval.
+- Commits are made from Umair's terminal by count-guarded scripts that count tests per
+  binary name, since the result lines no longer map one-to-one to escrow suites.
+- Two helper defects surfaced in red runs and were fixed before the checks landed: an
+  identical re-creation needs `expire_blockhash` (tests 52 and 54), and the integration file
+  needed its own hex decoder (test 65).
+
+Next. Session 9 builds `approve`, `reject`, `resolve` and `expire`, and owns the
+double-release, payout-destination and refund-after-payout tests (SPEC 12.7). Before any
+devnet deploy of this layout, SPEC section 13's operational steps: generate the eligibility
+and arbiter development keys; rehearse `initialize` on localnet with the exact devnet public
+keys; cancel program-owned devnet accounts holding test USDC while the Session 4 program can
+still read them. Open items go to BACKLOG in C9.
+
+---
+
 ## Working rules
 
 - Read SECURITY.md before touching the escrow, auth, verifier, or any key (D50).
@@ -721,11 +834,18 @@ for `~/.claude` and is excluded by the global git ignore.
 - Start a fresh Claude Code session per numbered session. Compaction loses
   spec detail.
 - Approve a write only after seeing it.
-- A counted escrow run is `anchor build`, the `escrow.so` and IDL timestamps, then
-  `cargo test`, in one output.
+- A counted escrow run (D90) is `anchor build`; `cargo build-sbf --manifest-path
+  programs/cpi_caller/Cargo.toml`; the `escrow.so`, IDL and `cpi_caller.so` timestamps; then
+  `cargo test --locked`, in one output. The summary shows five result lines (three test
+  binaries and two doc-test runs); count each by name.
 - A test pass counts only if the summary shows the expected test count. A
   green run that executed nothing looks identical from the exit banner alone
   (D36).
 - Never `git stash`. It moves uncommitted work out of the working tree and
   the pop can fail. For a read-only comparison against HEAD, read the
   committed file from the object store: `git show HEAD:<path>`.
+- Devnet deploys use `anchor deploy --program-name escrow` only. Never run
+  `anchor keys sync` or `anchor build --ignore-keys`: the first would replace a program id,
+  the second would silence the escrow's own id check (D90).
+- Claude Code sessions start in auto mode. Check the footer before the opening prompt; every
+  write phase is manual with per-edit approval.
