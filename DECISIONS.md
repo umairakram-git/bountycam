@@ -1817,3 +1817,38 @@ capture nonce issuance, any devnet deployment, key generation and dependency cha
 Cut-off: if by the end of 22 September 2026, Sydney time, a counted run (D90) on a committed
 Session 9 build does not show every Session 9 SPEC test passing, Umair rules on BACKLOG's
 three-instruction contingency before further build work. Nothing switches automatically.
+
+---
+
+## Session 9 build rulings (18 September)
+
+**D99 — Settlement writes the terminal state before the token CPI; two SPEC wording
+corrections.** SECURITY.md section 8 requires every check and transition to precede any CPI.
+SPEC 7.6, 7.9 and 7.11 listed their effects as transfer, close, state, and D92's summary reads
+the same way. SECURITY.md wins (D50): `approve`, `release`, `resolve` and `expire_accepted`
+write `Paid` or `Refunded` first, then transfer, then close the vault. Anchor serialises the
+bounty at exit in either order, so no observable result changes; what changes is what the
+handler has established before it calls another program.
+
+Closures are the exception, and stating it is the point of this entry. `cancel` and
+`expire_unaccepted` close the bounty through Anchor's `close` constraint, which runs at exit,
+after the handler and therefore after the token CPI. Section 8 is still met: the state check
+precedes the CPI; no other instruction can observe the account mid-transaction; and the only
+CPI target is the classic SPL Token program, which cannot call back into the escrow. Closing by
+hand inside the handler was rejected — hand-written account closing on a money path is exactly
+what D88's re-creation rules rely on Anchor to do correctly.
+
+Two wording corrections travel with the same amendment, neither changing behaviour:
+
+- Section 11's "State before transfer" row becomes "every check and state write precedes the
+  token CPI".
+- Section 11's duplicate-accounts row records that Anchor's automatic duplicate-mutable check
+  covers only account types that serialise at exit (`anchor-syn` 1.1.2,
+  `generate_duplicate_mutable_checks`). The `UncheckedAccount` and `Signer` fields Session 9
+  adds fall outside it and are bound instead by `has_one`, address constraints and
+  `ArbiterIsParty`.
+
+Tests, at minimum: none new. Effect order inside one handler is not observable, because a failed
+CPI reverts the whole transaction. The positives of tests 96, 103, 114, 115, 123 and 128 assert
+the final state and balances, and section 13's review item — every Session 9 check precedes its
+token CPI — now covers the state write too.
