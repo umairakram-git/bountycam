@@ -62,8 +62,9 @@ never overrides a different on-chain winner.
 ## 2. Trust model — who is trusted for exactly what
 
 **Requester** — wallet signature.
-May: fund; approve; reject with a named requirement; cancel only in states where the
-program permits it.
+May: fund; approve a submitted bounty; reject a submitted bounty within its review window,
+naming the failing requirement, which moves it to `DISPUTED` for the arbiter (D93); cancel
+only in states where the program permits it.
 May not: choose a payout destination; change the Scout after assignment; redirect escrow
 to a third party; bypass terminal states.
 
@@ -94,14 +95,21 @@ issuing earlier than represented, so A1 freshness can no longer be trusted; the
 attester and the on-chain settlement rules retain their separate authorities.
 
 **Relayer** — trusted for liveness only (D2).
-May: pay fees; submit already-authorised transactions.
-May not: act as any other authority; choose accounts; alter instruction data; move USDC.
-Every money-moving instruction must remain safe if the relayer is malicious.
+May: pay fees; submit already-authorised transactions; submit the permissionless `release`,
+`expire_unaccepted` and `expire_accepted` instructions (D92, D95).
+May not: act as any other authority; choose accounts; alter instruction data; move USDC
+other than through those instructions, which fix every account, amount, destination and
+timing from stored state.
+Any other fee payer may submit the same three instructions under the same limits; doing so
+requires no trust. Every money-moving instruction must remain safe if the relayer, or any
+fee payer, is malicious.
 
 **Arbiter** — dedicated protocol-level administrative key, held as program or config
 state, never per-bounty and never caller-supplied (D9, D74).
-May: resolve a bounty only while it is on-chain `DISPUTED`, choosing one of the
-settlement outcomes the program permits, only to protocol-defined destinations.
+May: resolve a bounty only while it is on-chain `DISPUTED`, and only when the arbiter is
+neither its requester nor its Scout, choosing one of two outcomes: the vault's entire
+balance to the stored Scout's payout account, or to the requester's associated token
+account (D94).
 May not: create recipients; change amounts; create, fund, accept or submit evidence;
 alter bounty policy; act outside the dispute state. Materially more privileged than
 the eligibility service and separately keyed for that reason: eligibility authorises
@@ -229,9 +237,10 @@ All under `~/bountycam-keys/`, mode 600, outside the repo. Production custody ru
 are in `SECURITY-PRODUCTION.md` section 1.
 
 - **upgrade-authority** — deploy and upgrade. Leak: attacker replaces the program.
-- **attester** — sign attestations. Leak: any evidence passes; any bounty pays its
-  assigned Scout, so a Scout colluding with the key holder is paid without real work
-  (D85).
+- **attester** — sign attestations. Leak: any evidence passes; a submitted bounty pays
+  its assigned Scout unless the requester rejects within the review window, so a Scout
+  colluding with the key holder is paid without real work whenever the requester stays
+  silent (D85, D92, D93). After a rejection the arbiter decides.
 - **eligibility** — sign acceptance vouchers (D68); not yet generated, owed before
   `initialize` (D83). Leak: any wallet can be authorised to accept, re-opening the
   claim griefing D68 closed and bypassing eligibility profiles; USDC cannot move.
