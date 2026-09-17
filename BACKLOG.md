@@ -1,6 +1,6 @@
 # BountyCam — Backlog
 
-**As at:** 16 September 2026 · 22 days to deadline
+**As at:** 17 September 2026 · 21 days to deadline
 
 ---
 
@@ -238,31 +238,62 @@ find the parent; decide whether it matters (Session 7).
   counts are in `programs/escrow/SPEC.md` section 14: 780 bytes for
   `submit_attestation`, 795 for `accept`. Correct the row at the next
   `MESSAGES.md` edit.
-- **The remaining plan still uses D72 non-terms.** Its rows for Sessions 8 and 9
+- ~~**The remaining plan still uses D72 non-terms.** Its rows for Sessions 8 and 9
   say "challenge nonce" and "challenge window", and Session 16's says "challenge
-  window". Replace with capture nonce and review window in a wording-only edit.
+  window". Replace with capture nonce and review window in a wording-only edit.~~
+  Closed in this edit.
 
 ---
 
 ## Open items from Session 8 build part 1 (16 September)
 
-- **Legacy `cancel_when_accepted_fails` still plants `Accepted`.** It rewrites the
+- ~~**Legacy `cancel_when_accepted_fails` still plants `Accepted`.** It rewrites the
   bounty account, which SPEC section 12's harness rules forbid, and is kept only so
   D49's cancel-after-accept rejection stays covered. Part 2 replaces it with SPEC
-  test 31 through a real `accept` (task 14) and removes it in the same commit.
-- **Test 91 has two of its three cases.** Part 2 adds the `accept` Scout case and
-  raises the asserted case count to 3.
-- **`VaultBalanceBelowReward` has no failing run.** SPEC section 7.3 makes it
+  test 31 through a real `accept` (task 14) and removes it in the same commit.~~
+  Closed 97f0732: test 31 reaches `Accepted` through a real `accept`; the legacy test is
+  removed in that commit.
+- ~~**Test 91 has two of its three cases.** Part 2 adds the `accept` Scout case and
+  raises the asserted case count to 3.~~ Closed 97f0732: the `accept` Scout case is the
+  third, with a valid voucher so the missing signature is its only fault.
+- ~~**`VaultBalanceBelowReward` has no failing run.** SPEC section 7.3 makes it
   unreachable by construction. Review item: confirm by reading that only the bounty
-  PDA can move vault tokens and that the check precedes the transfer.
-- **SPEC task 18 review items are owed.** Every check precedes the token CPI; no
+  PDA can move vault tokens and that the check precedes the transfer.~~ Closed 3bb66ac:
+  HANDOFF records the review; `cancel.rs` line 49 precedes the transfer at line 67 and the
+  vault's authority is the bounty PDA, which only the program can sign for.
+- ~~**SPEC task 18 review items are owed.** Every check precedes the token CPI; no
   instruction reads remaining accounts; no dependence on recursion. Part 2 records
-  each against the final source.
-- **SPEC section 16's reconciliation row stops at D86.** Add D87 (sections 10, 11
-  and 12) and D88 (test 40) at the next SPEC edit; wording only.
+  each against the final source.~~ Closed 3bb66ac: recorded in HANDOFF against 0297dce with
+  grep evidence, plus the builder call sites and the untested checks listed below.
+- ~~**SPEC section 16's reconciliation row stops at D86.** Add D87 (sections 10, 11
+  and 12) and D88 (test 40) at the next SPEC edit; wording only.~~ Closed c2f74c9: the row
+  runs through D89. D90 and D91 are owed below.
 - **Claude Code's project memory index names a missing file.** `MEMORY.md` lists
   `feedback_spec_editing.md`, which does not exist. Restore the file or remove the
   line, at the next D32 inspection.
+
+---
+
+## Open items from Session 8 build part 2 (17 September)
+
+- **Two checks are implemented with no test.** `accept` check 7 (`TimestampOverflow`)
+  needs a funding clock within 30 days of `i64::MAX`, which no real chain reaches, and a
+  test would change the 95-test gate. `submit_attestation` check 2
+  (`StateInvariantViolated`) is unreachable without planting: only `accept` writes `scout`
+  and `deadline`, always together, and only `accept` sets `Accepted`. Both are task 18
+  review items in HANDOFF; revisit only if a Session 9 instruction can clear either field.
+- **SPEC wording, owed at the next SPEC edit.** Section 4.1's sentence "An instruction
+  finding the invariant broken fails with `StateInvariantViolated`" reads as binding on
+  every instruction, but section 7.4 gives `accept` no such check and the build followed
+  7.4; tighten 4.1 to name `submit_attestation`. Section 16's reconciliation row stops at
+  D89; extend it to D90 and D91; the exact wording is settled at that edit. Wording only,
+  no behaviour change.
+- **RUSTSEC acceptances need an allowlist entry, not silent removal.** `ed25519-dalek`
+  1.0.1 (RUSTSEC-2022-0093) and `curve25519-dalek` 3.2.0 (RUSTSEC-2024-0344) are accepted
+  for tests only (D89): they enter through the two dev-dependency edges and never the
+  program build. When the CI dependency review of SECURITY-PRODUCTION.md section 7 exists,
+  its allowlist carries both ids citing D89, so a future audit run fails loudly on any
+  third advisory rather than on these two.
 
 ---
 
@@ -344,13 +375,22 @@ find the parent; decide whether it matters (Session 7).
 - litesvm 0.10.0 `add_program` records no upgrade authority. To test an
   upgrade-authority gate, overwrite ProgramData: the `Option` tag at offset 12, the
   key at 13 to 44.
+- litesvm 0.10.0 runs precompiles only with its `precompiles` feature; without it the
+  ed25519 program account is never loaded and no signature is ever checked.
+- A precompile failure reaches litesvm as `InstructionError(index, Custom(n))`, n being
+  the `PrecompileError` variant index: `InvalidSignature` 2, `InvalidInstructionDataSize` 4.
+- Anchor CLI 1.1.2's program-ID check is a warning that reports only the first mismatch
+  and continues building; one permanent mismatch can hide another.
+- `[workspace] exclude` in Anchor.toml keeps a test program out of Anchor's build and key
+  check; build it with `cargo build-sbf`, which writes to the same `target/deploy`.
 
 ---
 
 ## Remaining plan
 
 Revised from the original four-week plan after the D10 positioning change.
-Sessions 1–5 complete.
+Sessions 1 to 6, 7a and 7b complete; Session 8's escrow build complete, its capture nonce
+issuance not built.
 
 ### Week 1 remainder
 
@@ -364,8 +404,8 @@ Sessions 1–5 complete.
 
 | # | Scope |
 |---|---|
-| 8 | Escrow — `accept`, `submit_attestation`, challenge nonce issuance |
-| 9 | Escrow — `approve`, `reject`, `resolve`, `expire`, challenge window |
+| 8 | Escrow — `accept`, `submit_attestation` **done 17 Sep**; capture nonce issuance open |
+| 9 | Escrow — `approve`, `reject`, `resolve`, `expire`, review window |
 | 10 | Mobile — MWA sign-in, SIWS on device, SGT verification |
 | 11 | Mobile — discovery, bounty detail, accept, assignment race test |
 | 12 | Mobile — guided capture via c2pa-android |
@@ -377,7 +417,7 @@ Sessions 1–5 complete.
 |---|---|
 | 14 | Verifier service — policy evaluation, assurance grading, signed attestation |
 | 15 | Relayer, transaction reconciliation from confirmations |
-| 16 | Requester review, challenge window, dispute with named requirement |
+| 16 | Requester review, review window, dispute with named requirement |
 | 17 | Standalone independent verification script |
 | 18 | Reputation counters, both-sided profiles |
 | 19 | SKR — balance display, Seeker gating |
