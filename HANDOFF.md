@@ -2,9 +2,9 @@
 
 **Date:** 17 September 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
-spec session steps 1 to 3; Session 8 build parts 1 and 2
-**Next session:** Session 8 build part 2 complete; next is Session 9 — `approve`, `reject`,
-`resolve` and `expire`
+spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification
+**Next session:** Session 9 build — `approve`, `release`, `reject`, `resolve`,
+`expire_unaccepted` and `expire_accepted`; tests 96 to 140; cut-off end of 22 September (D98)
 **Deadline:** 8 October 2026 (21 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
@@ -67,10 +67,10 @@ hackathon202609/
 ├── packages/
 │   └── shared/       SPEC.md (normative) + implementation, 66 passing tests
 └── programs/
-    └── escrow/       Anchor 1.1.2, SPEC.md, 44 integration and 1 unit test passing
+    └── escrow/       Anchor 1.1.2, SPEC.md, 95 SPEC tests plus test_id passing
 ```
 
-All work committed and pushed to `main`. History: `git log`.
+All work committed to `main`; Umair pushes. History: `git log`.
 
 ---
 
@@ -817,6 +817,93 @@ and arbiter development keys; rehearse `initialize` on localnet with the exact d
 keys; cancel program-owned devnet accounts holding test USDC while the Session 4 program can
 still read them. Open items go to BACKLOG in C9.
 
+## Session 9 specification — rulings, D92 to D98, three amendments (17 September)
+
+Architect chat and Umair only; no Claude Code session. Before any work the uploaded files were
+verified against b48ac9a: 36 paths byte for byte, with HEAD, the local origin/main and GitHub's
+main all at b48ac9a.
+
+SPEC section 1.2 and D80 left the settlement instructions unspecified, so Session 9 opened as a
+spec session. Umair ruled R1 to R10, each as recommended; every payout destination, refund path
+and arbiter power came to him before it was written. Four commits, each made by a count-guarded
+script whose counted run showed `test_escrow` 94, escrow unit 2, `cpi_caller` 1 and two empty
+doc-test runs. No source changed:
+
+- 32e943b — D92 to D98.
+- eecf47c — SECURITY.md sections 2 and 7 (D92 to D95).
+- e5bab87 — escrow SPEC: sections 7.6 to 7.11, errors 34 to 48, tests 96 to 140, tasks 20
+  to 25 (D92 to D98).
+- 655262b — POLICY.md section 7.2, the `bounty_state` mapping (D97).
+
+What was decided:
+
+- `approve` (requester) and `release` (any fee payer, strictly after the review window end) pay
+  the stored Scout's associated token account the vault's entire balance (D92).
+- `reject` (requester, at or before the review window end) stores a 16-byte requirement id and
+  enters `Disputed`; no money moves (D93).
+- `resolve` (the configured arbiter, never a party to the bounty) pays the entire balance to the
+  Scout or to the requester, never split; a dispute has no timeout (D94).
+- `expire_unaccepted` and `expire_accepted` (any fee payer) refund the requester's associated
+  token account after `acceptance_cutoff` or `deadline`. The first closes the bounty; the second
+  leaves it `Refunded` (D95).
+- `Disputed`, `Paid` and `Refunded` are appended. Settled bounty accounts are never closed, so
+  D86's replay trigger is not tripped (D96).
+- The database mapping follows confirmed transactions; a funded `cancel` ends `CANCELLED` (D97).
+- The program has eleven instructions. Cut-off: end of 22 September, Sydney time; if no
+  committed build shows every Session 9 test passing by then, Umair rules on BACKLOG's
+  contingency (D98).
+
+Facts read from crate source (`anchor-lang`, `anchor-syn` and `anchor-spl` 1.1.2 from crates.io,
+checksums equal to `Cargo.lock`'s):
+
+- Generated `try_accounts` decodes `#[instruction]` arguments, loads every account in declaration
+  order, runs `init` constraints, then the duplicate-mutable check, then each account's
+  constraints in declaration order (`anchor-syn` `codegen/accounts/try_accounts.rs`).
+- Within one account the order is seeds, associated token, mut, signer, `has_one`, raw, owner,
+  close, address (`codegen/accounts/constraints.rs`, `linearize`).
+- `Account::try_from` returns `AccountNotInitialized` for an account owned by the system program
+  with zero lamports (`anchor-lang` `accounts/account.rs` line 315). A closed vault therefore
+  fails at load, before any state constraint; SPEC tests 134 and 135 rely on this.
+- The associated-token constraint checks the token account's owner (`ConstraintTokenOwner`),
+  then the derived address (`ConstraintAssociated`), and never the mint separately
+  (`generate_constraint_associated_token`).
+- The program dispatcher decodes instruction arguments before any account and maps a failure to
+  `InstructionDidNotDeserialize` (`codegen/program/handlers.rs`). SPEC test 116 relies on this.
+- `init` of an associated token account always calls the Associated Token program's
+  non-idempotent `create`; only `init_if_needed` accepts an existing account
+  (`constraints.rs`, the `InitKind::AssociatedToken` branch). See BACKLOG on vault pre-creation.
+- `anchor_spl::associated_token` re-exports `get_associated_token_address` and
+  `get_associated_token_address_with_program_id`.
+
+Process facts:
+
+- At step 3c `COMMIT` was typed before the architect had seen the output. The commit was
+  verified afterwards and is correct; every later prompt waited for review.
+- Apply scripts embed the whole reviewed file and check the base hash, result hash, line counts
+  and hunk count, restoring from HEAD on a mismatch. Commit scripts re-check the file hash and
+  count tests per binary name before the prompt.
+
+Next: Session 9 build. Claude Code builds SPEC tasks 20 to 25 against the SPEC at e5bab87, in a
+fresh session that first follows SECURITY.md section 16. Proposed commit order:
+
+1. Layout: the three enum variants, `failed_requirement_id`, space 274, errors 34 to 48,
+   `BountyExpired`; tests 92 and 93 modified; test 28 covers the new codes.
+2. `reject`; tests 108 to 111 and 113.
+3. `expire_unaccepted`; tests 123 to 127.
+4. `expire_accepted`; tests 128 to 133.
+5. `approve`; tests 96 to 102, and 112, whose `Paid` case needs `approve`.
+6. `release`; tests 103 to 107.
+7. `resolve`; tests 114 to 122.
+8. Cross-cutting tests 134 to 140, then task 25's review items against the final source.
+
+A test lands in the first commit where every instruction it calls exists. Each instruction first
+lands with its accounts and effects but no checks, and its negative tests are shown red at their
+own expected-error assertion. Tests whose failure is raised by Anchor's account loading, argument
+decoding or the system program cannot be red in that form and are expected to be guards shown
+passing, as tests 82 and 95 were: 101, 102, 116, 134, 136, 139 and 140. Each is ruled on when it
+appears. Gate at the end: 140 SPEC tests plus `test_id` — `test_escrow` 139, escrow unit 2,
+`cpi_caller` 1.
+
 ---
 
 ## Working rules
@@ -849,3 +936,4 @@ still read them. Open items go to BACKLOG in C9.
   the second would silence the escrow's own id check (D90).
 - Claude Code sessions start in auto mode. Check the footer before the opening prompt; every
   write phase is manual with per-edit approval.
+- Answer a commit script's prompt only after the architect has checked the pasted output.
