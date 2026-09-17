@@ -1,8 +1,9 @@
 # Escrow Program Specification
 
 **Path:** `programs/escrow/SPEC.md`
-**Status:** normative for the escrow program's accounts, state machine, authorities and the
-instructions `initialize`, `create_and_fund`, `cancel`, `accept` and `submit_attestation`.
+**Status:** normative for the escrow program's accounts, state machine, authorities and its
+eleven instructions: `initialize`, `create_and_fund`, `cancel`, `accept`, `submit_attestation`,
+`approve`, `release`, `reject`, `resolve`, `expire_unaccepted` and `expire_accepted`.
 **Supersedes:** the Session 4 post-hoc specification (file sha256
 `a50e20d905b11cc087c8f58db747d67cb36ee85a8cacf771106f70b6ca0fadb8`), wholesale, per D80. That
 file documented what was built rather than constraining it. Git history preserves it; it is
@@ -35,20 +36,25 @@ offset, width, signedness and domain tag.
 ### 1.2 Scope
 
 In scope: the configuration account, the bounty account, the on-chain state enum and every
-transition into and out of the states it holds, and five instructions.
+transition into and out of the states it holds, the Scout payout and requester refund accounts,
+and eleven instructions.
 
-Out of scope and named only: `approve`, `reject`, `resolve` and `expire`, which are Session 9's
-to specify (D80), together with the states they introduce and the Scout payout account. Writing
-them here would repeat, in the other direction, the error D80 corrects.
-
-D1's "six instructions" is superseded. After Session 9 the program has nine: the five here and
-Session 9's four.
+D1's "six instructions" is superseded. The program has eleven (D98): the five Session 8 built,
+and Session 9's `approve`, `release`, `reject`, `resolve`, `expire_unaccepted` and
+`expire_accepted` (D92 to D95). Session 9's plan named four; `release` and the split of expiry
+into two instructions are D92's and D95's.
 
 ### 1.3 Terms
 
 - **now** — `Clock::get()?.unix_timestamp`, read once per instruction, signed 64-bit.
 - **at or before** — an instruction succeeds when `now` is less than or equal to the bound,
   and fails one second later (D81).
+- **strictly later** — an instruction succeeds when `now` is greater than the bound, so it fails
+  at the bound and succeeds one second later. It is the complement of *at or before* on the same
+  bound, so the two never both succeed (D92, D93, D95).
+- **review window end** — `submitted_at` plus `review_window_secs`, the addition checked.
+- **entire balance** — the vault's token amount when the handler reads it, including any
+  unsolicited deposit (section 7.3).
 - **configured** — held in the configuration account (section 3).
 - **fail closed** — any unexpected account, owner, mint, signer, program, state or byte shape is
   rejected with the error named for it (SECURITY.md section 0).
@@ -70,8 +76,9 @@ term in this document.
 | Scout | `Signer` at `accept`; stored by `accept` | voucher, then bounty |
 | eligibility authority | designated ed25519 verification (section 6) | configuration |
 | attester authority | designated ed25519 verification (section 6) | configuration |
-| arbiter authority | `Signer` in Session 9's `resolve` | configuration |
+| arbiter authority | `Signer` in `resolve`, address equal to configuration | configuration |
 | relayer | transaction fee payer only | none — never read |
+| any fee payer | submits `release`, `expire_unaccepted`, `expire_accepted` | none — never read |
 
 Rules:
 
@@ -84,6 +91,12 @@ Rules:
 - `accept` requires the Scout to differ from the requester (section 7.4). SECURITY.md section 8
   requires distinct roles to be distinct accounts, and a requester accepting their own bounty
   would inflate their own reputation.
+- `resolve` requires the arbiter to differ from the bounty's requester and its Scout (section
+  7.9, D94).
+- `release`, `expire_unaccepted` and `expire_accepted` take no signer beyond the fee payer. Every
+  account, amount, destination and time bound they use is fixed by stored state, so the caller
+  chooses nothing (D92, D95; SECURITY.md section 2). They do not reject CPI: a caller gains
+  nothing by invoking through another program.
 
 ---
 
@@ -97,7 +110,7 @@ One account per deployment (D83). PDA seeded on the single literal `b"config"`, 
 | `usdc_mint` | `Pubkey` | the only mint any instruction accepts (D83) |
 | `eligibility_authority` | `Pubkey` | verifies acceptance vouchers (D68) |
 | `attester_authority` | `Pubkey` | verifies attestations (D82) |
-| `arbiter_authority` | `Pubkey` | read by Session 9's `resolve` (D74) |
+| `arbiter_authority` | `Pubkey` | read by `resolve` (D74, D94) |
 | `bump` | `u8` | canonical PDA bump |
 
 Space: 8 discriminator bytes plus 130, total 138. All fields are fixed width.
@@ -107,8 +120,7 @@ requires a deliberately authorised upgrade carrying a migration or a new version
 under its own D-entry; under SECURITY-PRODUCTION.md section 1 that mechanism is a mainnet
 blocker (D83).
 
-`arbiter_authority` has no reader until Session 9. It is stored now because the configuration is
-immutable and Session 9 cannot add it without a migration.
+`arbiter_authority` has one reader, `resolve` (section 7.9).
 
 ---
 
@@ -134,22 +146,29 @@ This order gives every non-`Option` field a stable offset for account filters.
 | 136 | `required_assurance` | `u8` | create | payout gate (D17); message field |
 | 137 | `acceptance_window_secs` | `i64` | create | cutoff source (D81) |
 | 145 | `completion_window_secs` | `i64` | create | deadline source (D81) |
-| 153 | `review_window_secs` | `i64` | create | Session 9 review window; signed |
+| 153 | `review_window_secs` | `i64` | create | review window (D92, D93); signed |
 | 161 | `acceptance_cutoff` | `i64` | create | last second `accept` succeeds |
 | 169 | `state` | `BountyState` | all | section 5 |
 | 170 | `bump` | `u8` | create | canonical PDA bump |
 | 171 | `scout` | `Option<Pubkey>` | accept | payout identity; message field |
 | var | `deadline` | `Option<i64>` | accept | last second an attestation lands |
-| var | `submitted_at` | `Option<i64>` | submit | review window start for Session 9 |
+| var | `submitted_at` | `Option<i64>` | submit | review window start (D92, D93) |
 | var | `evidence_root` | `Option<[u8; 32]>` | submit | attested evidence commitment |
 | var | `achieved_assurance` | `Option<u8>` | submit | attested level; legible record (D17) |
+| var | `failed_requirement_id` | `Option<[u8; 16]>` | reject | named failing requirement (D93) |
 
-Maximum space: 8 discriminator bytes plus 249, total 257, allocated at creation.
+Maximum space: 8 discriminator bytes plus 266, total 274, allocated at creation (D93).
 
-`Option` invariant: while `Funded`, all five `Option` fields are `None`. `accept` sets `scout`
+`Option` invariant: while `Funded`, all six `Option` fields are `None`. `accept` sets `scout`
 and `deadline`. `submit_attestation` sets `submitted_at`, `evidence_root` and
-`achieved_assurance`. Nothing clears a field once set. An instruction finding the invariant
-broken fails with `StateInvariantViolated`.
+`achieved_assurance`. `reject` sets `failed_requirement_id`. Nothing clears a field once set, and
+no instruction clears `scout` or `deadline` (D96).
+
+The invariant is checked where a field is read, not everywhere: `submit_attestation` requires
+`scout` and `deadline`; `release` and `reject` require `submitted_at`; `resolve` requires
+`scout`; `expire_accepted` requires `deadline`. Each fails with `StateInvariantViolated`. Other
+instructions read no `Option` field, or read `scout` only through an account constraint, and do
+not check it.
 
 `deadline` is `Option` rather than a zero sentinel because zero is a valid signed timestamp in
 the published vectors, so a sentinel could not be told apart from a value (D81 leaves the
@@ -179,13 +198,18 @@ enum BountyState {
     Funded,     // 0
     Accepted,   // 1
     Submitted,  // 2
+    Disputed,   // 3
+    Paid,       // 4
+    Refunded,   // 5
 }
 ```
 
 SECURITY.md section 9 permits a variant only if an instruction enters it with defined exits and
 tests. The enum therefore holds exactly the states these instructions enter. `Cancelled` is
-removed (D76). Session 9 appends its states after `Submitted`; variants are append-only, so the
-discriminants above never change.
+removed (D76). Variants are append-only, so discriminants never change (D96).
+
+`Paid` and `Refunded` are terminal. No instruction accepts either as a source state, and their
+bounty accounts are never closed (D96).
 
 ### 5.2 Transitions
 
@@ -194,29 +218,40 @@ discriminants above never change.
 | `create_and_fund` | none | `Funded` | requester | requester ATA to vault: `reward_amount` |
 | `cancel` | `Funded` | closed | requester | vault to requester ATA: full balance |
 | `accept` | `Funded` | `Accepted` | Scout | none |
-| `submit_attestation` | `Accepted` | `Submitted` | none required | none |
+| `submit_attestation` | `Accepted` | `Submitted` | none | none |
+| `approve` | `Submitted` | `Paid` | requester | vault to Scout payout account: full balance |
+| `release` | `Submitted` | `Paid` | none | vault to Scout payout account: full balance |
+| `reject` | `Submitted` | `Disputed` | requester | none |
+| `resolve` | `Disputed` | `Paid` or `Refunded` | arbiter | vault to the named party: full balance |
+| `expire_unaccepted` | `Funded` | closed | none | vault to requester ATA: full balance |
+| `expire_accepted` | `Accepted` | `Refunded` | none | vault to requester ATA: full balance |
+
+A signer of `none` means no signer beyond the fee payer. Every instruction that moves the vault's
+balance also closes the vault, lamports to the requester. Only `cancel` and `expire_unaccepted`
+close the bounty account.
 
 Failed instructions change nothing; Solana transactions are atomic.
 
 ### 5.3 Exits
 
-- `Funded`: `accept` and `cancel`, specified here. Session 9's `expire` after
-  `acceptance_cutoff`.
-- `Accepted`: `submit_attestation`, specified here. `cancel` is rejected (D49). Session 9's
-  `expire` after `deadline`. An attested shortfall leaves the bounty `Accepted` (D85).
-- `Submitted`: Session 9's approval, automatic release at the end of the review window, rejection
-  with a named requirement, and dispute resolution (D12).
-
-Stated limit: until Session 9 lands, `Accepted` and `Submitted` have no exit, so their reward
-stays locked. Acceptable on devnet test USDC only (D8).
+- `Funded`: `accept` at or before `acceptance_cutoff`; `cancel` at any time; `expire_unaccepted`
+  strictly later than `acceptance_cutoff`.
+- `Accepted`: `submit_attestation` at or before `deadline`; `expire_accepted` strictly later than
+  `deadline`. `cancel` is rejected (D49). An attested shortfall leaves the bounty `Accepted`
+  until `deadline` passes (D85, D95).
+- `Submitted`: `approve` at any time; `reject` at or before the review window end; `release`
+  strictly later than the review window end (D92, D93).
+- `Disputed`: `resolve` only (D74, D94). The arbiter has no deadline (section 15).
+- `Paid`, `Refunded`: none (D96).
 
 ### 5.4 Database projection (informative)
 
-Normative mapping is Session 9's enum reconciliation. Already fixed: a confirmed
-`create_and_fund` projects to `AVAILABLE` only when every policy-to-chain binding agrees (D79,
-D84); a confirmed `accept` projects to `ACCEPTED` (D79); a confirmed `cancel` of a funded bounty
-is `CANCELLED` with the transaction signature and event recorded (D76). `SUBMITTED` is expected
-from a confirmed `submit_attestation` (POLICY.md section 7.2).
+Normative mapping: D97 and `apps/api/POLICY.md` section 7.2. From confirmed transactions
+only: `create_and_fund` to `AVAILABLE` when every binding agrees (D79, D84); `accept` to
+`ACCEPTED`; `submit_attestation` to `SUBMITTED`; `reject` to `DISPUTED`; `approve`, `release`,
+and `resolve` paying the Scout to `PAID`; `expire_accepted`, and `resolve` refunding the
+requester, to `REFUNDED`; `expire_unaccepted` to `EXPIRED`; `cancel` of a funded bounty to
+`CANCELLED` (D76).
 
 ---
 
@@ -342,7 +377,7 @@ Accounts:
 |---|---|
 | `requester` | `Signer`, mutable (rent payer) |
 | `config` | seeds `[b"config"]`, `bump = config.bump` |
-| `bounty` | `init`, seeds section 4, canonical bump, space 257 |
+| `bounty` | `init`, seeds section 4, canonical bump, space 274 |
 | `usdc_mint` | `Account<Mint>`, address equals `config.usdc_mint` — `MintMismatch` |
 | `bounty_vault` | `init`, associated token account, mint `usdc_mint`, authority `bounty` |
 | `requester_ata` | mutable; mint equals `config.usdc_mint` — `MintMismatch`; owner equals |
@@ -481,11 +516,223 @@ Effects: `evidence_root` and `achieved_assurance` from the arguments; `submitted
 `issued_at` is compared with nothing (D82). An attestation issued early remains submittable until
 `deadline` unless the state changes or the configured attester changes (MESSAGES.md section 6).
 
+### 7.6 `approve`
+
+No arguments.
+
+Accounts:
+
+| Account | Type and constraints |
+|---|---|
+| `requester` | `Signer`, mutable (receives the vault's rent) |
+| `config` | seeds `[b"config"]`, `bump = config.bump` |
+| `bounty` | mutable; seeds section 4 with `bump = bounty.bump`; `has_one = requester` — |
+| | `UnauthorizedRequester`; `state == Submitted` — `BountyNotApprovable` |
+| `usdc_mint` | `Account<Mint>`, address equals `config.usdc_mint` — `MintMismatch` |
+| `bounty_vault` | mutable, associated token account, mint `usdc_mint`, authority `bounty` |
+| `scout` | `UncheckedAccount`; `bounty.scout` equals `Some(scout)` — `ScoutMismatch` |
+| `scout_payout` | mutable, associated token account, mint `usdc_mint`, authority `scout`; mint |
+| | equals `config.usdc_mint` — `MintMismatch` |
+| `token_program` | `Program<Token>` |
+
+`scout_payout` is the Scout payout account (D92). Anchor 1.1.2's associated-token constraint
+checks the owner and then the derived address (`anchor-syn`,
+`generate_constraint_associated_token`): an account owned by another wallet reports
+`ConstraintTokenOwner`, and a Scout-owned account at another address reports
+`ConstraintAssociated`. Only the Associated Token program can create an account at the derived
+address, and it initialises that account with the derivation's mint, so the mint constraint
+cannot fail on a real chain; it is checked to fail closed.
+
+The program never creates `scout_payout` (D92). If it does not exist, Anchor's account load fails
+with `AccountNotInitialized` before any constraint runs.
+
+Handler checks:
+
+1. `bounty_vault.amount` is at least `reward_amount` — `VaultBalanceBelowReward`, as section 7.3.
+
+Effects, in order:
+
+1. `transfer_checked` of the vault's entire balance to `scout_payout`, signed by the bounty PDA.
+2. Close `bounty_vault`, lamports to `requester`.
+3. `state` `Paid`. The bounty account stays open (D96). No event.
+
+### 7.7 `release`
+
+No arguments. No signer beyond the fee payer (D92).
+
+Accounts: as section 7.6, with two rows changed.
+
+| Account | Type and constraints |
+|---|---|
+| `requester` | `UncheckedAccount`, mutable (receives the vault's rent) |
+| `bounty` | mutable; seeds section 4 with `bump = bounty.bump`; `has_one = requester` — |
+| | `RequesterAccountMismatch`; `state == Submitted` — `BountyNotReleasable` |
+
+Handler checks:
+
+1. `submitted_at` is `Some` — `StateInvariantViolated`.
+2. The review window end does not overflow `i64` — `TimestampOverflow`.
+3. `now` strictly later than the review window end — `ReviewWindowOpen`.
+4. `bounty_vault.amount` is at least `reward_amount` — `VaultBalanceBelowReward`.
+
+Checks 1 and 2 cannot fail through the instructions: `submit_attestation` writes `submitted_at`
+as it enters `Submitted`, and `submitted_at` is at most `deadline`, far below the `i64` limit.
+They are review items (section 13), as `submit_attestation` check 2 is.
+
+Effects: as section 7.6.
+
+### 7.8 `reject`
+
+Arguments: `failed_requirement_id: [u8; 16]`.
+
+Accounts:
+
+| Account | Type and constraints |
+|---|---|
+| `requester` | `Signer` |
+| `bounty` | mutable; seeds section 4 with `bump = bounty.bump`; `has_one = requester` — |
+| | `UnauthorizedRequester`; `state == Submitted` — `BountyNotRejectable` |
+
+No configuration, mint or token accounts: `reject` moves no USDC (D93).
+
+Handler checks. Trusted state first, then the argument (D85's rule):
+
+1. `submitted_at` is `Some` — `StateInvariantViolated`.
+2. The review window end does not overflow `i64` — `TimestampOverflow`.
+3. `now` at or before the review window end — `ReviewWindowClosed`.
+4. `failed_requirement_id` is not all zero — `InvalidRequirementId`.
+
+Checks 1 and 2 are review items, for section 7.7's reason.
+
+Effects: `failed_requirement_id` set to the argument; `state` `Disputed`. No money moves. No
+event.
+
+The program does not check that the id names a requirement in the committed policy. The API
+checks it before building the transaction and the arbiter checks it before resolving (D93).
+
+### 7.9 `resolve`
+
+Arguments: `outcome: ResolveOutcome`.
+
+```
+enum ResolveOutcome {
+    PayScout,         // 0
+    RefundRequester,  // 1
+}
+```
+
+Serialised as one byte. Any other value fails argument decoding with
+`InstructionDidNotDeserialize` before any account is loaded (`anchor-syn` 1.1.2, program
+handlers). The two variants are D94's; another needs its own D-entry.
+
+Accounts:
+
+| Account | Type and constraints |
+|---|---|
+| `arbiter` | `Signer`; address equals `config.arbiter_authority` — `UnauthorizedArbiter` |
+| `config` | seeds `[b"config"]`, `bump = config.bump` |
+| `requester` | `UncheckedAccount`, mutable (receives the vault's rent) |
+| `bounty` | mutable; seeds section 4 with `bump = bounty.bump`; `has_one = requester` — |
+| | `RequesterAccountMismatch`; `state == Disputed` — `BountyNotResolvable` |
+| `usdc_mint` | `Account<Mint>`, address equals `config.usdc_mint` — `MintMismatch` |
+| `bounty_vault` | mutable, associated token account, mint `usdc_mint`, authority `bounty` |
+| `destination` | `Account<TokenAccount>`, mutable; handler checks 3 to 5 |
+| `token_program` | `Program<Token>` |
+
+The destination is checked in the handler because the wallet it must belong to depends on the
+argument. Carrying only the paid party's account means a missing account on the other side
+cannot block resolution.
+
+Handler checks:
+
+1. `scout` is `Some` — `StateInvariantViolated`.
+2. `arbiter` differs from `bounty.requester` and from the stored Scout — `ArbiterIsParty`.
+3. The named wallet is the stored Scout for `PayScout` and `bounty.requester` for
+   `RefundRequester`. `destination.owner` equals it — `TokenAccountOwnerMismatch`.
+4. `destination` equals the associated token account of the named wallet for
+   `config.usdc_mint` under the classic SPL Token program — `DestinationAccountMismatch`.
+5. `destination.mint` equals `config.usdc_mint` — `MintMismatch`. It cannot fail once check 4
+   holds; checked to fail closed.
+6. `bounty_vault.amount` is at least `reward_amount` — `VaultBalanceBelowReward`.
+
+Checks 3 and 4 keep the associated-token constraint's order, owner and then address, so a
+substituted destination reports the same kind of failure here as in sections 7.6 and 7.10.
+Check 1 is a review item: `accept` writes `scout` and every path to `Disputed` passes through it.
+
+Effects, in order:
+
+1. `transfer_checked` of the vault's entire balance to `destination`, signed by the bounty PDA.
+2. Close `bounty_vault`, lamports to `requester`.
+3. `state` `Paid` for `PayScout`, `Refunded` for `RefundRequester`. The bounty account stays
+   open (D96). No event.
+
+### 7.10 `expire_unaccepted`
+
+No arguments. No signer beyond the fee payer (D95).
+
+Accounts:
+
+| Account | Type and constraints |
+|---|---|
+| `requester` | `UncheckedAccount`, mutable (receives both accounts' rent) |
+| `config` | seeds `[b"config"]`, `bump = config.bump` |
+| `bounty` | mutable; seeds section 4 with `bump = bounty.bump`; `has_one = requester` — |
+| | `RequesterAccountMismatch`; `state == Funded` — `BountyNotExpirable`; |
+| | `close = requester` |
+| `usdc_mint` | `Account<Mint>`, address equals `config.usdc_mint` — `MintMismatch` |
+| `bounty_vault` | mutable, associated token account, mint `usdc_mint`, authority `bounty` |
+| `requester_ata` | mutable, associated token account, mint `usdc_mint`, authority `requester`; |
+| | mint equals `config.usdc_mint` — `MintMismatch` |
+| `token_program` | `Program<Token>` |
+
+`requester_ata` is the requester's associated token account, not any account the requester owns:
+the requester does not sign, so no caller chooses among the requester's accounts (D95). Its
+constraints report as section 7.6 describes. `cancel`'s rule in section 7.3 is unchanged.
+
+Handler checks:
+
+1. `now` strictly later than `acceptance_cutoff` — `AcceptanceWindowOpen`.
+2. `bounty_vault.amount` is at least `reward_amount` — `VaultBalanceBelowReward`.
+
+Effects, in D76's order:
+
+1. `transfer_checked` of the vault's entire balance to `requester_ata`, signed by the bounty PDA.
+2. Emit `BountyExpired` (section 8).
+3. Close `bounty_vault`, lamports to `requester`.
+4. Close `bounty`, lamports to `requester`, by the `close` constraint after the handler.
+
+### 7.11 `expire_accepted`
+
+No arguments. No signer beyond the fee payer (D95).
+
+Accounts: as section 7.10, with the bounty row changed.
+
+| Account | Type and constraints |
+|---|---|
+| `bounty` | mutable; seeds section 4 with `bump = bounty.bump`; `has_one = requester` — |
+| | `RequesterAccountMismatch`; `state == Accepted` — `BountyNotExpirable`; no `close` |
+
+Handler checks:
+
+1. `deadline` is `Some` — `StateInvariantViolated`.
+2. `now` strictly later than `deadline` — `SubmissionDeadlineOpen`.
+3. `bounty_vault.amount` is at least `reward_amount` — `VaultBalanceBelowReward`.
+
+Check 1 is a review item: `accept` writes `deadline` as it enters `Accepted`.
+
+Effects, in order:
+
+1. `transfer_checked` of the vault's entire balance to `requester_ata`, signed by the bounty PDA.
+2. Close `bounty_vault`, lamports to `requester`.
+3. `state` `Refunded`. The bounty account stays open (D96). No event.
+
+This covers an abandoned mission and an attested shortfall alike (D85, D95).
+
 ---
 
 ## 8. Events
 
-One event:
+Two events, with the same fields except the timestamp's name:
 
 ```
 BountyCancelled {
@@ -497,12 +744,23 @@ BountyCancelled {
     refunded_amount: u64,    // entire vault balance transferred; at least reward_amount
     cancelled_at: i64,       // now
 }
+
+BountyExpired {
+    bounty: Pubkey,
+    bounty_id: [u8; 16],
+    requester: Pubkey,
+    usdc_mint: Pubkey,
+    reward_amount: u64,
+    refunded_amount: u64,
+    expired_at: i64,         // now
+}
 ```
 
-It exists because `cancel` closes the account, leaving no state to read (D76). Surviving accounts
-are the reconciliation source for every other instruction (SECURITY.md section 12), so no other
-event is emitted. Events live in transaction logs and are not an archival guarantee; the database
-is the durable record (D76).
+They exist because `cancel` and `expire_unaccepted` close the bounty account, leaving no state to
+read (D76, D95). Surviving accounts are the reconciliation source for every other instruction
+(SECURITY.md section 12), including the four settlements that leave a terminal account (D96), so
+no other event is emitted. Events live in transaction logs and are not an archival guarantee; the
+database is the durable record (D76).
 
 ---
 
@@ -567,6 +825,23 @@ inserted around or removed. A retired variant keeps its code and is never emitte
 | 31 | `VerificationMessageMismatch` | verified message differs from the reconstruction |
 | 32 | `VaultBalanceBelowReward` | vault holds less than `reward_amount` |
 | 33 | `StateInvariantViolated` | a section 4.1 `Option` invariant is broken |
+| 34 | `BountyNotApprovable` | `approve` outside `Submitted` |
+| 35 | `BountyNotReleasable` | `release` outside `Submitted` |
+| 36 | `ReviewWindowOpen` | `release` at or before the review window end |
+| 37 | `BountyNotRejectable` | `reject` outside `Submitted` |
+| 38 | `ReviewWindowClosed` | `reject` after the review window end |
+| 39 | `InvalidRequirementId` | `failed_requirement_id` is all zero |
+| 40 | `BountyNotResolvable` | `resolve` outside `Disputed` |
+| 41 | `UnauthorizedArbiter` | signer is not the configured arbiter |
+| 42 | `ArbiterIsParty` | arbiter is the bounty's requester or Scout (D94) |
+| 43 | `BountyNotExpirable` | `expire_unaccepted` outside `Funded`, or `expire_accepted` outside |
+| | | `Accepted` |
+| 44 | `AcceptanceWindowOpen` | `expire_unaccepted` at or before `acceptance_cutoff` |
+| 45 | `SubmissionDeadlineOpen` | `expire_accepted` at or before `deadline` |
+| 46 | `ScoutMismatch` | account passed as the Scout is not the stored Scout |
+| 47 | `RequesterAccountMismatch` | unsigned account passed as the requester is not the bounty's |
+| 48 | `DestinationAccountMismatch` | `resolve` destination is not the named wallet's associated |
+| | | token account |
 
 `MintMismatch`'s message text changes from "the bounty USDC mint" to "the configured USDC mint",
 because the bounty no longer stores a mint. Its code does not change.
@@ -574,8 +849,8 @@ because the bounty no longer stores a mint. Its code does not change.
 Errors named by tests but raised outside this program, from Anchor 1.1.2 (`anchor-lang-error`)
 unless stated: `AccountNotInitialized`, `AccountNotSigner`, `AccountOwnedByWrongProgram`,
 `ConstraintAssociated`, `ConstraintDuplicateMutableAccount` (D87), `ConstraintSeeds`,
-`InvalidProgramId`; `InvalidAccountData` from the SPL Token mint unpack; and the system
-program's "already in use".
+`ConstraintTokenOwner`, `InstructionDidNotDeserialize`, `InvalidProgramId`; `InvalidAccountData`
+from the SPL Token mint unpack; and the system program's "already in use".
 
 ---
 
@@ -585,52 +860,64 @@ Each SECURITY.md section 8 invariant, its mechanism here, and its tests (section
 
 | Invariant | Mechanism | Tests |
 |---|---|---|
-| Authority validation | section 2; `has_one`; section 6; ProgramData | 2, 3, 4, 30, 47, 48, 50, |
-| | | 64, 91 |
-| Account ownership and type | typed Anchor accounts | 10, 11, 25, 41 |
+| Authority validation | section 2; `has_one`; section 6; ProgramData; | 2, 3, 4, 30, 47, 48, 50, |
+| | arbiter address | 64, 91, 98, 111, 117, 118, |
+| | | 119, 137 |
+| Account ownership and type | typed Anchor accounts | 10, 11, 25, 41, 102 |
 | PDA validation | seeds with the stored canonical bump | 25, 94 |
-| Exact USDC mint | address equals `config.usdc_mint` | 10, 20, 21, 35, 36 |
+| Exact USDC mint | address equals `config.usdc_mint` | 10, 20, 21, 35, 36, 138 |
 | Escrow token account | associated-token constraint on the bounty PDA | 12, 29, 37 |
-| Scout payout account | Session 9 | Session 9 |
-| Checked transfers | `transfer_checked` only | 12, 29; review item |
-| Arbitrary CPI | `Program<Token>`, `Program<AssociatedToken>`, `Program<System>` | 26 |
+| Scout payout account | associated-token constraint on the stored Scout | 100, 101, 102, 107, 121 |
+| | (7.6, 7.7); handler checks (7.9) | |
+| Requester refund account | associated-token constraint on the stored | 121, 127, 133 |
+| | requester (7.10, 7.11); handler checks (7.9) | |
+| Checked transfers | `transfer_checked` only | 12, 29, 96, 114, 115, 123, |
+| | | 128; review item |
+| Arbitrary CPI | `Program<Token>`, `Program<AssociatedToken>`, | 26, 139 |
+| | `Program<System>` | |
 | State before transfer | every check precedes the token CPI | review item |
 | Recursion | no dependence; explicit state checks | review item |
-| Double release | Session 9 | Session 9 |
-| Amount integrity | stored `reward_amount`; checked `i64` additions | 12, 18, 27 |
+| Double release | terminal states without exits; vault closed at | 134, 135 |
+| | settlement; state constraints (D96) | |
+| Amount integrity | stored `reward_amount`; entire balance; no amount | 12, 18, 27, 97, 140 |
+| | argument after funding; checked `i64` additions | |
 | Fee | `platform_fee` 0; no fee argument | 12, 23 |
-| Account closure | `cancel` closes both; close-then-reinit | 29, 33, 40 |
-| Duplicate accounts | Anchor duplicate-mutable check (D87); owner constraints; | 39, 48 |
-| | `ScoutIsRequester` | |
+| Account closure | `cancel` and `expire_unaccepted` close both; | 29, 33, 40, 123, 128, 136 |
+| | settlements close the vault only; terminal | |
+| | accounts never close; close-then-reinit | |
+| Duplicate accounts | Anchor duplicate-mutable check (D87); owner | 39, 48, 101, 118, 119 |
+| | constraints; `ScoutIsRequester`; `ArbiterIsParty` | |
 | Remaining accounts | never read | review item |
 
 D71's invariant is section 6, tested by 55, 69, 70 to 90 and 95.
 
 SECURITY-PRODUCTION.md section 8 classes in scope for these instructions:
 
-- wrong, missing or substituted signer — 2, 30, 47, 91
-- wrong bounty, Scout or requester — 47, 63, 68
+- wrong, missing or substituted signer — 2, 30, 47, 91, 98, 111, 117, 137
+- wrong bounty, Scout or requester — 47, 63, 68, 100, 106, 122, 126, 132
 - wrong PDA or non-canonical derivation — 25, 94
-- wrong mint, fake USDC, wrong token program — 10, 20, 21, 26, 35, 36
-- attacker escrow account; duplicate account aliasing — 37, 39
+- wrong mint, fake USDC, wrong token program — 10, 20, 21, 26, 35, 36, 138, 139
+- attacker payout, refund or escrow account; duplicate account aliasing — 37, 39, 100, 101, 107,
+  121, 127, 133
 - modified attestation — 65, 95
 - attestation for another bounty, Scout or evidence root — 63, 65, 68
-- insufficient assurance — 59
+- insufficient assurance — 59, 130
 - expired or replayed attestation — 58, 66
-- wrong state — 31, 32, 49, 66, 67
-- arithmetic boundaries — 18, 27
+- double payout, double refund, payout after refund, refund after payout — 134, 135
+- wrong state — 31, 32, 49, 66, 67, 99, 105, 112, 120, 125, 131
+- arithmetic and time boundaries — 18, 27, 104, 109, 110, 124, 129
 - unexpected CPI — 55, 69
-- close-then-reinit — 40
+- close-then-reinit — 40, 136
 
-Amount modification has no surface here: the only amount argument is at funding, and every later
-movement uses stored state. Payout, double-payout, double-refund and refund-after-payout classes
-are Session 9's.
+Amount modification has no surface: the only amount argument is at funding, and every later
+movement transfers the vault's entire balance as stored state directs (test 140).
 
 ---
 
 ## 12. Tests
 
-Gate: **95 tests**, counted from the raw summary (D36). A test iterating cases asserts its case
+Gate: **140 tests**, counted from the raw summary (D36): 139 in `test_escrow` and test 90 in the
+escrow unit binary, beside `test_id`. A test iterating cases asserts its case
 count first, so an empty case list fails.
 
 Harness rules:
@@ -655,6 +942,12 @@ Harness rules:
 - A state is reached through the real instructions, never by rewriting the bounty account. Only
   exploit tests plant foreign accounts (25, 41, 94), and each says so.
 - Each negative test introduces exactly one fault.
+- Tests 96 to 140 reach `Submitted`, `Disputed`, `Paid` and `Refunded` through real `accept`,
+  `submit_attestation`, `reject` and settling instructions. Test 135's re-created vault is made by
+  the Associated Token program's idempotent create and a third party's token transfer, both real
+  instructions, not planting.
+- An arbitrary fee payer is a fresh funded key that is none of the requester, the Scout or the
+  configured authorities.
 
 ### 12.1 `initialize`
 
@@ -799,12 +1092,119 @@ Harness rules:
 
 91. Missing signer, three cases: `create_and_fund` requester, `cancel` requester, `accept`
     Scout — `AccountNotSigner`.
-92. Serialised bounty and configuration layouts match sections 3 and 4.1: fixed offsets, `None`
-    as one byte, maximum sizes 257 and 138.
-93. `BountyState` discriminants: `Funded` 0, `Accepted` 1, `Submitted` 2.
+92. Modified: serialised bounty and configuration layouts match sections 3 and 4.1: fixed
+    offsets, `None` as one byte, `failed_requirement_id` last, maximum sizes 274 and 138 (D96).
+93. Modified: `BountyState` discriminants `Funded` 0, `Accepted` 1, `Submitted` 2, `Disputed` 3,
+    `Paid` 4, `Refunded` 5 (D96).
 94. A program-owned bounty at a non-canonical PDA address, planted — `ConstraintSeeds`.
 
-Session 9 owns the double-release, payout-destination and refund-after-payout tests.
+### 12.8 `approve`
+
+96. Positive, after a real `submit_attestation`: the Scout payout account rises by the vault's
+    entire balance; the vault is closed with its rent to the requester; `state` `Paid`; the
+    bounty account is open with every other field unchanged.
+97. Tokens donated to the vault first: the Scout receives reward plus donation (D92).
+98. Signer other than the requester, two cases, the Scout and a fresh key —
+    `UnauthorizedRequester`.
+99. Outside `Submitted`, two cases: `Accepted` with no attestation, and `Disputed` after a real
+    `reject` — `BountyNotApprovable`.
+100. Payout substitutes, four cases: the requester's associated token account —
+     `ConstraintTokenOwner`; an attacker's — `ConstraintTokenOwner`; the Scout's for a second real
+     mint — `ConstraintAssociated`; another wallet as `scout`, with its own associated token
+     account as `scout_payout` — `ScoutMismatch`.
+101. `scout_payout` set to the vault address — `ConstraintDuplicateMutableAccount`, caused by
+     `scout_payout` (D87's mechanism).
+102. The Scout has no associated token account for the configured mint — `AccountNotInitialized`;
+     the bounty account and vault balance are unchanged (D92).
+
+### 12.9 `release`
+
+103. Positive, one second after the review window end, submitted by an arbitrary fee payer with no
+     other signer: test 96's effects.
+104. At exactly the review window end — `ReviewWindowOpen`.
+105. Outside `Submitted`, test 99's two cases — `BountyNotReleasable`.
+106. `requester` account other than the bounty's requester — `RequesterAccountMismatch`.
+107. Payout substitutes, test 100's four cases, with its errors.
+
+### 12.10 `reject`
+
+108. Positive: `state` `Disputed`; `failed_requirement_id` stored byte for byte; vault balance and
+     every other field unchanged.
+109. At exactly the review window end succeeds (D81, D93).
+110. One second after — `ReviewWindowClosed`.
+111. Signer other than the requester, two cases, the Scout and a fresh key —
+     `UnauthorizedRequester`.
+112. Outside `Submitted`, three cases: `Accepted`; `Disputed` after a first `reject`; `Paid` after
+     `approve` — `BountyNotRejectable`.
+113. All-zero `failed_requirement_id` — `InvalidRequirementId`.
+
+### 12.11 `resolve`
+
+114. `PayScout` after a real `reject`, with tokens donated to the vault: the Scout payout account
+     receives the entire balance; the vault is closed with its rent to the requester; `state`
+     `Paid`; the bounty account is open.
+115. `RefundRequester`, the same setup: the requester's associated token account receives the
+     entire balance; `state` `Refunded`.
+116. Outcome byte 2 — `InstructionDidNotDeserialize`.
+117. Signer other than the arbiter, five cases: the eligibility authority, the attester authority,
+     a fresh key, the requester and the Scout — `UnauthorizedArbiter`.
+118. The configured arbiter key as the bounty's requester: it funds, a Scout accepts and attests,
+     it rejects, then resolves — `ArbiterIsParty`.
+119. The configured arbiter key as the bounty's Scout, accepting with a valid voucher naming it —
+     `ArbiterIsParty`.
+120. From `Submitted` — `BountyNotResolvable`.
+121. Destination substitutes, six cases. `PayScout` with the requester's associated token account
+     and an attacker's, and `RefundRequester` with the Scout's and an attacker's —
+     `TokenAccountOwnerMismatch`; `PayScout` with the Scout's for a second real mint, and
+     `RefundRequester` with the requester's for a second real mint — `DestinationAccountMismatch`.
+122. `requester` account other than the bounty's requester — `RequesterAccountMismatch`.
+
+### 12.12 `expire_unaccepted`
+
+123. Positive, one second after `acceptance_cutoff`, by an arbitrary fee payer, with tokens donated
+     to the vault: the requester's associated token account receives the entire balance;
+     `BountyExpired` fields exact; vault and bounty closed with rent to the requester.
+124. At exactly `acceptance_cutoff` — `AcceptanceWindowOpen`.
+125. From `Accepted` — `BountyNotExpirable`.
+126. `requester` account other than the bounty's requester — `RequesterAccountMismatch`.
+127. Refund account substitutes, three cases: a non-associated token account the requester owns
+     for the configured mint — `ConstraintAssociated`; an attacker's associated token account —
+     `ConstraintTokenOwner`; the requester's for a second real mint — `ConstraintAssociated`.
+
+### 12.13 `expire_accepted`
+
+128. Positive, one second after `deadline`, by an arbitrary fee payer, with tokens donated to the
+     vault: the requester's associated token account receives the entire balance; the vault is
+     closed with its rent to the requester; `state` `Refunded`; the bounty account is open with
+     every other field unchanged.
+129. At exactly `deadline` — `SubmissionDeadlineOpen`.
+130. After an attested shortfall, a real `submit_attestation` failing with
+     `InsufficientAssurance`: succeeds once `deadline` has passed; `state` `Refunded` (D85, D95).
+131. Outside `Accepted`, three cases: `Funded`, `Submitted` and `Disputed` — `BountyNotExpirable`.
+132. `requester` account other than the bounty's requester — `RequesterAccountMismatch`.
+133. Refund account substitutes, test 127's three cases, with its errors.
+
+### 12.14 Settlement, cross-cutting
+
+134. Plain repeat, three cases: `approve` twice, `resolve` twice, `expire_accepted` twice —
+     `AccountNotInitialized`, from the closed vault. Anchor loads every account before it runs
+     any constraint (`anchor-syn` 1.1.2, `try_accounts`), so the state constraint is not reached.
+135. Repeat against a re-created vault, eight cases. After settlement a third party re-creates the
+     vault and transfers one token unit into it; the instruction then fails on state, and the
+     vault, Scout and requester balances are unchanged. `approve` after `approve`, after `release`
+     and after `expire_accepted` — `BountyNotApprovable`; `release` after `approve` —
+     `BountyNotReleasable`; `resolve` after `resolve` (`RefundRequester`) and after `release` —
+     `BountyNotResolvable`; `expire_accepted` after `expire_accepted` and after `approve` —
+     `BountyNotExpirable`.
+136. `create_and_fund` with the `bounty_id` of a `Paid` bounty — system "already in use" (D96).
+137. Missing signer, three cases: `approve` requester, `reject` requester, `resolve` arbiter —
+     `AccountNotSigner`.
+138. Mint account other than the configured mint, five cases: `approve`, `release`, `resolve`,
+     `expire_unaccepted` and `expire_accepted` — `MintMismatch`.
+139. The Token-2022 program ID as `token_program`, test 138's five cases — `InvalidProgramId`.
+140. The generated IDL lists no arguments for `approve`, `release`, `expire_unaccepted` and
+     `expire_accepted`, exactly `failed_requirement_id` for `reject`, and exactly `outcome` with
+     two variants for `resolve`: no amount, destination or wallet argument (D92, D94).
 
 ---
 
@@ -840,6 +1240,17 @@ Each is a difference between current source and this document (D80).
     remaining accounts; no dependence on recursion behaviour.
 19. Enable litesvm's `precompiles` feature and add `solana-ed25519-program` `=3.0.0` as a
     dev-dependency; confirm `agave-precompiles` 3.1.14 with `cargo tree` (D89).
+20. Append `Disputed`, `Paid` and `Refunded` to `BountyState`; add `failed_requirement_id` last;
+    bounty space 274 in `create_and_fund` (D93, D96).
+21. Append errors 34 to 48 (D75).
+22. Add `BountyExpired` (D95).
+23. Add `ResolveOutcome`; implement `approve`, `release`, `reject`, `resolve`,
+    `expire_unaccepted` and `expire_accepted` per sections 7.6 to 7.11.
+24. Modify tests 92 and 93; add tests 96 to 140.
+25. Review items with no single test: every Session 9 check precedes its token CPI; `release`
+    checks 1 and 2, `reject` checks 1 and 2, `resolve` checks 1 and 5, `expire_accepted` check
+    1, the mint constraints on `scout_payout` and `requester_ata`, and every
+    `VaultBalanceBelowReward` check cannot fail through the instructions.
 
 Operational, before any devnet deployment of this layout (BACKLOG):
 
@@ -870,20 +1281,48 @@ Correction noted, not edited into `MESSAGES.md`: its 60-byte `submit_attestation
 only without the two-byte index field (62 with it). Its total is declared an upper bound and
 already counts a second signature, 64 bytes of slack against a two-byte error.
 
+Session 9's instructions carry no designated verification. Each is counted with the client's
+idempotent create for its destination account placed first (D92, D95); `reject` has none.
+
+| | Keys | Signatures | Bytes | Headroom |
+|---|---|---|---|---|
+| `approve` | 13 | 2 | 631 | 601 |
+| `release` | 13 | 1 | 567 | 665 |
+| `reject` | 5 | 2 | 375 | 857 |
+| `resolve` | 14 | 2 | 664 | 568 |
+| `expire_unaccepted` | 12 | 1 | 534 | 698 |
+| `expire_accepted` | 12 | 1 | 534 | 698 |
+
+`resolve` is counted with `PayScout`, whose create names the Scout wallet; `RefundRequester`
+names the requester, already a key, so it needs one key fewer.
+
 ---
 
 ## 15. Stated limits
 
-- **Voucher replay across cancellation** — D86, with revisit triggers in BACKLOG.
+- **Voucher replay across closure** — D86, after `cancel` or `expire_unaccepted`, with revisit
+  triggers in BACKLOG. No other instruction closes a bounty account (D96).
 - **Early attestation** — valid until `deadline` unless state or the configured attester changes
   (D82).
 - **Malformed direct funding** — a policy-chain mismatch cannot attest and locks only its
-  funder's USDC, recoverable through Session 9's `expire` (D77).
+  funder's USDC until `expire_unaccepted` (D77, D95).
 - **Eligibility availability** — if the eligibility service is down, new accepts stop (D68).
 - **Immutable configuration** — replacing a leaked configured key needs an upgrade with a
   migration (D83).
-- **Donations** — tokens sent to a vault return to the requester on `cancel`.
-- **No exits yet** — `Accepted` and `Submitted` lock the reward until Session 9 (section 5.3).
+- **Donations** — tokens sent to a live vault go, with the reward, to whoever the settling or
+  cancelling instruction pays.
+- **Unresolved dispute** — a `Disputed` bounty's balance stays in the vault until the arbiter
+  resolves it; no timeout exists (D94).
+- **Missing or frozen destination** — settlement fails with nothing moved while the payout or
+  refund account does not exist or is frozen by the mint's freeze authority. The balance stays in
+  the vault, payable to the same party, until the account is created or thawed (D92, D95).
+- **Rent in settled bounties** — each `Paid` or `Refunded` account keeps the requester's 2797920
+  lamports; no instruction closes it (D96).
+- **Tokens sent to a settled bounty's vault address** — anyone can re-create an associated token
+  account there and deposit into it, and no instruction moves tokens once the bounty is `Paid` or
+  `Refunded` (test 135). Such tokens are unrecoverable.
+- **Requirement membership** — the program stores `failed_requirement_id` without checking it
+  against the policy (D93).
 
 Not this document's: `CAPTURE_START_DEADLINE_BUFFER_SECS` (operational, MESSAGES.md section 10);
 OPEN-1 profiles below A4 (BACKLOG); the policy binding register (POLICY.md, D84).
@@ -894,19 +1333,25 @@ OPEN-1 profiles below A4 (BACKLOG); the policy binding register (POLICY.md, D84)
 
 | Check | Result |
 |---|---|
-| Every existing instruction represented | `create_and_fund` 7.2, `cancel` 7.3 |
+| Every existing instruction represented | `create_and_fund` 7.2, `cancel` 7.3; the six new |
+| | instructions in 7.6 to 7.11 |
 | Every account field has a purpose | section 4.1 and section 3 purpose columns |
 | Every stored field required or removed | removals in section 4.2 |
 | Every enum state reachable with exits | section 5.1 and 5.3 |
 | Every authority defined and enforced | section 2 |
-| Every money path has preconditions and destination | section 5.2; sections 7.2 and 7.3 |
-| D67 to D89 reflected | D67 7.2; D68 7.4; D69 via D84; D70 and D71 6; D72 1.3; |
+| Every money path has preconditions and destination | section 5.2; sections 7.2, 7.3, 7.6, 7.7, |
+| | 7.9, 7.10 and 7.11 |
+| D67 to D98 reflected | D67 7.2; D68 7.4; D69 via D84; D70 and D71 6; D72 1.3; |
 | | D73 off-chain, no program surface; D74 3; D75 10; D76 5.1, 7.3, 8; |
 | | D77 7.2, 15; D78 test 90; D79 5.4; D80 this document; D81 4.1, 7.2, 7.4; |
-| | D82 2, 7.5; D83 3, 7.1; D84 7.2; D85 7.5; D86 tests 52, 53, 54; |
-| | D87 10, 11, test 39; D88 test 40; D89 11, 12, 13, test 95 |
+| | D82 2, 7.5; D83 3, 7.1; D84 7.2; D85 7.5, 7.11; D86 tests 52, 53, 54; |
+| | D87 10, 11, test 39; D88 test 40; D89 11, 12, 13, test 95; |
+| | D90 12 harness, tests 55 and 69; D91 6.2, no behaviour of its own; |
+| | D92 2, 7.6, 7.7; D93 4.1, 7.8; D94 2, 7.9, 15; D95 7.10, 7.11, 8; |
+| | D96 4.1, 5.1, 5.3, 15, tests 92, 93, 134 to 136; D97 5.4; D98 1.2 |
 | Existing tests checked | nine kept or modified as tests 12, 13, 14, 19, 21, 29, 30, 31, 33; |
-| | `create_with_past_deadline_fails` replaced (task 15) |
+| | `create_with_past_deadline_fails` replaced (task 15); 92 and 93 modified |
+| | for D96 |
 | Source differences are tasks | section 13 |
 
 ---
@@ -917,7 +1362,7 @@ Run with `python3`. The output reproduces section 14.
 
 ```python
 #!/usr/bin/env python3
-"""Legacy transaction size for accept and submit_attestation. No lookup tables."""
+"""Legacy transaction sizes for section 14's instructions. No lookup tables."""
 LIMIT = 1232
 
 def cu16(n):  # compact-u16 length prefix size
@@ -943,4 +1388,15 @@ tx("submit_attestation", 1,
 tx("accept", 2,
    ["relayer", "scout", "config", "bounty", "sysvar", "escrow", "ed25519", "compute_budget"],
    CB + [("ed25519", 0, ED_HEADER + 212), ("accept", 4, DISC + 8 + INDEX)])
+
+ATA = [("create_idempotent", 6, 1)]   # payer, account, wallet, mint, system, token
+BASE = ["relayer", "config", "bounty", "mint", "vault", "token", "escrow", "compute_budget",
+        "system", "associated_token", "requester"]
+tx("approve", 2, BASE + ["scout", "scout_payout"], CB + ATA + [("approve", 8, DISC)])
+tx("release", 1, BASE + ["scout", "scout_payout"], CB + ATA + [("release", 8, DISC)])
+tx("reject", 2, ["relayer", "requester", "bounty", "escrow", "compute_budget"],
+   CB + [("reject", 2, DISC + 16)])
+tx("resolve", 2, BASE + ["arbiter", "destination", "scout"], CB + ATA + [("resolve", 8, DISC + 1)])
+tx("expire_unaccepted", 1, BASE + ["requester_ata"], CB + ATA + [("expire_unaccepted", 7, DISC)])
+tx("expire_accepted", 1, BASE + ["requester_ata"], CB + ATA + [("expire_accepted", 7, DISC)])
 ```
