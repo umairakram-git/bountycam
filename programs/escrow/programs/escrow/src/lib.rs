@@ -4,6 +4,7 @@ pub mod events;
 pub mod instructions;
 pub mod messages;
 pub mod state;
+pub mod verification;
 
 use anchor_lang::prelude::*;
 
@@ -61,5 +62,13 @@ pub mod escrow {
 
     pub fn cancel(ctx: Context<Cancel>) -> Result<()> {
         instructions::cancel::handle_cancel(ctx)
+    }
+
+    pub fn accept(
+        ctx: Context<Accept>,
+        expires_at: i64,
+        verification_instruction_index: u16,
+    ) -> Result<()> {
+        instructions::accept::handle_accept(ctx, expires_at, verification_instruction_index)
     }
 }

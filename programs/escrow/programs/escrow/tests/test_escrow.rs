@@ -5,7 +5,9 @@ use {
         __private::base64::{engine::general_purpose::STANDARD, Engine},
         prelude::{Clock, ProgramData, Pubkey},
         solana_program::{
-            bpf_loader_upgradeable, instruction::Instruction, program_pack::Pack,
+            bpf_loader_upgradeable,
+            instruction::{AccountMeta, Instruction},
+            program_pack::Pack,
             system_instruction, system_program,
         },
         AccountDeserialize, AccountSerialize, AnchorDeserialize, Discriminator,
@@ -25,6 +27,7 @@ use {
         types::{FailedTransactionMetadata, TransactionMetadata},
         LiteSVM,
     },
+    solana_ed25519_program::new_ed25519_instruction_with_signature,
     solana_keypair::Keypair,
     solana_message::{Message, VersionedMessage},
     solana_signer::Signer,
@@ -43,6 +46,24 @@ const REVIEW_WINDOW: i64 = 3_600;
 const DEPLOYMENT_ID: u8 = 1;
 const PROGRAM_BYTES: &[u8] =
     include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/escrow.so"));
+/// The test-only CPI caller (SPEC section 12 harness rules, D90), built by
+/// `cargo build-sbf` in the counted run. A missing file fails compilation.
+const CPI_CALLER_BYTES: &[u8] =
+    include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/cpi_caller.so"));
+/// The caller's ID (D90): 32 bytes of 0xC7, not a point on the ed25519 curve.
+const CPI_CALLER_ID: Pubkey =
+    Pubkey::from_str_const("ESrpUvg2gM75m1mzoSuquCaoabs42edBCCdabdvDgJBg");
+/// Anchor discriminator of the caller's `forward`: the first eight bytes of
+/// sha256 of `global:forward`, verified independently (D90).
+const FORWARD_DISCRIMINATOR: [u8; 8] = [0x2d, 0xa5, 0xc9, 0x74, 0xce, 0xe1, 0xf1, 0x12];
+/// The published vectors (D78): the layout tables place every field of the
+/// test-side message builders, independently of the program's builders.
+const VECTORS: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../../packages/shared/vectors/vectors.json"
+));
+/// Default voucher lifetime in the accept tests; well inside the cutoff.
+const VOUCHER_TTL: i64 = 600;
 
 struct Setup {
     svm: LiteSVM,
@@ -644,9 +665,11 @@ fn t94_cancel_with_bounty_at_non_canonical_pda_fails() {
     assert_named_error(res, "ConstraintSeeds");
 }
 
-// SPEC test 91: missing signer. Part 1 covers the create_and_fund requester
-// and the cancel requester; part 2 adds the accept Scout as the third case.
-// A relayer pays and is the only signer; the requester's meta is demoted.
+// SPEC test 91: missing signer, three cases: the create_and_fund requester,
+// the cancel requester, and the accept Scout. A relayer pays and is the only
+// signer; the named account's meta is demoted in the last instruction of the
+// case. The accept case carries a valid voucher, so the missing signature is
+// its only fault.
 #[test]
 fn t91_missing_signer_fails() {
     let mut s = setup();
@@ -654,17 +677,29 @@ fn t91_missing_signer_fails() {
     let relayer = Keypair::new();
     s.svm.airdrop(&relayer.pubkey(), 1_000_000_000).unwrap();
     let funded = fund_bounty(&mut s, [91u8; 16]);
+    let to_accept = fund_bounty(&mut s, [93u8; 16]);
+    let scout = new_scout(&mut s);
+    let expires_at = NOW + VOUCHER_TTL;
+    let voucher = voucher_ix(&s.svm, &s.eligibility, &to_accept, &scout.pubkey(), expires_at);
 
-    let cases: [Instruction; 2] = [
-        create_and_fund_ix(&s, [92u8; 16], REWARD, 3, s.requester_ata),
-        cancel_ix(&s, requester, funded, s.requester_ata),
+    let cases: [(Vec<Instruction>, Pubkey); 3] = [
+        (
+            vec![create_and_fund_ix(&s, [92u8; 16], REWARD, 3, s.requester_ata)],
+            requester,
+        ),
+        (vec![cancel_ix(&s, requester, funded, s.requester_ata)], requester),
+        (
+            vec![voucher, accept_ix(scout.pubkey(), to_accept, expires_at, 0)],
+            scout.pubkey(),
+        ),
     ];
-    assert_eq!(cases.len(), 2);
-    for mut ix in cases {
-        let meta = ix.accounts.iter_mut().find(|m| m.pubkey == requester).unwrap();
+    assert_eq!(cases.len(), 3);
+    for (mut ixs, demoted) in cases {
+        let last = ixs.last_mut().unwrap();
+        let meta = last.accounts.iter_mut().find(|m| m.pubkey == demoted).unwrap();
         assert!(meta.is_signer);
         meta.is_signer = false;
-        let res = send(&mut s.svm, &relayer, &[ix], &[&relayer]);
+        let res = send(&mut s.svm, &relayer, &ixs, &[&relayer]);
         assert_named_error(res, "AccountNotSigner");
     }
 }
@@ -742,25 +777,15 @@ fn t30_cancel_by_non_requester_fails() {
     assert_named_error(res, "UnauthorizedRequester");
 }
 
+// SPEC test 31: cancel after a real accept. One fault: the state. Guard of
+// the existing state constraint, reached through `accept` rather than by
+// rewriting the account (section 12 harness rules).
 #[test]
-fn cancel_when_accepted_fails() {
+fn t31_cancel_when_accepted_fails() {
     let mut s = setup();
-    let bounty_id = [4u8; 16];
-    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, s.requester_ata);
-    send(&mut s.svm, &s.requester, &[ix], &[&s.requester]).unwrap();
-
-    // No accept instruction exists yet, so force the state transition directly.
-    let bounty_key = bounty_pda(&s.requester.pubkey(), &bounty_id);
-    let mut account = s.svm.get_account(&bounty_key).unwrap();
-    let original_len = account.data.len();
-    let mut bounty = Bounty::try_deserialize(&mut account.data.as_slice()).unwrap();
-    bounty.state = BountyState::Accepted;
-    bounty.scout = Some(Pubkey::new_unique());
-    let mut data = Vec::new();
-    bounty.try_serialize(&mut data).unwrap();
-    data.resize(original_len, 0);
-    account.data = data;
-    s.svm.set_account(bounty_key, account).unwrap();
+    let bounty_key = fund_bounty(&mut s, [31u8; 16]);
+    let scout = new_scout(&mut s);
+    accept_with_voucher(&mut s, &scout, bounty_key, NOW + VOUCHER_TTL).unwrap();
 
     let ix = cancel_ix(&s, s.requester.pubkey(), bounty_key, s.requester_ata);
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
@@ -1531,4 +1556,456 @@ fn t27_create_with_timestamp_overflow_fails() {
     let ix = create_and_fund_ix(&s, [27u8; 16], REWARD, 3, s.requester_ata);
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
     assert_named_error(res, "TimestampOverflow");
+}
+
+// ---------------------------------------------------------------------------
+// SPEC 12.4: accept (D68, D71, D81, D86)
+// ---------------------------------------------------------------------------
+
+/// A published layout table: each field's name, offset and width, and the
+/// schema's total length (MESSAGES.md sections 3 and 4, `vectors.json`).
+fn layout(name: &str) -> (Vec<(String, usize, usize)>, usize) {
+    let doc: serde_json::Value = serde_json::from_str(VECTORS).unwrap();
+    let table = &doc["layouts"][name];
+    let fields = table["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            (
+                f["field"].as_str().unwrap().to_string(),
+                f["offset"].as_u64().unwrap() as usize,
+                f["width"].as_u64().unwrap() as usize,
+            )
+        })
+        .collect();
+    (fields, table["total_bytes"].as_u64().unwrap() as usize)
+}
+
+/// Test-side `BOUNTYCAM_ELIGIBILITY_V1`: every field placed at the published
+/// table's offset with the table's width, from bounty state and the given
+/// Scout and expiry. Independent of the program's builder, which test 90
+/// verifies against the vectors separately.
+fn eligibility_message(bounty: &Bounty, scout: &Pubkey, expires_at: i64) -> Vec<u8> {
+    let (fields, total) = layout("BOUNTYCAM_ELIGIBILITY_V1");
+    let mut out = vec![0u8; total];
+    for (name, offset, width) in &fields {
+        let bytes: Vec<u8> = match name.as_str() {
+            "domain_tag" => b"BOUNTYCAM_ELIGIBILITY_V1".to_vec(),
+            "schema_version" => 1u16.to_le_bytes().to_vec(),
+            "deployment_id" => vec![DEPLOYMENT_ID],
+            "program_id" => escrow::id().to_bytes().to_vec(),
+            "bounty_id" => bounty.bounty_id.to_vec(),
+            "requester" => bounty.requester.to_bytes().to_vec(),
+            "scout" => scout.to_bytes().to_vec(),
+            "policy_hash" => bounty.policy_hash.to_vec(),
+            "eligibility_profile_hash" => bounty.eligibility_profile_hash.to_vec(),
+            "required_assurance" => vec![bounty.required_assurance],
+            "expires_at" => expires_at.to_le_bytes().to_vec(),
+            other => panic!("unknown eligibility field {other}"),
+        };
+        assert_eq!(bytes.len(), *width, "{name}");
+        out[*offset..*offset + *width].copy_from_slice(&bytes);
+    }
+    out
+}
+
+/// The canonical designated instruction (SPEC 6.1), built only by
+/// `solana-ed25519-program` 3.0.0 so test and program cannot share one
+/// misreading of the offset table (D89).
+fn ed25519_ix(signer: &Keypair, message: &[u8]) -> Instruction {
+    let signature: [u8; 64] = signer.sign_message(message).as_ref().try_into().unwrap();
+    new_ed25519_instruction_with_signature(message, &signature, &signer.pubkey().to_bytes())
+}
+
+/// A voucher for `scout` over the bounty's current state, signed by the
+/// given key (normally the configured eligibility authority).
+fn voucher_ix(
+    svm: &LiteSVM,
+    signer: &Keypair,
+    bounty: &Pubkey,
+    scout: &Pubkey,
+    expires_at: i64,
+) -> Instruction {
+    let state = read_bounty(svm, bounty);
+    ed25519_ix(signer, &eligibility_message(&state, scout, expires_at))
+}
+
+fn accept_ix(scout: Pubkey, bounty: Pubkey, expires_at: i64, index: u16) -> Instruction {
+    Instruction::new_with_bytes(
+        escrow::id(),
+        &escrow::instruction::Accept {
+            expires_at,
+            verification_instruction_index: index,
+        }
+        .data(),
+        escrow::accounts::Accept {
+            scout,
+            config: config_pda(),
+            bounty,
+            instructions_sysvar: solana_instructions_sysvar::ID,
+        }
+        .to_account_metas(None),
+    )
+}
+
+/// `[verification, accept]` with the designated index 0; the Scout pays and
+/// is the only signer.
+fn accept_tx(
+    svm: &mut LiteSVM,
+    scout: &Keypair,
+    bounty: Pubkey,
+    expires_at: i64,
+    verification: Instruction,
+) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+    let accept = accept_ix(scout.pubkey(), bounty, expires_at, 0);
+    send(svm, scout, &[verification, accept], &[scout])
+}
+
+/// The default accept: a voucher for this Scout signed by the configured
+/// eligibility authority, then `accept`.
+fn accept_with_voucher(
+    s: &mut Setup,
+    scout: &Keypair,
+    bounty: Pubkey,
+    expires_at: i64,
+) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+    let voucher = voucher_ix(&s.svm, &s.eligibility, &bounty, &scout.pubkey(), expires_at);
+    accept_tx(&mut s.svm, scout, bounty, expires_at, voucher)
+}
+
+fn new_scout(s: &mut Setup) -> Keypair {
+    let scout = Keypair::new();
+    s.svm.airdrop(&scout.pubkey(), 1_000_000_000).unwrap();
+    scout
+}
+
+fn set_clock(svm: &mut LiteSVM, unix_timestamp: i64) {
+    let mut clock = svm.get_sysvar::<Clock>();
+    clock.unix_timestamp = unix_timestamp;
+    svm.set_sysvar::<Clock>(&clock);
+}
+
+/// Wrap `inner` in the test-only caller's `forward` (D90): the escrow program
+/// account first, then the inner metas unchanged; data is the discriminator,
+/// then the inner data as a borsh `Vec<u8>` (4-byte little-endian length).
+fn via_cpi(inner: Instruction) -> Instruction {
+    let mut accounts = vec![AccountMeta::new_readonly(escrow::id(), false)];
+    accounts.extend(inner.accounts);
+    let mut data = FORWARD_DISCRIMINATOR.to_vec();
+    data.extend((inner.data.len() as u32).to_le_bytes());
+    data.extend(inner.data);
+    Instruction {
+        program_id: CPI_CALLER_ID,
+        accounts,
+        data,
+    }
+}
+
+/// Every field `create_and_fund` wrote, compared between two reads.
+fn assert_fixed_fields_equal(a: &Bounty, b: &Bounty) {
+    assert_eq!(a.bounty_id, b.bounty_id);
+    assert_eq!(a.requester, b.requester);
+    assert_eq!(a.reward_amount, b.reward_amount);
+    assert_eq!(a.platform_fee, b.platform_fee);
+    assert_eq!(a.policy_hash, b.policy_hash);
+    assert_eq!(a.eligibility_profile_hash, b.eligibility_profile_hash);
+    assert_eq!(a.required_assurance, b.required_assurance);
+    assert_eq!(a.acceptance_window_secs, b.acceptance_window_secs);
+    assert_eq!(a.completion_window_secs, b.completion_window_secs);
+    assert_eq!(a.review_window_secs, b.review_window_secs);
+    assert_eq!(a.acceptance_cutoff, b.acceptance_cutoff);
+    assert_eq!(a.bump, b.bump);
+}
+
+// SPEC test 42: scout stored; deadline equals clock plus completion window;
+// state Accepted; the other Options still None; every fixed field unchanged;
+// no token balance changes anywhere.
+#[test]
+fn t42_accept_succeeds() {
+    let mut s = setup();
+    let bounty_key = fund_bounty(&mut s, [42u8; 16]);
+    let before = read_bounty(&s.svm, &bounty_key);
+    let scout = new_scout(&mut s);
+    let vault = associated_token::get_associated_token_address(&bounty_key, &s.usdc_mint);
+
+    accept_with_voucher(&mut s, &scout, bounty_key, NOW + VOUCHER_TTL).unwrap();
+
+    let after = read_bounty(&s.svm, &bounty_key);
+    assert_eq!(after.scout, Some(scout.pubkey()));
+    assert_eq!(after.deadline, Some(NOW + COMPLETION_WINDOW));
+    assert_eq!(after.state, BountyState::Accepted);
+    assert_eq!(after.submitted_at, None);
+    assert_eq!(after.evidence_root, None);
+    assert_eq!(after.achieved_assurance, None);
+    assert_fixed_fields_equal(&before, &after);
+
+    assert_eq!(token_balance(&s.svm, &vault), REWARD);
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE - REWARD);
+    let scout_ata = associated_token::get_associated_token_address(&scout.pubkey(), &s.usdc_mint);
+    assert!(s.svm.get_account(&scout_ata).is_none(), "no Scout token account exists");
+}
+
+// SPEC test 43: at exactly acceptance_cutoff succeeds (D81). The voucher
+// expires one second later so expiry is not in play.
+#[test]
+fn t43_accept_at_exactly_cutoff_succeeds() {
+    let mut s = setup();
+    let bounty_key = fund_bounty(&mut s, [43u8; 16]);
+    let scout = new_scout(&mut s);
+    let cutoff = NOW + ACCEPTANCE_WINDOW;
+    assert_eq!(read_bounty(&s.svm, &bounty_key).acceptance_cutoff, cutoff);
+    set_clock(&mut s.svm, cutoff);
+
+    accept_with_voucher(&mut s, &scout, bounty_key, cutoff + 1).unwrap();
+    let bounty = read_bounty(&s.svm, &bounty_key);
+    assert_eq!(bounty.state, BountyState::Accepted);
+    assert_eq!(bounty.deadline, Some(cutoff + COMPLETION_WINDOW));
+}
+
+// SPEC test 44: one second after acceptance_cutoff. One fault: the clock;
+// the voucher is valid and unexpired.
+#[test]
+fn t44_accept_one_second_after_cutoff_fails() {
+    let mut s = setup();
+    let bounty_key = fund_bounty(&mut s, [44u8; 16]);
+    let scout = new_scout(&mut s);
+    let cutoff = NOW + ACCEPTANCE_WINDOW;
+    set_clock(&mut s.svm, cutoff + 1);
+
+    let res = accept_with_voucher(&mut s, &scout, bounty_key, cutoff + 100);
+    assert_named_error(res, "AcceptanceWindowClosed");
+}
+
+// SPEC test 45: at exactly expires_at succeeds.
+#[test]
+fn t45_accept_at_exactly_expires_at_succeeds() {
+    let mut s = setup();
+    let bounty_key = fund_bounty(&mut s, [45u8; 16]);
+    let scout = new_scout(&mut s);
+
+    accept_with_voucher(&mut s, &scout, bounty_key, NOW).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty_key).state, BountyState::Accepted);
+}
+
+// SPEC test 46: one second after expires_at. One fault: the voucher's expiry;
+// the cutoff is untouched.
+#[test]
+fn t46_accept_one_second_after_expires_at_fails() {
+    let mut s = setup();
+    let bounty_key = fund_bounty(&mut s, [46u8; 16]);
+    let scout = new_scout(&mut s);
+
+    let res = accept_with_voucher(&mut s, &scout, bounty_key, NOW - 1);
+    assert_named_error(res, "VoucherExpired");
+}
+
+// SPEC test 47: a wallet other than the voucher's Scout signs and submits a
+// valid voucher. One fault: the signer, which is spliced into the
+// reconstruction (SPEC 7.4, D68). The wallet is not the requester.
+#[test]
+fn t47_accept_by_wallet_other_than_voucher_scout_fails() {
+    let mut s = setup();
+    let bounty_key = fund_bounty(&mut s, [47u8; 16]);
+    let named = new_scout(&mut s);
+    let other = new_scout(&mut s);
+    let expires_at = NOW + VOUCHER_TTL;
+    let voucher = voucher_ix(&s.svm, &s.eligibility, &bounty_key, &named.pubkey(), expires_at);
+
+    let res = accept_tx(&mut s.svm, &other, bounty_key, expires_at, voucher);
+    assert_named_error(res, "VerificationMessageMismatch");
+}
+
+// SPEC test 48: a valid voucher naming the requester, signed by the requester.
+// One fault: the identity. Check 3 precedes verification, and the voucher
+// would verify, so nothing else can fire.
+#[test]
+fn t48_requester_accepting_own_bounty_fails() {
+    let mut s = setup();
+    let bounty_key = fund_bounty(&mut s, [48u8; 16]);
+    let requester = s.requester.pubkey();
+    let expires_at = NOW + VOUCHER_TTL;
+    let voucher = voucher_ix(&s.svm, &s.eligibility, &bounty_key, &requester, expires_at);
+
+    let res = accept_tx(&mut s.svm, &s.requester, bounty_key, expires_at, voucher);
+    assert_named_error(res, "ScoutIsRequester");
+}
+
+// SPEC test 49: a second Scout with its own valid voucher after the first
+// accept. One fault: the state (D68).
+#[test]
+fn t49_second_scout_after_accept_fails() {
+    let mut s = setup();
+    let bounty_key = fund_bounty(&mut s, [49u8; 16]);
+    let first = new_scout(&mut s);
+    let second = new_scout(&mut s);
+    accept_with_voucher(&mut s, &first, bounty_key, NOW + VOUCHER_TTL).unwrap();
+
+    let res = accept_with_voucher(&mut s, &second, bounty_key, NOW + VOUCHER_TTL);
+    assert_named_error(res, "BountyNotAcceptable");
+}
+
+// SPEC test 50: the correct voucher message signed by the attester, the
+// arbiter and a fresh key, three cases. One fault: the verifying key.
+#[test]
+fn t50_voucher_signed_by_non_eligibility_key_fails() {
+    let mut s = setup();
+    let bounty_key = fund_bounty(&mut s, [50u8; 16]);
+    let scout = new_scout(&mut s);
+    let expires_at = NOW + VOUCHER_TTL;
+    let state = read_bounty(&s.svm, &bounty_key);
+    let message = eligibility_message(&state, &scout.pubkey(), expires_at);
+
+    let signers: [(&str, Keypair); 3] = [
+        ("attester", s.attester.insecure_clone()),
+        ("arbiter", s.arbiter.insecure_clone()),
+        ("fresh key", Keypair::new()),
+    ];
+    assert_eq!(signers.len(), 3);
+    for (name, signer) in &signers {
+        eprintln!("case: signed by the {name}");
+        let ix = ed25519_ix(signer, &message);
+        let res = accept_tx(&mut s.svm, &scout, bounty_key, expires_at, ix);
+        assert_named_error(res, "VerificationAuthorityMismatch");
+    }
+}
+
+// SPEC test 51: one mutation per signed voucher field, eleven cases. The
+// fields and their offsets come from the published layout table; each case
+// flips one bit of the signed message inside that field and leaves the
+// arguments unchanged. One fault: one signed field.
+#[test]
+fn t51_voucher_field_mutations_fail() {
+    let (fields, _) = layout("BOUNTYCAM_ELIGIBILITY_V1");
+    let names: Vec<&str> = fields.iter().map(|f| f.0.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "domain_tag",
+            "schema_version",
+            "deployment_id",
+            "program_id",
+            "bounty_id",
+            "requester",
+            "scout",
+            "policy_hash",
+            "eligibility_profile_hash",
+            "required_assurance",
+            "expires_at",
+        ],
+        "MESSAGES.md section 4 fields, in order"
+    );
+    assert_eq!(fields.len(), 11);
+
+    let mut s = setup();
+    let bounty_key = fund_bounty(&mut s, [51u8; 16]);
+    let scout = new_scout(&mut s);
+    let expires_at = NOW + VOUCHER_TTL;
+    let state = read_bounty(&s.svm, &bounty_key);
+    let message = eligibility_message(&state, &scout.pubkey(), expires_at);
+
+    for (name, offset, _width) in &fields {
+        eprintln!("case: {name} at offset {offset}");
+        let mut mutated = message.clone();
+        mutated[*offset] ^= 0x01;
+        assert_ne!(mutated, message);
+        let ix = ed25519_ix(&s.eligibility, &mutated);
+        let res = accept_tx(&mut s.svm, &scout, bounty_key, expires_at, ix);
+        assert_named_error(res, "VerificationMessageMismatch");
+    }
+}
+
+/// Cancel `bounty_id` and re-create it with `args`, in two transactions.
+fn cancel_and_recreate(s: &mut Setup, bounty: Pubkey, args: CreateArgs) {
+    let cancel = cancel_ix(s, s.requester.pubkey(), bounty, s.requester_ata);
+    send(&mut s.svm, &s.requester, &[cancel], &[&s.requester]).unwrap();
+    // An identical re-creation is byte-identical to the original funding
+    // transaction; a fresh blockhash keeps litesvm from rejecting it as a
+    // duplicate (as in tests 19 and 33).
+    s.svm.expire_blockhash();
+    let create = create_and_fund_ix_args(s, args);
+    send(&mut s.svm, &s.requester, &[create], &[&s.requester]).unwrap();
+}
+
+// SPEC test 52: an unexpired voucher replayed after cancel and identical
+// re-creation succeeds. This documents D86's stated limit: only the requester
+// can re-create, the terms must be identical, and the voucher still attests
+// only that this Scout satisfies these exact committed terms.
+#[test]
+fn t52_voucher_replay_after_identical_recreation_succeeds() {
+    let mut s = setup();
+    let bounty_id = [52u8; 16];
+    let bounty_key = fund_bounty(&mut s, bounty_id);
+    let scout = new_scout(&mut s);
+    let expires_at = NOW + VOUCHER_TTL;
+    let voucher = voucher_ix(&s.svm, &s.eligibility, &bounty_key, &scout.pubkey(), expires_at);
+
+    cancel_and_recreate(&mut s, bounty_key, create_args(bounty_id, REWARD, 3));
+    accept_tx(&mut s.svm, &scout, bounty_key, expires_at, voucher).unwrap();
+    let bounty = read_bounty(&s.svm, &bounty_key);
+    assert_eq!(bounty.scout, Some(scout.pubkey()));
+    assert_eq!(bounty.state, BountyState::Accepted);
+}
+
+// SPEC test 53: the same replay with policy_hash, eligibility_profile_hash or
+// required_assurance changed at re-creation, three cases (D86). One fault
+// each: one committed term.
+#[test]
+fn t53_voucher_replay_with_changed_terms_fails() {
+    let cases: [(&str, fn(&mut CreateArgs)); 3] = [
+        ("policy_hash", |a| a.policy_hash = [8u8; 32]),
+        ("eligibility_profile_hash", |a| a.eligibility_profile_hash = [10u8; 32]),
+        ("required_assurance", |a| a.required_assurance = 4),
+    ];
+    assert_eq!(cases.len(), 3);
+    for (i, (name, change)) in cases.into_iter().enumerate() {
+        eprintln!("case: {name} changed at re-creation");
+        let mut s = setup();
+        let bounty_id = [53u8 + i as u8; 16];
+        let bounty_key = fund_bounty(&mut s, bounty_id);
+        let scout = new_scout(&mut s);
+        let expires_at = NOW + VOUCHER_TTL;
+        let voucher =
+            voucher_ix(&s.svm, &s.eligibility, &bounty_key, &scout.pubkey(), expires_at);
+
+        let mut args = create_args(bounty_id, REWARD, 3);
+        change(&mut args);
+        cancel_and_recreate(&mut s, bounty_key, args);
+        let res = accept_tx(&mut s.svm, &scout, bounty_key, expires_at, voucher);
+        assert_named_error(res, "VerificationMessageMismatch");
+    }
+}
+
+// SPEC test 54: the replay after voucher expiry (D86). One fault: the expiry;
+// the clock stays inside the re-created bounty's cutoff.
+#[test]
+fn t54_voucher_replay_after_expiry_fails() {
+    let mut s = setup();
+    let bounty_id = [54u8; 16];
+    let bounty_key = fund_bounty(&mut s, bounty_id);
+    let scout = new_scout(&mut s);
+    let expires_at = NOW + 100;
+    let voucher = voucher_ix(&s.svm, &s.eligibility, &bounty_key, &scout.pubkey(), expires_at);
+
+    cancel_and_recreate(&mut s, bounty_key, create_args(bounty_id, REWARD, 3));
+    set_clock(&mut s.svm, expires_at + 1);
+    let res = accept_tx(&mut s.svm, &scout, bounty_key, expires_at, voucher);
+    assert_named_error(res, "VoucherExpired");
+}
+
+// SPEC test 55: accept through CPI. The test-only caller forwards the exact
+// accept instruction; the Scout signs the outer transaction and `invoke`
+// forwards the signer flag. One fault: the stack height (D71).
+#[test]
+fn t55_accept_through_cpi_fails() {
+    let mut s = setup();
+    s.svm.add_program(CPI_CALLER_ID, CPI_CALLER_BYTES).unwrap();
+    let bounty_key = fund_bounty(&mut s, [55u8; 16]);
+    let scout = new_scout(&mut s);
+    let expires_at = NOW + VOUCHER_TTL;
+    let voucher = voucher_ix(&s.svm, &s.eligibility, &bounty_key, &scout.pubkey(), expires_at);
+    let inner = accept_ix(scout.pubkey(), bounty_key, expires_at, 0);
+
+    let res = send(&mut s.svm, &scout, &[voucher, via_cpi(inner)], &[&scout]);
+    assert_named_error(res, "InvocationNotTopLevel");
 }
