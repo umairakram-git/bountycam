@@ -1602,3 +1602,218 @@ version `anchor-lang` then requires.
 Tests, at minimum: `cargo tree -e normal,features` for the escrow package is identical before and
 after the manifest change; the lock diff is that one line; the counted run shows 44 integration
 and 2 escrow unit tests.
+
+---
+
+## Session 9 rulings (17 September)
+
+Rulings R1 to R10 from the opening of Session 9. `programs/escrow/SPEC.md` section 1.2 and D80
+left `approve`, `reject`, `resolve` and `expire` unspecified. Umair ruled every payout
+destination, refund path and arbiter power; choices made on technical grounds say so. These
+entries precede the Session 9 SPEC amendment, which carries accounts, check order, errors and
+the full test list.
+
+**D92 — Approval and release pay the stored Scout the whole vault balance; release needs no
+signer.** `approve`: the requester signs, bound by `has_one`; the bounty is `Submitted`; there is
+no time condition. `release`, a new instruction: no signer beyond the fee payer; the bounty is
+`Submitted`; it succeeds only when `now` is strictly later than `submitted_at` plus
+`review_window_secs`, the addition checked. Both transfer the vault's entire balance to the
+Scout payout account, close the vault with its rent to the requester, and set `Paid`. Neither
+takes an amount, destination or wallet argument.
+
+The entire balance, not `reward_amount`, for `cancel`'s reason (D76, SPEC section 7.3): anyone
+can deposit into the vault, and a residue would block its closure. Donated tokens go to the
+Scout.
+
+This is how D12's "silence auto-releases" is realised. A program acts only when a transaction
+arrives, so nothing is automatic: once the review window has passed, any fee payer may submit
+`release`, normally the relayer. A release nobody submits leaves the reward in the vault,
+payable to the Scout alone. `release` is its own instruction rather than a second signer rule
+on `approve`, a technical choice: one authorisation rule per instruction keeps every negative
+test a single fault.
+
+The Scout payout account is the associated token account of the Scout wallet stored by `accept`,
+for `config.usdc_mint` under the classic SPL Token program, validated by derivation, mint and
+owner (SECURITY.md section 8). No instruction argument, API, database or caller selects it. The
+program does not create it: `init_if_needed` is kept off money paths, a technical choice. The
+client places the Associated Token program's idempotent create before the instruction, its rent
+paid by that transaction's fee payer. A missing or frozen payout account makes the transaction
+fail with nothing changed; the reward stays payable only to the Scout.
+
+Supersedes D2's sentence "Only `approve` (requester) or `resolve` (arbiter) moves money", already
+inaccurate since `cancel`. Replacement: USDC moves only through an instruction whose destination
+and amount the program fixes from stored state; a required signer authorises that the movement
+happens, never where it goes. Amends D12: "auto-releases" means permissionless `release` after
+the review window. SECURITY.md section 2 is amended: the requester's `approve` is recorded, and
+the relayer, instead of "may not move USDC", may submit the permissionless instructions of D92
+and D95, which let it choose no account, amount, destination or timing, and may move USDC by no
+other means.
+
+Tests, at minimum: `approve` pays the Scout the entire vault balance including a donation, closes
+the vault with rent to the requester, sets `Paid`, and leaves the bounty account open; `approve`
+signed by a wallet other than the requester, including the Scout, fails; `approve` from
+`Accepted`, `Disputed`, `Paid` and `Refunded` fails; `approve` twice fails; the payout account
+replaced by the requester's, an attacker's, or the Scout's account for another mint fails;
+`release` at exactly the end of the review window fails; one second later it succeeds, submitted
+by an arbitrary fee payer; `release` after `approve`, `approve` after `release`, and `release`
+from `Disputed` fail.
+
+**D93 — Reject names a requirement on-chain inside the review window and enters `Disputed`.**
+The requester signs; the bounty is `Submitted`; `now` is at or before `submitted_at` plus
+`review_window_secs`. The argument `failed_requirement_id: [u8; 16]` is the 16 bytes of the
+uuid of an evidence requirement in the committed policy (POLICY.md section 2.2). It is stored in
+a new field `failed_requirement_id: Option<[u8; 16]>`, placed last per SPEC section 4.1's `Option`
+ordering, raising the bounty's maximum space from 257 to 274 bytes. The state becomes
+`Disputed`. No money moves and the vault is untouched. A second `reject` fails on state.
+
+The program cannot check that the id belongs to the policy: that needs the canonical policy,
+which D70 keeps off-chain. It rejects the all-zero id, which no version 4 uuid can be, as a
+technical fail-closed check. Membership is checked off-chain, by the API before it builds the
+transaction and by the arbiter before resolving. Storing the id fixes the requester's claim in
+their own signed transaction before any arbiter reads it. The database `decisions` constraint
+requiring `failed_requirement_id` for a rejection (Session 3) remains the product record.
+
+Boundaries under D81: `reject` succeeds at the window's last second and `release` one second
+later, so the two never overlap. `approve` stays available in `Submitted` after the window
+closes. From `Disputed` only `resolve` exits (D74); the requester cannot withdraw a rejection by
+approving.
+
+SECURITY.md section 7's attester leak line is tightened, closing its BACKLOG item: with a leaked
+attester key a colluding Scout is paid unless the requester rejects within the review window,
+and after a rejection the arbiter decides.
+
+Tests, at minimum: `reject` sets `Disputed`, stores the id byte for byte, and leaves the vault
+balance unchanged; `reject` at exactly the end of the window succeeds and one second later fails;
+`reject` by a wallet other than the requester fails; `reject` from `Accepted`, `Disputed` and
+`Paid` fails; the all-zero id fails; `release` and `approve` after `reject` fail.
+
+**D94 — Resolve has two whole-balance outcomes, and an arbiter who is a party to the bounty
+cannot resolve it.** The signer equals `config.arbiter_authority`; the bounty is `Disputed`. One
+argument selects the outcome: pay the Scout, setting `Paid`, or refund the requester, setting
+`Refunded`. The vault's entire balance goes to the associated token account, for
+`config.usdc_mint`, of the wallet the outcome names: the Scout payout account of D92, or the
+requester's account of D95. The vault closes with its rent to the requester; the bounty account
+stays open (D96). There is no partial settlement, amount argument or other destination
+(SECURITY.md section 2). The arbiter has no deadline.
+
+`resolve` also fails when the signer equals the bounty's requester or its stored Scout. D83's
+distinctness covers the configured keys only; nothing stops the arbiter's wallet funding a
+bounty or accepting one, and this check removes resolving a dispute in which the arbiter is a
+party. It narrows the arbiter's power and adds no authority.
+
+Stated limit, ruled R5: a dispute the arbiter never resolves leaves the reward in the vault. No
+timeout defaults it to either side; `resolve` remains the only exit from `Disputed` (D74).
+
+Tests, at minimum, D74's list plus: each outcome pays the entire vault balance to its named
+account, closes the vault and sets its state; an outcome value outside the two fails; for each
+outcome, the destination replaced by the other party's account or an attacker's fails; `resolve`
+from `Submitted`, `Paid` and `Refunded` fails; `resolve` twice fails; an arbiter who is the
+requester, and one who is the Scout, fails; the eligibility authority, the attester authority,
+a fresh key, the requester and the Scout as signer each fail.
+
+**D95 — Expiry is permissionless, refunds the requester, and is two instructions.** No signer
+beyond the fee payer.
+
+`expire_unaccepted`: the bounty is `Funded` and `now` is strictly later than
+`acceptance_cutoff`. Effects follow `cancel` in D76's order: the vault's entire balance to the
+requester's account; emit `BountyExpired`, carrying `BountyCancelled`'s fields with the expiry
+time; close the vault; close the bounty; rent to the requester. Closing is safe because a
+`Funded` bounty has no Scout and cannot hold an attestation. A direct-funded malformed bounty,
+which can obtain no voucher (D84), recovers here (D77).
+
+`expire_accepted`: the bounty is `Accepted` and `now` is strictly later than `deadline`. It covers
+an abandoned mission and an attested shortfall. The vault's entire balance goes to the
+requester's account; the vault closes with its rent to the requester; the state becomes
+`Refunded`; the bounty account stays open (D96). No event. The bounty is not returned to the
+marketplace: that would clear `scout` and `deadline`, which SPEC section 4.1 forbids. A requester
+who still wants the work posts a new bounty.
+
+Two instructions rather than one, a technical choice: one closes the bounty account and the
+other keeps it, and a conditional closure inside one handler would replace Anchor's `close`
+constraint with hand-written closing code on a money path.
+
+D85's open question is answered: an attested shortfall gets no state of its own. The bounty
+stays `Accepted`, the Scout may land a passing attestation until `deadline`, and after
+`deadline` it expires to the requester. D68's mandatory `expire` is satisfied.
+
+The requester's account on both paths, and on `resolve`'s refund, is the requester's associated
+token account for `config.usdc_mint`, validated by derivation, mint and owner. The requester
+does not sign these paths, so no caller may choose among the requester's token accounts.
+`cancel`, which the requester signs, keeps its SPEC section 7.3 rule. If the requester has closed
+that account, any caller may re-create it with the idempotent create first.
+
+Boundaries under D81: `accept` succeeds at `acceptance_cutoff` and `expire_unaccepted` one second
+later; `submit_attestation` succeeds at `deadline` and `expire_accepted` one second later.
+
+Tests, at minimum: `expire_unaccepted` one second after the cutoff, by an arbitrary fee payer,
+refunds the entire balance including a donation, emits `BountyExpired` with exact fields, and
+closes both accounts with rent to the requester; at exactly the cutoff it fails; from `Accepted`
+it fails; `expire_accepted` one second after `deadline` refunds the entire balance, closes the
+vault, sets `Refunded` and leaves the bounty open; at exactly `deadline` it fails; after an
+attested shortfall it succeeds once `deadline` has passed; from `Funded`, `Submitted`,
+`Disputed`, `Paid` and `Refunded` it fails; twice it fails; on either path the requester's
+account replaced by another account of the requester, an attacker's account, or an account for
+another mint fails.
+
+**D96 — Settled bounties keep their account in a terminal state; D86's trigger is not tripped.**
+`BountyState` appends `Disputed` (3), `Paid` (4) and `Refunded` (5); existing discriminants do
+not change. `Paid` and `Refunded` are terminal: no instruction accepts either as a source state.
+Every settlement closes the vault with its rent to the requester. The bounty account stays open,
+so the requester's rent of 2797920 lamports at 274 bytes remains locked per settled bounty.
+
+Consequences. The address cannot be initialised again, so a settled `bounty_id` is spent for that
+requester. No voucher or attestation can be replayed into a re-created bounty for work already
+settled. The open account is the reconciliation source (SPEC section 8), so the four settling
+instructions emit no event.
+
+D86 assessment, owed to its revisit triggers. The only Session 9 path that closes a bounty
+account is `expire_unaccepted`, from `Funded`, which cannot hold a valid attestation. The trigger
+is not tripped, and D86's voucher-replay limit applies to it exactly as to `cancel`. BACKLOG's
+revisit of `submit_attestation` check 2 is not reopened: no Session 9 instruction clears `scout`
+or `deadline`.
+
+No instruction closes a terminal bounty account. Reclaiming that rent needs its own D-entry.
+
+Tests, at minimum: bounty layout at 274 bytes with `failed_requirement_id` last; discriminants 0
+to 5; SECURITY.md section 8's double-release list — `approve` twice, `resolve` twice,
+`expire_accepted` twice, `approve` after a refund, `expire_accepted` after a payout, `resolve`
+after a terminal state; `create_and_fund` with the id of a `Paid` bounty fails with the system
+program's "already in use".
+
+**D97 — Database `bounty_state` mapping.** Resolves the enum reconciliation BACKLOG, D56 and
+POLICY.md section 7.2 assign to Session 9. The database tracks confirmed chain state (D79); every
+value below is written only from a confirmed transaction, never from a submission response
+(SECURITY.md section 12).
+
+- `DRAFT` — creation (POLICY.md section 8.3).
+- `AVAILABLE` — confirmed `create_and_fund` with every binding agreeing (D79, D84).
+- `ACCEPTED` — confirmed `accept` (D79).
+- `SUBMITTED` — confirmed `submit_attestation`.
+- `DISPUTED` — confirmed `reject`; the `decisions` row's `failed_requirement_id` equals the
+  chain's.
+- `PAID` — confirmed `approve`, `release`, or `resolve` paying the Scout.
+- `REFUNDED` — confirmed `expire_accepted`, or `resolve` refunding the requester.
+- `EXPIRED` — confirmed `expire_unaccepted`; the account is closed, so the transaction signature
+  and `BountyExpired` event are recorded, as D76 records a funded cancellation.
+- `CANCELLED` — unfunded cancellation (D56), or confirmed `cancel` of a funded bounty with its
+  signature and event (D76). This settles POLICY.md section 7.2's open choice: `CANCELLED`, not
+  `REFUNDED`.
+
+Retained without a producer, never written, the enum not narrowed (D56): `FUNDED`, whose use for
+a malformed funded bounty remains Session 15's (D77, D84); `IN_REVIEW`, the same chain state as
+`SUBMITTED`, whose window is derived from `submitted_at` and `review_window_secs`; `APPROVED` and
+`REJECTED`, each confirmed in the same transaction as `PAID` or `DISPUTED`, so no confirmed chain
+state corresponds to them.
+
+POLICY.md section 7.2 is amended to this mapping. No migration and no API code in Session 9;
+Session 15's reconciliation repairs missed projections of these values.
+
+**D98 — Session 9 scope and cut-off.** Session 9 specifies and builds `approve`, `release`,
+`reject`, `resolve`, `expire_unaccepted` and `expire_accepted`, taking the program to eleven
+instructions; SPEC section 1.2's "nine" is superseded by the SPEC amendment. It also amends
+SECURITY.md sections 2 and 7 and POLICY.md section 7.2 as above. Out of scope unless ruled:
+capture nonce issuance, any devnet deployment, key generation and dependency changes.
+
+Cut-off: if by the end of 22 September 2026, Sydney time, a counted run (D90) on a committed
+Session 9 build does not show every Session 9 SPEC test passing, Umair rules on BACKLOG's
+three-instruction contingency before further build work. Nothing switches automatically.
