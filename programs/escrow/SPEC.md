@@ -552,9 +552,13 @@ Handler checks:
 
 Effects, in order:
 
-1. `transfer_checked` of the vault's entire balance to `scout_payout`, signed by the bounty PDA.
-2. Close `bounty_vault`, lamports to `requester`.
-3. `state` `Paid`. The bounty account stays open (D96). No event.
+1. `state` `Paid`.
+2. `transfer_checked` of the vault's entire balance to `scout_payout`, signed by the bounty PDA.
+3. Close `bounty_vault`, lamports to `requester`. The bounty account stays open (D96). No event.
+
+The state is written before the token CPI, as SECURITY.md section 8 requires (D99). Anchor
+serialises the bounty at exit either way, so this changes no observable result; what it fixes is
+what the handler has established before it calls another program.
 
 ### 7.7 `release`
 
@@ -661,10 +665,10 @@ Check 1 is a review item: `accept` writes `scout` and every path to `Disputed` p
 
 Effects, in order:
 
-1. `transfer_checked` of the vault's entire balance to `destination`, signed by the bounty PDA.
-2. Close `bounty_vault`, lamports to `requester`.
-3. `state` `Paid` for `PayScout`, `Refunded` for `RefundRequester`. The bounty account stays
-   open (D96). No event.
+1. `state` `Paid` for `PayScout`, `Refunded` for `RefundRequester` (D99).
+2. `transfer_checked` of the vault's entire balance to `destination`, signed by the bounty PDA.
+3. Close `bounty_vault`, lamports to `requester`. The bounty account stays open (D96). No
+   event.
 
 ### 7.10 `expire_unaccepted`
 
@@ -701,6 +705,10 @@ Effects, in D76's order:
 3. Close `bounty_vault`, lamports to `requester`.
 4. Close `bounty`, lamports to `requester`, by the `close` constraint after the handler.
 
+This instruction writes no state: the bounty is closed instead, and its closure necessarily
+follows the token CPI because Anchor's `close` constraint runs at exit. `cancel` has worked this
+way since D76; D99 records why SECURITY.md section 8 is still satisfied.
+
 ### 7.11 `expire_accepted`
 
 No arguments. No signer beyond the fee payer (D95).
@@ -722,9 +730,9 @@ Check 1 is a review item: `accept` writes `deadline` as it enters `Accepted`.
 
 Effects, in order:
 
-1. `transfer_checked` of the vault's entire balance to `requester_ata`, signed by the bounty PDA.
-2. Close `bounty_vault`, lamports to `requester`.
-3. `state` `Refunded`. The bounty account stays open (D96). No event.
+1. `state` `Refunded` (D99).
+2. `transfer_checked` of the vault's entire balance to `requester_ata`, signed by the bounty PDA.
+3. Close `bounty_vault`, lamports to `requester`. The bounty account stays open (D96). No event.
 
 This covers an abandoned mission and an attested shortfall alike (D85, D95).
 
@@ -875,7 +883,7 @@ Each SECURITY.md section 8 invariant, its mechanism here, and its tests (section
 | | | 128; review item |
 | Arbitrary CPI | `Program<Token>`, `Program<AssociatedToken>`, | 26, 139 |
 | | `Program<System>` | |
-| State before transfer | every check precedes the token CPI | review item |
+| State before transfer | every check and state write precedes the token CPI | review item |
 | Recursion | no dependence; explicit state checks | review item |
 | Double release | terminal states without exits; vault closed at | 134, 135 |
 | | settlement; state constraints (D96) | |
@@ -885,8 +893,10 @@ Each SECURITY.md section 8 invariant, its mechanism here, and its tests (section
 | Account closure | `cancel` and `expire_unaccepted` close both; | 29, 33, 40, 123, 128, 136 |
 | | settlements close the vault only; terminal | |
 | | accounts never close; close-then-reinit | |
-| Duplicate accounts | Anchor duplicate-mutable check (D87); owner | 39, 48, 101, 118, 119 |
-| | constraints; `ScoutIsRequester`; `ArbiterIsParty` | |
+| Duplicate accounts | Anchor duplicate-mutable check (D87), which covers | 39, 48, 101, 118, 119 |
+| | only account types that serialise at exit; owner | |
+| | constraints; `has_one` and address constraints on | |
+| | the others; `ScoutIsRequester`; `ArbiterIsParty` (D99) | |
 | Remaining accounts | never read | review item |
 
 D71's invariant is section 6, tested by 55, 69, 70 to 90 and 95.
@@ -1348,7 +1358,8 @@ OPEN-1 profiles below A4 (BACKLOG); the policy binding register (POLICY.md, D84)
 | | D87 10, 11, test 39; D88 test 40; D89 11, 12, 13, test 95; |
 | | D90 12 harness, tests 55 and 69; D91 6.2, no behaviour of its own; |
 | | D92 2, 7.6, 7.7; D93 4.1, 7.8; D94 2, 7.9, 15; D95 7.10, 7.11, 8; |
-| | D96 4.1, 5.1, 5.3, 15, tests 92, 93, 134 to 136; D97 5.4; D98 1.2 |
+| | D96 4.1, 5.1, 5.3, 15, tests 92, 93, 134 to 136; D97 5.4; D98 1.2; |
+| | D99 7.6, 7.9, 7.10, 7.11, 11 |
 | Existing tests checked | nine kept or modified as tests 12, 13, 14, 19, 21, 29, 30, 31, 33; |
 | | `create_with_past_deadline_fails` replaced (task 15); 92 and 93 modified |
 | | for D96 |
