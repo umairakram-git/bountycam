@@ -76,4 +76,34 @@ pub enum EscrowError {
     VaultBalanceBelowReward = 32,
     #[msg("bounty Option field invariant is broken")]
     StateInvariantViolated = 33,
+    #[msg("approve outside Submitted")]
+    BountyNotApprovable = 34,
+    #[msg("release outside Submitted")]
+    BountyNotReleasable = 35,
+    #[msg("release at or before the review window end")]
+    ReviewWindowOpen = 36,
+    #[msg("reject outside Submitted")]
+    BountyNotRejectable = 37,
+    #[msg("reject after the review window end")]
+    ReviewWindowClosed = 38,
+    #[msg("failed_requirement_id is all zero")]
+    InvalidRequirementId = 39,
+    #[msg("resolve outside Disputed")]
+    BountyNotResolvable = 40,
+    #[msg("signer is not the configured arbiter")]
+    UnauthorizedArbiter = 41,
+    #[msg("arbiter is the bounty's requester or Scout")]
+    ArbiterIsParty = 42,
+    #[msg("expire_unaccepted outside Funded, or expire_accepted outside Accepted")]
+    BountyNotExpirable = 43,
+    #[msg("expire_unaccepted at or before acceptance_cutoff")]
+    AcceptanceWindowOpen = 44,
+    #[msg("expire_accepted at or before deadline")]
+    SubmissionDeadlineOpen = 45,
+    #[msg("account passed as the Scout is not the stored Scout")]
+    ScoutMismatch = 46,
+    #[msg("unsigned account passed as the requester is not the bounty's")]
+    RequesterAccountMismatch = 47,
+    #[msg("resolve destination is not the named wallet's associated token account")]
+    DestinationAccountMismatch = 48,
 }

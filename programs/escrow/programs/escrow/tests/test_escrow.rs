@@ -1060,7 +1060,7 @@ fn t34_cancel_with_token_account_owned_by_other_wallet_fails() {
 #[test]
 fn t28_every_error_variant_has_its_listed_code() {
     use escrow::error::EscrowError as E;
-    let table: [(E, u32); 34] = [
+    let table: [(E, u32); 49] = [
         (E::InvalidRewardAmount, 6000),
         (E::DeadlineInPast, 6001),
         (E::AssuranceTooHigh, 6002),
@@ -1095,8 +1095,23 @@ fn t28_every_error_variant_has_its_listed_code() {
         (E::VerificationMessageMismatch, 6031),
         (E::VaultBalanceBelowReward, 6032),
         (E::StateInvariantViolated, 6033),
+        (E::BountyNotApprovable, 6034),
+        (E::BountyNotReleasable, 6035),
+        (E::ReviewWindowOpen, 6036),
+        (E::BountyNotRejectable, 6037),
+        (E::ReviewWindowClosed, 6038),
+        (E::InvalidRequirementId, 6039),
+        (E::BountyNotResolvable, 6040),
+        (E::UnauthorizedArbiter, 6041),
+        (E::ArbiterIsParty, 6042),
+        (E::BountyNotExpirable, 6043),
+        (E::AcceptanceWindowOpen, 6044),
+        (E::SubmissionDeadlineOpen, 6045),
+        (E::ScoutMismatch, 6046),
+        (E::RequesterAccountMismatch, 6047),
+        (E::DestinationAccountMismatch, 6048),
     ];
-    assert_eq!(table.len(), 34, "section 10 lists 34 variants");
+    assert_eq!(table.len(), 49, "section 10 lists 49 variants");
     for (variant, expected) in table {
         assert_eq!(u32::from(variant), expected, "{variant:?}");
     }
@@ -1290,9 +1305,10 @@ fn t11_initialize_with_token_account_as_mint_fails() {
 // ---------------------------------------------------------------------------
 
 // SPEC test 92: serialised layouts match sections 3 and 4.1. Configuration:
-// fixed offsets, 138 bytes. Bounty: fixed offsets, `None` as one byte (176
+// fixed offsets, 138 bytes. Bounty: fixed offsets, `None` as one byte (177
 // bytes all-None), each `Option` tag at its computed offset when all-Some
-// (257 bytes), and the on-chain account is 257 bytes.
+// (274 bytes), `failed_requirement_id` last, and the on-chain account is 274
+// bytes (D96).
 #[test]
 fn t92_serialised_layouts_match_spec() {
     let keys: [Pubkey; 4] = std::array::from_fn(|_| Pubkey::new_unique());
@@ -1339,11 +1355,12 @@ fn t92_serialised_layouts_match_spec() {
         submitted_at: None,
         evidence_root: None,
         achieved_assurance: None,
+        failed_requirement_id: None,
     };
     let mut buf = Vec::new();
     bounty.try_serialize(&mut buf).unwrap();
-    assert_eq!(Bounty::INIT_SPACE, 249);
-    assert_eq!(buf.len(), 176);
+    assert_eq!(Bounty::INIT_SPACE, 266);
+    assert_eq!(buf.len(), 177);
     assert_eq!(&buf[8..24], &[1u8; 16]);
     assert_eq!(&buf[24..56], requester.as_ref());
     assert_eq!(&buf[56..64], &2u64.to_le_bytes());
@@ -1357,18 +1374,19 @@ fn t92_serialised_layouts_match_spec() {
     assert_eq!(&buf[161..169], &9i64.to_le_bytes());
     assert_eq!(buf[169], 2, "state Submitted");
     assert_eq!(buf[170], 251, "bump");
-    assert_eq!(&buf[171..176], &[0u8; 5], "five None tags");
+    assert_eq!(&buf[171..177], &[0u8; 6], "six None tags");
 
-    // Bounty, all-Some: tags at 171, 204, 213, 222, 255.
+    // Bounty, all-Some: tags at 171, 204, 213, 222, 255, 257.
     let scout = Pubkey::new_unique();
     bounty.scout = Some(scout);
     bounty.deadline = Some(10);
     bounty.submitted_at = Some(11);
     bounty.evidence_root = Some([12u8; 32]);
     bounty.achieved_assurance = Some(13);
+    bounty.failed_requirement_id = Some([14u8; 16]);
     let mut buf = Vec::new();
     bounty.try_serialize(&mut buf).unwrap();
-    assert_eq!(buf.len(), 257);
+    assert_eq!(buf.len(), 274);
     assert_eq!(buf[171], 1);
     assert_eq!(&buf[172..204], scout.as_ref());
     assert_eq!(buf[204], 1);
@@ -1379,14 +1397,17 @@ fn t92_serialised_layouts_match_spec() {
     assert_eq!(&buf[223..255], &[12u8; 32]);
     assert_eq!(buf[255], 1);
     assert_eq!(buf[256], 13);
+    assert_eq!(buf[257], 1);
+    assert_eq!(&buf[258..274], &[14u8; 16], "failed_requirement_id last");
 
     // On-chain: the account is allocated at the maximum size.
     let bounty_key = fund_bounty(&mut s, [92u8; 16]);
-    assert_eq!(s.svm.get_account(&bounty_key).unwrap().data.len(), 257);
+    assert_eq!(s.svm.get_account(&bounty_key).unwrap().data.len(), 274);
 }
 
 // SPEC test 93: BountyState discriminants Funded 0, Accepted 1, Submitted 2,
-// both as the Rust discriminant and as the serialised byte.
+// Disputed 3, Paid 4, Refunded 5 (D96), both as the Rust discriminant and as
+// the serialised byte.
 #[test]
 fn t93_bounty_state_discriminants() {
     use anchor_lang::AnchorSerialize;
@@ -1394,8 +1415,11 @@ fn t93_bounty_state_discriminants() {
         (BountyState::Funded, 0u8),
         (BountyState::Accepted, 1u8),
         (BountyState::Submitted, 2u8),
+        (BountyState::Disputed, 3u8),
+        (BountyState::Paid, 4u8),
+        (BountyState::Refunded, 5u8),
     ];
-    assert_eq!(cases.len(), 3);
+    assert_eq!(cases.len(), 6);
     for (state, expected) in cases {
         assert_eq!(state as u8, expected, "{state:?}");
         let mut buf = Vec::new();

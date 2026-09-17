@@ -105,6 +105,7 @@ pub fn handle_create_and_fund(
         submitted_at: None,
         evidence_root: None,
         achieved_assurance: None,
+        failed_requirement_id: None,
     });
 
     // Effect 2: exactly reward_amount, checked against the mint's decimals.

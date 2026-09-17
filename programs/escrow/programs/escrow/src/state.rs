@@ -15,22 +15,27 @@ pub struct Config {
 }
 
 /// SPEC section 5.1. Exactly the states these instructions enter (D76).
-/// Append-only: Session 9 adds its states after `Submitted`; discriminants
-/// never change.
+/// Append-only: discriminants never change (D96). `Paid` and `Refunded` are
+/// terminal; no instruction accepts either as a source state.
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BountyState {
     Funded,    // 0
     Accepted,  // 1
     Submitted, // 2
+    Disputed,  // 3
+    Paid,      // 4
+    Refunded,  // 5
 }
 
 /// SPEC section 4.1. PDA on `BOUNTY_SEED`, the requester key and `bounty_id`.
 /// Fixed-width fields first, every `Option` last, so non-`Option` fields keep
-/// stable offsets for account filters. Space: 8 discriminator bytes plus 249.
+/// stable offsets for account filters. Space: 8 discriminator bytes plus 266
+/// (D93).
 ///
-/// `Option` invariant: while `Funded` all five are `None`; `accept` sets
-/// `scout` and `deadline`; `submit_attestation` sets the other three. Nothing
-/// clears a field once set.
+/// `Option` invariant: while `Funded` all six are `None`; `accept` sets
+/// `scout` and `deadline`; `submit_attestation` sets `submitted_at`,
+/// `evidence_root` and `achieved_assurance`; `reject` sets
+/// `failed_requirement_id`. Nothing clears a field once set (D96).
 #[account]
 #[derive(InitSpace)]
 pub struct Bounty {
@@ -52,4 +57,5 @@ pub struct Bounty {
     pub submitted_at: Option<i64>,          // written by submit_attestation
     pub evidence_root: Option<[u8; 32]>,    // written by submit_attestation
     pub achieved_assurance: Option<u8>,     // written by submit_attestation
+    pub failed_requirement_id: Option<[u8; 16]>, // written by reject (D93)
 }
