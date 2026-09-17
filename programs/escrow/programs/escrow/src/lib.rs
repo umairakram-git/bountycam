@@ -87,4 +87,8 @@ pub mod escrow {
             verification_instruction_index,
         )
     }
+
+    pub fn reject(ctx: Context<Reject>, failed_requirement_id: [u8; 16]) -> Result<()> {
+        instructions::reject::handle_reject(ctx, failed_requirement_id)
+    }
 }

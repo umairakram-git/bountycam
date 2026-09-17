@@ -2954,3 +2954,119 @@ fn t95_flipped_signature_bit_fails_in_native_verifier() {
         assert_eq!(read_bounty(&s.svm, &bounty).state, expected_state);
     }
 }
+
+// ---------------------------------------------------------------------------
+// SPEC 12.10: reject (D93)
+// ---------------------------------------------------------------------------
+
+/// A non-zero requirement id: the 16 bytes of a policy requirement's uuid.
+const REQUIREMENT_ID: [u8; 16] = [0x4a; 16];
+
+fn reject_ix(signer: Pubkey, bounty: Pubkey, failed_requirement_id: [u8; 16]) -> Instruction {
+    Instruction::new_with_bytes(
+        escrow::id(),
+        &escrow::instruction::Reject { failed_requirement_id }.data(),
+        escrow::accounts::Reject { requester: signer, bounty }.to_account_metas(None),
+    )
+}
+
+/// Fund, accept and submit: the state every reject test starts from.
+fn submitted_bounty(s: &mut Setup, bounty_id: [u8; 16]) -> (Pubkey, Keypair) {
+    let (bounty, scout) = accepted_bounty(s, bounty_id);
+    submit_default(s, bounty).unwrap();
+    (bounty, scout)
+}
+
+/// The review window end (SPEC 1.3): `submitted_at` plus `review_window_secs`,
+/// both read from the account.
+fn review_window_end(svm: &LiteSVM, bounty: &Pubkey) -> i64 {
+    let state = read_bounty(svm, bounty);
+    state.submitted_at.unwrap() + state.review_window_secs
+}
+
+/// A valid reject: the requester signs and pays, with `REQUIREMENT_ID`.
+fn reject_default(
+    s: &mut Setup,
+    bounty: Pubkey,
+) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+    let ix = reject_ix(s.requester.pubkey(), bounty, REQUIREMENT_ID);
+    send(&mut s.svm, &s.requester, &[ix], &[&s.requester])
+}
+
+// SPEC test 108: state Disputed; failed_requirement_id stored byte for byte;
+// vault balance and every other field unchanged.
+#[test]
+fn t108_reject_succeeds() {
+    let mut s = setup();
+    let (bounty, scout) = submitted_bounty(&mut s, [108u8; 16]);
+    let before = read_bounty(&s.svm, &bounty);
+    let vault = associated_token::get_associated_token_address(&bounty, &s.usdc_mint);
+    assert_eq!(before.failed_requirement_id, None);
+
+    reject_default(&mut s, bounty).unwrap();
+
+    let after = read_bounty(&s.svm, &bounty);
+    assert_eq!(after.state, BountyState::Disputed);
+    assert_eq!(after.failed_requirement_id, Some(REQUIREMENT_ID));
+    assert_fixed_fields_equal(&before, &after);
+    assert_eq!(after.scout, Some(scout.pubkey()));
+    assert_eq!(after.deadline, before.deadline);
+    assert_eq!(after.submitted_at, before.submitted_at);
+    assert_eq!(after.evidence_root, before.evidence_root);
+    assert_eq!(after.achieved_assurance, before.achieved_assurance);
+    assert_eq!(token_balance(&s.svm, &vault), REWARD);
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE - REWARD);
+}
+
+// SPEC test 109: at exactly the review window end succeeds (D81, D93).
+#[test]
+fn t109_reject_at_exactly_review_window_end_succeeds() {
+    let mut s = setup();
+    let (bounty, _scout) = submitted_bounty(&mut s, [109u8; 16]);
+    let end = review_window_end(&s.svm, &bounty);
+    assert_eq!(end, NOW + REVIEW_WINDOW);
+    set_clock(&mut s.svm, end);
+
+    reject_default(&mut s, bounty).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Disputed);
+}
+
+// SPEC test 110: one second after the review window end. One fault: the clock.
+#[test]
+fn t110_reject_one_second_after_review_window_end_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = submitted_bounty(&mut s, [110u8; 16]);
+    let end = review_window_end(&s.svm, &bounty);
+    set_clock(&mut s.svm, end + 1);
+
+    let res = reject_default(&mut s, bounty);
+    assert_named_error(res, "ReviewWindowClosed");
+}
+
+// SPEC test 111: signer other than the requester, two cases: the Scout and a
+// fresh key. One fault each: the signer, who also pays.
+#[test]
+fn t111_reject_by_non_requester_fails() {
+    let mut s = setup();
+    let (bounty, scout) = submitted_bounty(&mut s, [111u8; 16]);
+    let fresh = new_scout(&mut s);
+    let cases: [(&str, &Keypair); 2] = [("the Scout", &scout), ("a fresh key", &fresh)];
+    assert_eq!(cases.len(), 2);
+    for (name, signer) in cases {
+        eprintln!("case: {name}");
+        let ix = reject_ix(signer.pubkey(), bounty, REQUIREMENT_ID);
+        let res = send(&mut s.svm, signer, &[ix], &[signer]);
+        assert_named_error(res, "UnauthorizedRequester");
+    }
+}
+
+// SPEC test 113: all-zero failed_requirement_id. One fault: the argument.
+#[test]
+fn t113_reject_with_zero_requirement_id_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = submitted_bounty(&mut s, [113u8; 16]);
+
+    let ix = reject_ix(s.requester.pubkey(), bounty, [0u8; 16]);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error(res, "InvalidRequirementId");
+}
