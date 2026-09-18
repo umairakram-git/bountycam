@@ -209,9 +209,11 @@ find the parent; decide whether it matters (Session 7).
   can hold a valid attestation. Any one requires a program-bound bounty
   incarnation identifier. Session 9 assessment (D96): the third trigger is not
   tripped; only `expire_unaccepted` closes a bounty, from `Funded`.
-- **Eligibility and arbiter development keys (D83).** Neither exists in
-  `~/bountycam-keys/`. Generate both before `initialize`, and rehearse
-  `initialize` on localnet with the exact devnet public keys first: the
+- **Rehearse `initialize` on localnet (D83).** The eligibility and arbiter keys
+  were generated 18 September under `~/bountycam-keys/`, mode 600: eligibility
+  `Bg6SsTTH6EX5AaeQQ9i4yhDTwsSjxnHx9AV8cqa97xmp`, arbiter
+  `6YPX1obwh62N2DDyxtNa2RwkriWUUWLzjAvEWJFbvK1K`. The rehearsal with the exact
+  devnet public keys is still owed before `initialize` runs on devnet: the
   configuration is immutable, so a mistake costs an upgrade with a migration.
 - ~~**Escrow test dev-dependencies are caret ranges.** `litesvm`,
   `solana-message`, `solana-transaction`, `solana-signer` and `solana-keypair`
@@ -220,11 +222,13 @@ find the parent; decide whether it matters (Session 7).
   harness note relies on litesvm 0.10.0's `add_program` behaviour.~~ Done 16
   September (e6a5da4): exact-pinned to the locked versions; `serde_json` =1.0.151
   added for SPEC test 23.
-- **Devnet bounty accounts do not survive the layout change.** D74 and D81 to
+- ~~**Devnet bounty accounts do not survive the layout change.** D74 and D81 to
   D84 change the bounty account, so accounts created under the Session 4
   program become unreadable after the redeploy. List program-owned accounts on
   devnet before redeploying and cancel any holding test USDC while the old
-  program can still read them.
+  program can still read them.~~ Closed 18 September: `getProgramAccounts` for
+  the program on devnet returned an empty result before the upgrade. It owned no
+  accounts, so none held test USDC and none needed cancelling.
 - ~~**SECURITY.md section 7's attester leak line overstates.** It says a colluding
   Scout is paid without real work; D12's review window still lets the requester
   dispute before release. Tighten when Session 9 fixes the release and dispute
@@ -332,17 +336,38 @@ find the parent; decide whether it matters (Session 7).
 
 ## Open items from Session 9 build (18 September)
 
-- **SPEC task 25's review items are not done.** The build stopped at the gate. Task 25 covers
+- ~~**SPEC task 25's review items are not done.** The build stopped at the gate. Task 25 covers
   section 11's rows marked "review item" and the check-1 state invariants, read against the final
-  source. Owed before any devnet deploy.
-- **The escrow has never been deployed to devnet.** Eleven instructions, 140 tests, no deploy.
-  Whoever schedules it re-reads SECURITY.md section 16 and D90's deploy rules first.
+  source. Owed before any devnet deploy.~~ Done 18 September against the source at fe70f34: no
+  findings against the eleven instructions. `cancel` was reviewed alongside the Session 9 set.
+  Two record corrections came out of it, D101 and the SPEC 7.7 wording.
+- ~~**The escrow has never been deployed to devnet.** Eleven instructions, 140 tests, no deploy.
+  Whoever schedules it re-reads SECURITY.md section 16 and D90's deploy rules first.~~ Deployed
+  18 September. ProgramData extended from 218736 to 488736 bytes for 1.37 SOL, then upgraded.
+  Verified from the chain rather than from the tool: the first 456736 bytes of
+  `solana program dump` hash to 04dd0c29, equal to the local `target/deploy/escrow.so`, and the
+  remaining 32000 bytes are zero. No buffer was stranded.
 - **`approve` and `release` share one commit.** 4b5eef2 carries both, after a mis-run commit
   script produced an uncompilable 9044791 that was amended away. No single commit holds
   `approve` alone, and build commit 5's own counted run is in the architect chat only.
 - **Anchor's stack frame is close to full on the payout instructions.** D100 boxed four accounts
   in `approve`; `release` and `resolve` were written boxed. Any account added to a settlement
   instruction risks the 4096-byte limit again, and the build reports it while still exiting 0.
+
+## Open items from Session 10 (18 September)
+
+- **`initialize` has not run on devnet.** The program is deployed with no configuration account,
+  so every instruction fails on the config PDA. Owed: the localnet rehearsal, then `initialize`
+  with `deployment_id` 2 (D103), mint `ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR` (D102),
+  attester `2KAuf8WWHGDm4rA1MCCQ9UciEAiqyTHaKeyBHZFF3wZ5`, eligibility
+  `Bg6SsTTH6EX5AaeQQ9i4yhDTwsSjxnHx9AV8cqa97xmp` and arbiter
+  `6YPX1obwh62N2DDyxtNa2RwkriWUUWLzjAvEWJFbvK1K`, signed by the upgrade authority.
+- **The devnet IDL is still the Session 4 one.** The upgrade landed; the IDL metadata write did
+  not. Clients build from the local IDL file, so nothing is blocked.
+- **MESSAGES.md section 7 says `submit_attestation` does not exist.** It does. The owed check is
+  its real account list against the eighteen-account ceiling. Session 13.
+- **MESSAGES.md section 10 lists seven implementation discrepancies as open.** All seven have
+  since landed. The section is stale rather than wrong; it needs a wording pass.
 
 ---
 
@@ -357,6 +382,15 @@ find the parent; decide whether it matters (Session 7).
   Fix: `solana program extend <program-id> 10240 --url devnet` first.
 - Failed deploys strand buffer accounts holding real rent. One cost 1.06 SOL.
   Check `solana program show --buffers` after every failure.
+- `cargo clean -p escrow` does not reach `target/sbpf-solana-solana`. A
+  following `anchor build` re-derives `target/deploy/escrow.so` from the stale
+  object and reports the release profile finished in 0.2 seconds. Delete the
+  target triple directory to force a real compile (D101).
+- `solana program extend` needs the real deficit, not the 10240 minimum. Two
+  instructions grew to eleven and the account was 238000 bytes short.
+- `anchor deploy` 1.1.2 writes the IDL to a metadata account in a second
+  transaction after the upgrade. The upgrade succeeded and that write failed
+  with "Failed to initialize IDL" at 2.44 SOL available, so it is not funding.
 - `node --test <directory>` on Node 22 runs no files and reports a pass
   (tests 1, pass 1, fail 0). Name test files explicitly and check that the
   summary shows the expected test count.
@@ -439,8 +473,9 @@ find the parent; decide whether it matters (Session 7).
 
 Revised from the original four-week plan after the D10 positioning change.
 Sessions 1 to 6, 7a and 7b complete; Session 8's escrow build complete, its capture nonce
-issuance not built; Session 9 complete, specification and build, with SPEC task 25's review
-items and the devnet deploy outstanding.
+issuance not built; Session 9 complete, specification and build. Session 10 discharged SPEC task
+25 and deployed the escrow to devnet; `initialize` has not run, so the mobile scope Session 10
+planned moves to Session 11 and the sessions after it shift by one.
 
 ### Week 1 remainder
 
