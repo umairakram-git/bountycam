@@ -331,6 +331,11 @@ Within each instruction: Anchor account validation runs first, then the handler 
 listed order, then effects. Negative tests introduce exactly one fault each, so no test depends
 on Anchor's order across different accounts.
 
+The account tables name types as `Account<...>`. An account may be held as `Box<Account<...>>`
+where the generated validation would otherwise exceed SBF's 4096-byte stack frame, which
+`approve` does (D100). Boxing moves the decoded data to the heap and changes no constraint,
+error, ordering or on-chain result.
+
 ### 7.1 `initialize`
 
 Arguments: `deployment_id: u8`, `eligibility_authority: Pubkey`,
@@ -1250,6 +1255,9 @@ Each is a difference between current source and this document (D80).
     remaining accounts; no dependence on recursion behaviour.
 19. Enable litesvm's `precompiles` feature and add `solana-ed25519-program` `=3.0.0` as a
     dev-dependency; confirm `agave-precompiles` 3.1.14 with `cargo tree` (D89).
+19a. Box `bounty`, `usdc_mint`, `bounty_vault` and `scout_payout` in `approve`, and any account
+    of `release` or `resolve` their builds require (D100). Review item: the `anchor build`
+    output names no function over the stack limit.
 20. Append `Disputed`, `Paid` and `Refunded` to `BountyState`; add `failed_requirement_id` last;
     bounty space 274 in `create_and_fund` (D93, D96).
 21. Append errors 34 to 48 (D75).
@@ -1359,7 +1367,7 @@ OPEN-1 profiles below A4 (BACKLOG); the policy binding register (POLICY.md, D84)
 | | D90 12 harness, tests 55 and 69; D91 6.2, no behaviour of its own; |
 | | D92 2, 7.6, 7.7; D93 4.1, 7.8; D94 2, 7.9, 15; D95 7.10, 7.11, 8; |
 | | D96 4.1, 5.1, 5.3, 15, tests 92, 93, 134 to 136; D97 5.4; D98 1.2; |
-| | D99 7.6, 7.9, 7.10, 7.11, 11 |
+| | D99 7.6, 7.9, 7.10, 7.11, 11; D100 7 preamble, 13 |
 | Existing tests checked | nine kept or modified as tests 12, 13, 14, 19, 21, 29, 30, 31, 33; |
 | | `create_with_past_deadline_fails` replaced (task 15); 92 and 93 modified |
 | | for D96 |
