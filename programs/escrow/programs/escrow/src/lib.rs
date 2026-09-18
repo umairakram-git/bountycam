@@ -95,4 +95,8 @@ pub mod escrow {
     pub fn expire_unaccepted(ctx: Context<ExpireUnaccepted>) -> Result<()> {
         instructions::expire_unaccepted::handle_expire_unaccepted(ctx)
     }
+
+    pub fn expire_accepted(ctx: Context<ExpireAccepted>) -> Result<()> {
+        instructions::expire_accepted::handle_expire_accepted(ctx)
+    }
 }

@@ -3300,3 +3300,195 @@ fn t127_expire_unaccepted_with_substituted_refund_account_fails() {
         assert_named_error_at(res, expected, "requester_ata");
     }
 }
+
+// ---------------------------------------------------------------------------
+// SPEC 12.13: expire_accepted (D95)
+// ---------------------------------------------------------------------------
+
+/// `expire_accepted` with the default token-side accounts; the account list
+/// is `expire_unaccepted`'s (SPEC 7.11).
+fn expire_accepted_ix(s: &Setup, requester: Pubkey, bounty: Pubkey) -> Instruction {
+    let accounts = token_accounts(s, &bounty, s.requester_ata);
+    expire_accepted_ix_with(requester, bounty, accounts)
+}
+
+fn expire_accepted_ix_with(
+    requester: Pubkey,
+    bounty: Pubkey,
+    accounts: TokenAccounts,
+) -> Instruction {
+    Instruction::new_with_bytes(
+        escrow::id(),
+        &escrow::instruction::ExpireAccepted {}.data(),
+        escrow::accounts::ExpireAccepted {
+            requester,
+            config: accounts.config,
+            bounty,
+            usdc_mint: accounts.usdc_mint,
+            bounty_vault: accounts.bounty_vault,
+            requester_ata: accounts.requester_ata,
+            token_program: accounts.token_program,
+        }
+        .to_account_metas(None),
+    )
+}
+
+/// Sets the clock one second after the bounty's stored `deadline` and returns
+/// that deadline. Every accept in these tests happens at `NOW`.
+fn set_clock_past_deadline(s: &mut Setup, bounty: &Pubkey) -> i64 {
+    let deadline = read_bounty(&s.svm, bounty).deadline.unwrap();
+    assert_eq!(deadline, NOW + COMPLETION_WINDOW);
+    set_clock(&mut s.svm, deadline + 1);
+    deadline
+}
+
+// SPEC test 128: one second after deadline, by an arbitrary fee payer, with
+// tokens donated to the vault: the requester's associated token account
+// receives the entire balance; the vault is closed with its rent to the
+// requester; state Refunded; the bounty account open, every other field
+// unchanged.
+#[test]
+fn t128_expire_accepted_succeeds() {
+    let mut s = setup();
+    let (bounty, scout) = accepted_bounty(&mut s, [128u8; 16]);
+    let requester = s.requester.pubkey();
+    let vault = associated_token::get_associated_token_address(&bounty, &s.usdc_mint);
+
+    const DONATION: u64 = 1_234_567;
+    donate_to_vault(&mut s, &vault, DONATION);
+    assert_eq!(token_balance(&s.svm, &vault), REWARD + DONATION);
+
+    let before = read_bounty(&s.svm, &bounty);
+    set_clock_past_deadline(&mut s, &bounty);
+
+    let payer = arbitrary_fee_payer(&mut s);
+    let vault_rent = s.svm.get_account(&vault).unwrap().lamports;
+    let requester_before = s.svm.get_balance(&requester).unwrap();
+
+    let ix = expire_accepted_ix(&s, requester, bounty);
+    send(&mut s.svm, &payer, &[ix], &[&payer]).unwrap();
+
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE + DONATION);
+    assert!(is_closed(&s.svm, &vault), "vault closed");
+    let requester_after = s.svm.get_balance(&requester).unwrap();
+    assert_eq!(requester_after - requester_before, vault_rent);
+
+    assert!(!is_closed(&s.svm, &bounty), "bounty open");
+    let after = read_bounty(&s.svm, &bounty);
+    assert_eq!(after.state, BountyState::Refunded);
+    assert_fixed_fields_equal(&before, &after);
+    assert_eq!(after.scout, Some(scout.pubkey()));
+    assert_eq!(after.deadline, before.deadline);
+    assert_eq!(after.submitted_at, None);
+    assert_eq!(after.evidence_root, None);
+    assert_eq!(after.achieved_assurance, None);
+    assert_eq!(after.failed_requirement_id, None);
+}
+
+// SPEC test 129: at exactly deadline. One fault: the clock.
+#[test]
+fn t129_expire_accepted_at_exactly_deadline_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [129u8; 16]);
+    let deadline = read_bounty(&s.svm, &bounty).deadline.unwrap();
+    set_clock(&mut s.svm, deadline);
+
+    let payer = arbitrary_fee_payer(&mut s);
+    let ix = expire_accepted_ix(&s, s.requester.pubkey(), bounty);
+    let res = send(&mut s.svm, &payer, &[ix], &[&payer]);
+    assert_named_error(res, "SubmissionDeadlineOpen");
+}
+
+// SPEC test 130: after an attested shortfall, a real submit_attestation that
+// failed with InsufficientAssurance and left the bounty Accepted, expiry
+// succeeds once deadline has passed; state Refunded (D85, D95).
+#[test]
+fn t130_expire_accepted_after_attested_shortfall_succeeds() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [130u8; 16]);
+    let res = submit_with_achieved(&mut s, bounty, 2);
+    assert_named_error(res, "InsufficientAssurance");
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Accepted);
+
+    set_clock_past_deadline(&mut s, &bounty);
+    let payer = arbitrary_fee_payer(&mut s);
+    let ix = expire_accepted_ix(&s, s.requester.pubkey(), bounty);
+    send(&mut s.svm, &payer, &[ix], &[&payer]).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Refunded);
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE);
+}
+
+// SPEC test 131: outside Accepted, three cases: Funded, Submitted and
+// Disputed, each reached through real instructions. One fault each: the
+// state; the clock is past every deadline, so time is not one.
+#[test]
+fn t131_expire_accepted_outside_accepted_fails() {
+    let mut s = setup();
+    let funded = fund_bounty(&mut s, [131u8; 16]);
+    let (submitted, _scout) = submitted_bounty(&mut s, [141u8; 16]);
+    let (disputed, _scout) = submitted_bounty(&mut s, [151u8; 16]);
+    reject_default(&mut s, disputed).unwrap();
+    assert_eq!(read_bounty(&s.svm, &disputed).state, BountyState::Disputed);
+    set_clock(&mut s.svm, NOW + COMPLETION_WINDOW + 1);
+
+    let cases: [(&str, Pubkey); 3] =
+        [("Funded", funded), ("Submitted", submitted), ("Disputed", disputed)];
+    assert_eq!(cases.len(), 3);
+    for (name, bounty) in cases {
+        eprintln!("case: {name}");
+        let payer = arbitrary_fee_payer(&mut s);
+        let ix = expire_accepted_ix(&s, s.requester.pubkey(), bounty);
+        let res = send(&mut s.svm, &payer, &[ix], &[&payer]);
+        assert_named_error(res, "BountyNotExpirable");
+    }
+}
+
+// SPEC test 132: a requester account other than the bounty's requester. One
+// fault: that account; requester_ata is derived from the substitute, as in
+// test 126.
+#[test]
+fn t132_expire_accepted_with_other_requester_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [132u8; 16]);
+    set_clock_past_deadline(&mut s, &bounty);
+    let other = Keypair::new();
+    let other_ata = create_funded_ata(&mut s.svm, &s.requester, &other.pubkey(), &s.usdc_mint, 0);
+
+    let payer = arbitrary_fee_payer(&mut s);
+    let accounts = token_accounts(&s, &bounty, other_ata);
+    let ix = expire_accepted_ix_with(other.pubkey(), bounty, accounts);
+    let res = send(&mut s.svm, &payer, &[ix], &[&payer]);
+    assert_named_error(res, "RequesterAccountMismatch");
+}
+
+// SPEC test 133: refund account substitutes, test 127's three cases and
+// errors, each one fault, the token account. Pinned to requester_ata.
+#[test]
+fn t133_expire_accepted_with_substituted_refund_account_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [133u8; 16]);
+    set_clock_past_deadline(&mut s, &bounty);
+    let requester = s.requester.pubkey();
+    let attacker = Keypair::new();
+    let other_mint = create_mint(&mut s.svm, &s.requester);
+
+    let non_associated = create_token_account(&mut s.svm, &s.requester, &requester, &s.usdc_mint);
+    let attacker_ata =
+        create_funded_ata(&mut s.svm, &s.requester, &attacker.pubkey(), &s.usdc_mint, 0);
+    let other_mint_ata = create_funded_ata(&mut s.svm, &s.requester, &requester, &other_mint, 0);
+
+    let cases: [(&str, Pubkey, &str); 3] = [
+        ("non-associated account the requester owns", non_associated, "ConstraintAssociated"),
+        ("an attacker's associated token account", attacker_ata, "ConstraintTokenOwner"),
+        ("the requester's account for a second mint", other_mint_ata, "ConstraintAssociated"),
+    ];
+    assert_eq!(cases.len(), 3);
+    for (name, refund_account, expected) in cases {
+        eprintln!("case: {name}");
+        let payer = arbitrary_fee_payer(&mut s);
+        let accounts = token_accounts(&s, &bounty, refund_account);
+        let ix = expire_accepted_ix_with(requester, bounty, accounts);
+        let res = send(&mut s.svm, &payer, &[ix], &[&payer]);
+        assert_named_error_at(res, expected, "requester_ata");
+    }
+}
