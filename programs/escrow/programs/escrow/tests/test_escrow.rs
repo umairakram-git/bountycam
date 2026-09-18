@@ -4010,21 +4010,7 @@ fn resolve_ix(
     outcome: ResolveOutcome,
     destination: Pubkey,
 ) -> Instruction {
-    Instruction::new_with_bytes(
-        escrow::id(),
-        &escrow::instruction::Resolve { outcome }.data(),
-        escrow::accounts::Resolve {
-            arbiter,
-            config: s.config,
-            requester,
-            bounty,
-            usdc_mint: s.usdc_mint,
-            bounty_vault: associated_token::get_associated_token_address(&bounty, &s.usdc_mint),
-            destination,
-            token_program: spl_token::id(),
-        }
-        .to_account_metas(None),
-    )
+    resolve_ix_with(arbiter, requester, bounty, outcome, resolve_accounts(s, &bounty, destination))
 }
 
 /// A valid resolve: the configured arbiter co-signs with an arbitrary fee
@@ -4302,4 +4288,488 @@ fn t122_resolve_with_other_requester_fails() {
     );
     let res = send(&mut s.svm, &payer, &[ix], &[&payer, &s.arbiter]);
     assert_named_error(res, "RequesterAccountMismatch");
+}
+
+// ---------------------------------------------------------------------------
+// SPEC 12.14: settlement, cross-cutting (D96)
+// ---------------------------------------------------------------------------
+
+/// The non-signer, non-bounty accounts of `resolve` (SPEC 7.9). Tests that
+/// substitute one account build the default and replace one field.
+struct ResolveAccounts {
+    config: Pubkey,
+    usdc_mint: Pubkey,
+    bounty_vault: Pubkey,
+    destination: Pubkey,
+    token_program: Pubkey,
+}
+
+fn resolve_accounts(s: &Setup, bounty: &Pubkey, destination: Pubkey) -> ResolveAccounts {
+    ResolveAccounts {
+        config: s.config,
+        usdc_mint: s.usdc_mint,
+        bounty_vault: associated_token::get_associated_token_address(bounty, &s.usdc_mint),
+        destination,
+        token_program: spl_token::id(),
+    }
+}
+
+fn resolve_ix_with(
+    arbiter: Pubkey,
+    requester: Pubkey,
+    bounty: Pubkey,
+    outcome: ResolveOutcome,
+    accounts: ResolveAccounts,
+) -> Instruction {
+    Instruction::new_with_bytes(
+        escrow::id(),
+        &escrow::instruction::Resolve { outcome }.data(),
+        escrow::accounts::Resolve {
+            arbiter,
+            config: accounts.config,
+            requester,
+            bounty,
+            usdc_mint: accounts.usdc_mint,
+            bounty_vault: accounts.bounty_vault,
+            destination: accounts.destination,
+            token_program: accounts.token_program,
+        }
+        .to_account_metas(None),
+    )
+}
+
+/// `expire_accepted` by an arbitrary fee payer, naming the bounty's requester.
+fn expire_accepted_default(
+    s: &mut Setup,
+    bounty: Pubkey,
+) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+    let payer = arbitrary_fee_payer(s);
+    let ix = expire_accepted_ix(s, s.requester.pubkey(), bounty);
+    send(&mut s.svm, &payer, &[ix], &[&payer])
+}
+
+/// Settled bounties, each reached through the real instructions with the
+/// Scout payout account created first: `Paid` by approve, `Paid` by release,
+/// `Refunded` by expire_accepted, `Refunded` by resolve.
+fn paid_by_approve(s: &mut Setup, bounty_id: [u8; 16]) -> (Pubkey, Keypair) {
+    let (bounty, scout) = submitted_bounty(s, bounty_id);
+    scout_payout_ata(s, &scout.pubkey());
+    approve_default(s, bounty, &scout.pubkey()).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Paid);
+    (bounty, scout)
+}
+
+fn paid_by_release(s: &mut Setup, bounty_id: [u8; 16]) -> (Pubkey, Keypair) {
+    let (bounty, scout) = submitted_bounty(s, bounty_id);
+    scout_payout_ata(s, &scout.pubkey());
+    set_clock_past_review_window(s, &bounty);
+    release_default(s, bounty, &scout.pubkey()).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Paid);
+    (bounty, scout)
+}
+
+fn refunded_by_expire(s: &mut Setup, bounty_id: [u8; 16]) -> (Pubkey, Keypair) {
+    let (bounty, scout) = accepted_bounty(s, bounty_id);
+    scout_payout_ata(s, &scout.pubkey());
+    set_clock_past_deadline(s, &bounty);
+    expire_accepted_default(s, bounty).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Refunded);
+    (bounty, scout)
+}
+
+fn refunded_by_resolve(s: &mut Setup, bounty_id: [u8; 16]) -> (Pubkey, Keypair) {
+    let (bounty, scout) = disputed_bounty(s, bounty_id);
+    scout_payout_ata(s, &scout.pubkey());
+    let requester_ata = s.requester_ata;
+    resolve_default(s, bounty, ResolveOutcome::RefundRequester, requester_ata).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Refunded);
+    (bounty, scout)
+}
+
+/// Test 135's re-created vault: after settlement a third party re-creates
+/// the bounty's associated token account with the Associated Token program's
+/// idempotent create, and a donor transfers one token unit into it. Both are
+/// real instructions, not planting (SPEC section 12 harness rules).
+fn recreate_vault(s: &mut Setup, bounty: &Pubkey) -> Pubkey {
+    let vault = associated_token::get_associated_token_address(bounty, &s.usdc_mint);
+    assert!(is_closed(&s.svm, &vault), "vault closed by settlement");
+    let third_party = Keypair::new();
+    s.svm.airdrop(&third_party.pubkey(), 1_000_000_000).unwrap();
+    let create = spl_associated_token_account::instruction::create_associated_token_account_idempotent(
+        &third_party.pubkey(),
+        bounty,
+        &s.usdc_mint,
+        &spl_token::id(),
+    );
+    send(&mut s.svm, &third_party, &[create], &[&third_party]).unwrap();
+    donate_to_vault(s, &vault, 1);
+    assert_eq!(token_balance(&s.svm, &vault), 1);
+    vault
+}
+
+// SPEC test 134: plain repeat, three cases: approve twice, resolve twice,
+// expire_accepted twice. The vault is closed, so Anchor's account load fails
+// with AccountNotInitialized at bounty_vault before any constraint runs; the
+// state constraint is not reached. A fresh setup per case keeps the clocks
+// independent.
+#[test]
+fn t134_repeat_after_settlement_fails_on_closed_vault() {
+    let cases: [&str; 3] = ["approve twice", "resolve twice", "expire_accepted twice"];
+    assert_eq!(cases.len(), 3);
+    for name in cases {
+        eprintln!("case: {name}");
+        let mut s = setup();
+        let bounty_id = [134u8; 16];
+        let res = match name {
+            "approve twice" => {
+                let (bounty, scout) = paid_by_approve(&mut s, bounty_id);
+                s.svm.expire_blockhash();
+                approve_default(&mut s, bounty, &scout.pubkey())
+            }
+            "resolve twice" => {
+                let (bounty, scout) = disputed_bounty(&mut s, bounty_id);
+                let payout = scout_payout_ata(&mut s, &scout.pubkey());
+                resolve_default(&mut s, bounty, ResolveOutcome::PayScout, payout).unwrap();
+                resolve_default(&mut s, bounty, ResolveOutcome::PayScout, payout)
+            }
+            "expire_accepted twice" => {
+                let (bounty, _scout) = refunded_by_expire(&mut s, bounty_id);
+                expire_accepted_default(&mut s, bounty)
+            }
+            other => panic!("unknown case {other}"),
+        };
+        assert_named_error_at(res, "AccountNotInitialized", "bounty_vault");
+    }
+}
+
+// SPEC test 135: repeat against a re-created vault, eight cases. After
+// settlement a third party re-creates the vault and deposits one unit; the
+// instruction then fails on state, and the vault, Scout and requester
+// balances are unchanged. Each case has one fault, the state: the clock is
+// moved past any time bound the repeated instruction checks.
+#[test]
+fn t135_repeat_against_recreated_vault_fails_on_state() {
+    let cases: [(&str, &str); 8] = [
+        ("approve after approve", "BountyNotApprovable"),
+        ("approve after release", "BountyNotApprovable"),
+        ("approve after expire_accepted", "BountyNotApprovable"),
+        ("release after approve", "BountyNotReleasable"),
+        ("resolve after resolve", "BountyNotResolvable"),
+        ("resolve after release", "BountyNotResolvable"),
+        ("expire_accepted after expire_accepted", "BountyNotExpirable"),
+        ("expire_accepted after approve", "BountyNotExpirable"),
+    ];
+    assert_eq!(cases.len(), 8);
+    for (name, expected) in cases {
+        eprintln!("case: {name}");
+        let mut s = setup();
+        let bounty_id = [135u8; 16];
+        let (bounty, scout) = match name {
+            "approve after approve" | "release after approve" | "expire_accepted after approve" => {
+                paid_by_approve(&mut s, bounty_id)
+            }
+            "approve after release" | "resolve after release" => paid_by_release(&mut s, bounty_id),
+            "approve after expire_accepted" | "expire_accepted after expire_accepted" => {
+                refunded_by_expire(&mut s, bounty_id)
+            }
+            "resolve after resolve" => refunded_by_resolve(&mut s, bounty_id),
+            other => panic!("unknown case {other}"),
+        };
+        let vault = recreate_vault(&mut s, &bounty);
+        let payout = associated_token::get_associated_token_address(&scout.pubkey(), &s.usdc_mint);
+        let state_before = read_bounty(&s.svm, &bounty).state;
+        let vault_before = token_balance(&s.svm, &vault);
+        let payout_before = token_balance(&s.svm, &payout);
+        let requester_before = token_balance(&s.svm, &s.requester_ata);
+        // A repeat by the same signer is byte-identical to the settling
+        // transaction; a fresh blockhash keeps litesvm from refusing it as a
+        // duplicate before the program runs (as tests 19, 33 and 134).
+        s.svm.expire_blockhash();
+
+        let res = match name.split(' ').next().unwrap() {
+            "approve" => approve_default(&mut s, bounty, &scout.pubkey()),
+            "release" => {
+                set_clock_past_review_window(&mut s, &bounty);
+                release_default(&mut s, bounty, &scout.pubkey())
+            }
+            "resolve" => {
+                if name == "resolve after resolve" {
+                    let requester_ata = s.requester_ata;
+                    resolve_default(&mut s, bounty, ResolveOutcome::RefundRequester, requester_ata)
+                } else {
+                    resolve_default(&mut s, bounty, ResolveOutcome::PayScout, payout)
+                }
+            }
+            "expire_accepted" => {
+                set_clock_past_deadline(&mut s, &bounty);
+                expire_accepted_default(&mut s, bounty)
+            }
+            other => panic!("unknown instruction {other}"),
+        };
+        assert_named_error(res, expected);
+        assert_eq!(read_bounty(&s.svm, &bounty).state, state_before, "state unchanged");
+        assert_eq!(token_balance(&s.svm, &vault), vault_before, "vault unchanged");
+        assert_eq!(token_balance(&s.svm, &payout), payout_before, "Scout unchanged");
+        assert_eq!(token_balance(&s.svm, &s.requester_ata), requester_before, "requester unchanged");
+    }
+}
+
+// SPEC test 136: create_and_fund with the bounty_id of a Paid bounty. The
+// terminal account stays open (D96), so the system program rejects the
+// address during `init` ("already in use"), before program code can run.
+#[test]
+fn t136_create_with_bounty_id_of_paid_bounty_fails() {
+    let mut s = setup();
+    let bounty_id = [136u8; 16];
+    let (bounty, _scout) = paid_by_approve(&mut s, bounty_id);
+    assert!(!is_closed(&s.svm, &bounty), "Paid bounty open");
+
+    s.svm.expire_blockhash();
+    let ix = create_and_fund_ix(&s, bounty_id, REWARD, 3, s.requester_ata);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    let failed = res.expect_err("expected the Paid bounty's address to be in use");
+    let logs = failed.meta.logs.join("\n");
+    assert!(
+        logs.contains("already in use"),
+        "expected system AccountAlreadyInUse; got err {:?} with logs:\n{logs}",
+        failed.err,
+    );
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Paid);
+}
+
+// SPEC test 137: missing signer, three cases: the approve requester, the
+// reject requester and the resolve arbiter. A relayer pays and is the only
+// signer; the named account's meta is demoted, as test 91 does.
+#[test]
+fn t137_missing_settlement_signer_fails() {
+    let mut s = setup();
+    let relayer = arbitrary_fee_payer(&mut s);
+    let requester = s.requester.pubkey();
+    let arbiter = s.arbiter.pubkey();
+    let (approve_bounty, approve_scout) = submitted_bounty(&mut s, [137u8; 16]);
+    scout_payout_ata(&mut s, &approve_scout.pubkey());
+    let (reject_bounty, _scout) = submitted_bounty(&mut s, [147u8; 16]);
+    let (resolve_bounty, resolve_scout) = disputed_bounty(&mut s, [157u8; 16]);
+    let resolve_payout = scout_payout_ata(&mut s, &resolve_scout.pubkey());
+
+    let cases: [(&str, Instruction, Pubkey); 3] = [
+        (
+            "approve requester",
+            approve_ix(&s, requester, approve_bounty, approve_scout.pubkey()),
+            requester,
+        ),
+        ("reject requester", reject_ix(requester, reject_bounty, REQUIREMENT_ID), requester),
+        (
+            "resolve arbiter",
+            resolve_ix(&s, arbiter, requester, resolve_bounty, ResolveOutcome::PayScout, resolve_payout),
+            arbiter,
+        ),
+    ];
+    assert_eq!(cases.len(), 3);
+    for (name, mut ix, demoted) in cases {
+        eprintln!("case: {name}");
+        let meta = ix.accounts.iter_mut().find(|m| m.pubkey == demoted).unwrap();
+        assert!(meta.is_signer);
+        meta.is_signer = false;
+        let res = send(&mut s.svm, &relayer, &[ix], &[&relayer]);
+        assert_named_error(res, "AccountNotSigner");
+    }
+}
+
+/// Which configured key co-signs a settlement instruction beside the fee payer.
+enum ExtraSigner {
+    None,
+    Requester,
+    Arbiter,
+}
+
+/// One settlement instruction for tests 138 and 139: the named instruction
+/// against a bounty in its source state with any time bound already passed,
+/// built with the given mint account and token program, plus which key must
+/// co-sign. The mint and program are the only fields the caller varies.
+fn settlement_ix(
+    s: &mut Setup,
+    name: &str,
+    usdc_mint: Pubkey,
+    token_program: Pubkey,
+) -> (Instruction, ExtraSigner) {
+    let requester = s.requester.pubkey();
+    let bounty_id = [138u8; 16];
+    match name {
+        "approve" => {
+            let (bounty, scout) = submitted_bounty(s, bounty_id);
+            scout_payout_ata(s, &scout.pubkey());
+            let accounts = ApproveAccounts {
+                usdc_mint,
+                token_program,
+                ..approve_accounts(s, &bounty, scout.pubkey())
+            };
+            (approve_ix_with(requester, bounty, accounts), ExtraSigner::Requester)
+        }
+        "release" => {
+            let (bounty, scout) = submitted_bounty(s, bounty_id);
+            scout_payout_ata(s, &scout.pubkey());
+            set_clock_past_review_window(s, &bounty);
+            let accounts = ApproveAccounts {
+                usdc_mint,
+                token_program,
+                ..approve_accounts(s, &bounty, scout.pubkey())
+            };
+            (release_ix_with(requester, bounty, accounts), ExtraSigner::None)
+        }
+        "resolve" => {
+            let (bounty, scout) = disputed_bounty(s, bounty_id);
+            let payout = scout_payout_ata(s, &scout.pubkey());
+            let accounts = ResolveAccounts {
+                usdc_mint,
+                token_program,
+                ..resolve_accounts(s, &bounty, payout)
+            };
+            let ix = resolve_ix_with(
+                s.arbiter.pubkey(),
+                requester,
+                bounty,
+                ResolveOutcome::PayScout,
+                accounts,
+            );
+            (ix, ExtraSigner::Arbiter)
+        }
+        "expire_unaccepted" => {
+            let bounty = expirable_bounty(s, bounty_id);
+            let accounts = TokenAccounts {
+                usdc_mint,
+                token_program,
+                ..token_accounts(s, &bounty, s.requester_ata)
+            };
+            (expire_unaccepted_ix_with(requester, bounty, accounts), ExtraSigner::None)
+        }
+        "expire_accepted" => {
+            let (bounty, _scout) = accepted_bounty(s, bounty_id);
+            set_clock_past_deadline(s, &bounty);
+            let accounts = TokenAccounts {
+                usdc_mint,
+                token_program,
+                ..token_accounts(s, &bounty, s.requester_ata)
+            };
+            (expire_accepted_ix_with(requester, bounty, accounts), ExtraSigner::None)
+        }
+        other => panic!("unknown case {other}"),
+    }
+}
+
+fn send_settlement(
+    s: &mut Setup,
+    payer: &Keypair,
+    ix: Instruction,
+    extra: ExtraSigner,
+) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+    match extra {
+        ExtraSigner::None => send(&mut s.svm, payer, &[ix], &[payer]),
+        ExtraSigner::Requester => send(&mut s.svm, payer, &[ix], &[payer, &s.requester]),
+        ExtraSigner::Arbiter => send(&mut s.svm, payer, &[ix], &[payer, &s.arbiter]),
+    }
+}
+
+const SETTLEMENT_CASES: [&str; 5] =
+    ["approve", "release", "resolve", "expire_unaccepted", "expire_accepted"];
+
+// SPEC test 138: a mint account other than the configured mint, five cases.
+// One fault each: the mint account, a second real mint. Pinned to usdc_mint:
+// the payout and refund accounts' mint checks share the error name, and the
+// mint's address constraint runs first in declaration order (as test 36).
+#[test]
+fn t138_settlement_with_other_mint_fails() {
+    assert_eq!(SETTLEMENT_CASES.len(), 5);
+    for name in SETTLEMENT_CASES {
+        eprintln!("case: {name}");
+        let mut s = setup();
+        let other_mint = create_mint(&mut s.svm, &s.requester);
+        let (ix, extra) = settlement_ix(&mut s, name, other_mint, spl_token::id());
+        let payer = arbitrary_fee_payer(&mut s);
+        let res = send_settlement(&mut s, &payer, ix, extra);
+        assert_named_error_at(res, "MintMismatch", "usdc_mint");
+    }
+}
+
+// SPEC test 139: the Token-2022 program ID as token_program, test 138's five
+// cases. One fault each: the program account. `Program<Token>` checks the
+// key at load (as test 26).
+#[test]
+fn t139_settlement_with_token_2022_program_fails() {
+    assert_eq!(SETTLEMENT_CASES.len(), 5);
+    for name in SETTLEMENT_CASES {
+        eprintln!("case: {name}");
+        let mut s = setup();
+        let usdc_mint = s.usdc_mint;
+        let (ix, extra) = settlement_ix(&mut s, name, usdc_mint, spl_token_2022::id());
+        let payer = arbitrary_fee_payer(&mut s);
+        let res = send_settlement(&mut s, &payer, ix, extra);
+        assert_named_error_at(res, "InvalidProgramId", "token_program");
+    }
+}
+
+// SPEC test 140: the generated IDL lists no arguments for approve, release,
+// expire_unaccepted and expire_accepted, exactly failed_requirement_id for
+// reject, and exactly outcome with two variants for resolve: no amount,
+// destination or wallet argument (D92, D94). Read from the built IDL, as
+// test 23 does.
+#[test]
+fn t140_idl_lists_no_settlement_arguments() {
+    let path = concat!(env!("CARGO_TARGET_TMPDIR"), "/../idl/escrow.json");
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("IDL missing at {path}: {e}; run anchor build"));
+    let idl: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let args_of = |name: &str| -> Vec<serde_json::Value> {
+        idl["instructions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|ix| ix["name"] == name)
+            .unwrap_or_else(|| panic!("{name} in IDL"))["args"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let names = |args: &[serde_json::Value]| -> Vec<String> {
+        args.iter().map(|a| a["name"].as_str().unwrap().to_string()).collect()
+    };
+
+    let no_arguments: [&str; 4] = ["approve", "release", "expire_unaccepted", "expire_accepted"];
+    assert_eq!(no_arguments.len(), 4);
+    for name in no_arguments {
+        assert!(args_of(name).is_empty(), "{name} has arguments: {:?}", args_of(name));
+    }
+
+    let reject = args_of("reject");
+    assert_eq!(names(&reject), ["failed_requirement_id"]);
+    assert_eq!(reject[0]["type"], serde_json::json!({ "array": ["u8", 16] }));
+
+    let resolve = args_of("resolve");
+    assert_eq!(names(&resolve), ["outcome"]);
+    assert_eq!(resolve[0]["type"]["defined"]["name"], "ResolveOutcome");
+    let outcome = idl["types"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "ResolveOutcome")
+        .expect("ResolveOutcome in IDL types");
+    assert_eq!(outcome["type"]["kind"], "enum");
+    let variants: Vec<&str> = outcome["type"]["variants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(variants, ["PayScout", "RefundRequester"]);
+
+    let settling: [&str; 6] =
+        ["approve", "release", "reject", "resolve", "expire_unaccepted", "expire_accepted"];
+    assert_eq!(settling.len(), 6);
+    for name in settling {
+        for arg in names(&args_of(name)) {
+            for forbidden in ["amount", "destination", "wallet"] {
+                assert!(!arg.contains(forbidden), "{name} takes {arg}");
+            }
+        }
+    }
 }
