@@ -20,7 +20,7 @@ use {
     },
     escrow::{
         constants::{BOUNTY_SEED, CONFIG_SEED},
-        events::BountyCancelled,
+        events::{BountyCancelled, BountyExpired},
         state::{Bounty, BountyState, Config},
     },
     litesvm::{
@@ -3069,4 +3069,234 @@ fn t113_reject_with_zero_requirement_id_fails() {
     let ix = reject_ix(s.requester.pubkey(), bounty, [0u8; 16]);
     let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
     assert_named_error(res, "InvalidRequirementId");
+}
+
+// ---------------------------------------------------------------------------
+// SPEC 12.12: expire_unaccepted (D95)
+// ---------------------------------------------------------------------------
+
+/// An arbitrary fee payer (SPEC section 12 harness rules): a fresh funded key
+/// that is none of the requester, a Scout or the configured authorities.
+fn arbitrary_fee_payer(s: &mut Setup) -> Keypair {
+    let payer = Keypair::new();
+    for other in [&s.requester, &s.eligibility, &s.attester, &s.arbiter, &s.upgrade_authority] {
+        assert_ne!(payer.pubkey(), other.pubkey());
+    }
+    s.svm.airdrop(&payer.pubkey(), 1_000_000_000).unwrap();
+    payer
+}
+
+/// Tokens sent to a vault by a third party, as test 38 does: the donor's
+/// account is created and minted to by the requester, the mint authority.
+fn donate_to_vault(s: &mut Setup, vault: &Pubkey, amount: u64) {
+    let donor = Keypair::new();
+    s.svm.airdrop(&donor.pubkey(), 1_000_000_000).unwrap();
+    let donor_ata =
+        create_funded_ata(&mut s.svm, &s.requester, &donor.pubkey(), &s.usdc_mint, amount);
+    let donate = spl_token::instruction::transfer_checked(
+        &spl_token::id(),
+        &donor_ata,
+        &s.usdc_mint,
+        vault,
+        &donor.pubkey(),
+        &[],
+        amount,
+        DECIMALS,
+    )
+    .unwrap();
+    send(&mut s.svm, &donor, &[donate], &[&donor]).unwrap();
+}
+
+/// A plain, non-associated token account for `owner` and `mint` at a fresh
+/// keypair address, created and paid for by `payer`.
+fn create_token_account(svm: &mut LiteSVM, payer: &Keypair, owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+    let account = Keypair::new();
+    let rent = svm.minimum_balance_for_rent_exemption(spl_token::state::Account::LEN);
+    let ixs = [
+        system_instruction::create_account(
+            &payer.pubkey(),
+            &account.pubkey(),
+            rent,
+            spl_token::state::Account::LEN as u64,
+            &spl_token::id(),
+        ),
+        spl_token::instruction::initialize_account3(&spl_token::id(), &account.pubkey(), mint, owner)
+            .unwrap(),
+    ];
+    send(svm, payer, &ixs, &[payer, &account]).unwrap();
+    account.pubkey()
+}
+
+/// The one `BountyExpired` in a transaction's logs, decoded as `cancelled_event`
+/// decodes `BountyCancelled`.
+fn expired_event(meta: &TransactionMetadata) -> BountyExpired {
+    let events: Vec<BountyExpired> = meta
+        .logs
+        .iter()
+        .filter_map(|line| line.strip_prefix("Program data: "))
+        .map(|b64| STANDARD.decode(b64).unwrap())
+        .filter(|bytes| bytes.starts_with(BountyExpired::DISCRIMINATOR))
+        .map(|bytes| BountyExpired::deserialize(&mut &bytes[8..]).unwrap())
+        .collect();
+    assert_eq!(events.len(), 1, "exactly one BountyExpired; logs:\n{:#?}", meta.logs);
+    events.into_iter().next().unwrap()
+}
+
+/// `expire_unaccepted` with the default token-side accounts; `requester` is
+/// the unsigned account the instruction refunds and closes to.
+fn expire_unaccepted_ix(s: &Setup, requester: Pubkey, bounty: Pubkey) -> Instruction {
+    let accounts = token_accounts(s, &bounty, s.requester_ata);
+    expire_unaccepted_ix_with(requester, bounty, accounts)
+}
+
+fn expire_unaccepted_ix_with(
+    requester: Pubkey,
+    bounty: Pubkey,
+    accounts: TokenAccounts,
+) -> Instruction {
+    Instruction::new_with_bytes(
+        escrow::id(),
+        &escrow::instruction::ExpireUnaccepted {}.data(),
+        escrow::accounts::ExpireUnaccepted {
+            requester,
+            config: accounts.config,
+            bounty,
+            usdc_mint: accounts.usdc_mint,
+            bounty_vault: accounts.bounty_vault,
+            requester_ata: accounts.requester_ata,
+            token_program: accounts.token_program,
+        }
+        .to_account_metas(None),
+    )
+}
+
+/// A funded bounty with the clock one second after its `acceptance_cutoff`:
+/// the state every expire_unaccepted test starts from unless it says otherwise.
+fn expirable_bounty(s: &mut Setup, bounty_id: [u8; 16]) -> Pubkey {
+    let bounty = fund_bounty(s, bounty_id);
+    let cutoff = read_bounty(&s.svm, &bounty).acceptance_cutoff;
+    assert_eq!(cutoff, NOW + ACCEPTANCE_WINDOW);
+    set_clock(&mut s.svm, cutoff + 1);
+    bounty
+}
+
+// SPEC test 123: one second after acceptance_cutoff, by an arbitrary fee payer,
+// with tokens donated to the vault: the requester's associated token account
+// receives the entire balance; BountyExpired fields exact; vault and bounty
+// closed with rent to the requester.
+#[test]
+fn t123_expire_unaccepted_succeeds() {
+    let mut s = setup();
+    let bounty_id = [123u8; 16];
+    let bounty_key = fund_bounty(&mut s, bounty_id);
+    let requester = s.requester.pubkey();
+    let vault = associated_token::get_associated_token_address(&bounty_key, &s.usdc_mint);
+
+    const DONATION: u64 = 1_234_567;
+    donate_to_vault(&mut s, &vault, DONATION);
+    assert_eq!(token_balance(&s.svm, &vault), REWARD + DONATION);
+
+    let cutoff = read_bounty(&s.svm, &bounty_key).acceptance_cutoff;
+    assert_eq!(cutoff, NOW + ACCEPTANCE_WINDOW);
+    set_clock(&mut s.svm, cutoff + 1);
+
+    let payer = arbitrary_fee_payer(&mut s);
+    let vault_rent = s.svm.get_account(&vault).unwrap().lamports;
+    let bounty_rent = s.svm.get_account(&bounty_key).unwrap().lamports;
+    let requester_before = s.svm.get_balance(&requester).unwrap();
+
+    let ix = expire_unaccepted_ix(&s, requester, bounty_key);
+    let meta = send(&mut s.svm, &payer, &[ix], &[&payer]).unwrap();
+
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE + DONATION);
+    assert!(is_closed(&s.svm, &vault), "vault closed");
+    assert!(is_closed(&s.svm, &bounty_key), "bounty closed");
+    let requester_after = s.svm.get_balance(&requester).unwrap();
+    assert_eq!(requester_after - requester_before, vault_rent + bounty_rent);
+
+    let event = expired_event(&meta);
+    assert_eq!(event.bounty, bounty_key);
+    assert_eq!(event.bounty_id, bounty_id);
+    assert_eq!(event.requester, requester);
+    assert_eq!(event.usdc_mint, s.usdc_mint);
+    assert_eq!(event.reward_amount, REWARD);
+    assert_eq!(event.refunded_amount, REWARD + DONATION);
+    assert_eq!(event.expired_at, cutoff + 1);
+}
+
+// SPEC test 124: at exactly acceptance_cutoff. One fault: the clock.
+#[test]
+fn t124_expire_unaccepted_at_exactly_cutoff_fails() {
+    let mut s = setup();
+    let bounty = fund_bounty(&mut s, [124u8; 16]);
+    let cutoff = read_bounty(&s.svm, &bounty).acceptance_cutoff;
+    set_clock(&mut s.svm, cutoff);
+
+    let payer = arbitrary_fee_payer(&mut s);
+    let ix = expire_unaccepted_ix(&s, s.requester.pubkey(), bounty);
+    let res = send(&mut s.svm, &payer, &[ix], &[&payer]);
+    assert_named_error(res, "AcceptanceWindowOpen");
+}
+
+// SPEC test 125: from Accepted. One fault: the state; the clock is past the
+// cutoff, so time is not one.
+#[test]
+fn t125_expire_unaccepted_when_accepted_fails() {
+    let mut s = setup();
+    let (bounty, _scout) = accepted_bounty(&mut s, [125u8; 16]);
+    let cutoff = read_bounty(&s.svm, &bounty).acceptance_cutoff;
+    set_clock(&mut s.svm, cutoff + 1);
+
+    let payer = arbitrary_fee_payer(&mut s);
+    let ix = expire_unaccepted_ix(&s, s.requester.pubkey(), bounty);
+    let res = send(&mut s.svm, &payer, &[ix], &[&payer]);
+    assert_named_error(res, "BountyNotExpirable");
+}
+
+// SPEC test 126: a requester account other than the bounty's requester. One
+// fault: that account; requester_ata is derived from the substitute so the
+// associated-token constraint cannot report first.
+#[test]
+fn t126_expire_unaccepted_with_other_requester_fails() {
+    let mut s = setup();
+    let bounty = expirable_bounty(&mut s, [126u8; 16]);
+    let other = Keypair::new();
+    let other_ata = create_funded_ata(&mut s.svm, &s.requester, &other.pubkey(), &s.usdc_mint, 0);
+
+    let payer = arbitrary_fee_payer(&mut s);
+    let accounts = token_accounts(&s, &bounty, other_ata);
+    let ix = expire_unaccepted_ix_with(other.pubkey(), bounty, accounts);
+    let res = send(&mut s.svm, &payer, &[ix], &[&payer]);
+    assert_named_error(res, "RequesterAccountMismatch");
+}
+
+// SPEC test 127: refund account substitutes, three cases, each one fault, the
+// token account. Pinned to requester_ata: the vault shares the error names.
+#[test]
+fn t127_expire_unaccepted_with_substituted_refund_account_fails() {
+    let mut s = setup();
+    let bounty = expirable_bounty(&mut s, [127u8; 16]);
+    let requester = s.requester.pubkey();
+    let attacker = Keypair::new();
+    let other_mint = create_mint(&mut s.svm, &s.requester);
+
+    let non_associated = create_token_account(&mut s.svm, &s.requester, &requester, &s.usdc_mint);
+    let attacker_ata =
+        create_funded_ata(&mut s.svm, &s.requester, &attacker.pubkey(), &s.usdc_mint, 0);
+    let other_mint_ata = create_funded_ata(&mut s.svm, &s.requester, &requester, &other_mint, 0);
+
+    let cases: [(&str, Pubkey, &str); 3] = [
+        ("non-associated account the requester owns", non_associated, "ConstraintAssociated"),
+        ("an attacker's associated token account", attacker_ata, "ConstraintTokenOwner"),
+        ("the requester's account for a second mint", other_mint_ata, "ConstraintAssociated"),
+    ];
+    assert_eq!(cases.len(), 3);
+    for (name, refund_account, expected) in cases {
+        eprintln!("case: {name}");
+        let payer = arbitrary_fee_payer(&mut s);
+        let accounts = token_accounts(&s, &bounty, refund_account);
+        let ix = expire_unaccepted_ix_with(requester, bounty, accounts);
+        let res = send(&mut s.svm, &payer, &[ix], &[&payer]);
+        assert_named_error_at(res, expected, "requester_ata");
+    }
 }

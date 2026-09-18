@@ -91,4 +91,8 @@ pub mod escrow {
     pub fn reject(ctx: Context<Reject>, failed_requirement_id: [u8; 16]) -> Result<()> {
         instructions::reject::handle_reject(ctx, failed_requirement_id)
     }
+
+    pub fn expire_unaccepted(ctx: Context<ExpireUnaccepted>) -> Result<()> {
+        instructions::expire_unaccepted::handle_expire_unaccepted(ctx)
+    }
 }
