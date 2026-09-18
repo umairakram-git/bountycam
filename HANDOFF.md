@@ -1,11 +1,11 @@
 # BountyCam — Handoff
 
-**Date:** 17 September 2026
+**Date:** 18 September 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
-spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification
-**Next session:** Session 9 build — `approve`, `release`, `reject`, `resolve`,
-`expire_unaccepted` and `expire_accepted`; tests 96 to 140; cut-off end of 22 September (D98)
-**Deadline:** 8 October 2026 (21 days remaining)
+spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification and build
+**Next session:** Session 10 — mobile MWA sign-in, SIWS on device, SGT verification. The escrow
+is feature-complete at eleven instructions and has never been deployed to devnet.
+**Deadline:** 8 October 2026 (20 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
 
@@ -906,6 +906,60 @@ appears. Gate at the end: 140 SPEC tests plus `test_id` — `test_escrow` 139, e
 
 ---
 
+## Session 9 build — six instructions, the gate at 140 (18 September)
+
+Claude Code in manual mode, per-edit approval, every commit made by a hash- and count-guarded
+script. Nine commits on 16ae262; `origin/main` was still at 16ae262 when this was written.
+
+| Commit | Content |
+|---|---|
+| 97e7a11 | the three states, `failed_requirement_id`, errors 34 to 48, `BountyExpired` |
+| 29eb8f5 | `reject` (SPEC 7.8); tests 108 to 111, 113 |
+| 096f33d | `expire_unaccepted` (7.10); tests 123 to 127 |
+| 008a069 | `expire_accepted` (7.11); tests 128 to 133 |
+| 13ab47d, c19838e | D99 and its SPEC amendment |
+| 5b01043, fcc4d19 | D100 and its SPEC amendment |
+| 4b5eef2 | `approve` (7.6), `release` (7.7); tests 96 to 107, 112 |
+| 7a77185 | `resolve` (7.9); tests 114 to 122 |
+| 68750b1 | Cross-cutting tests 134 to 140; the gate |
+
+The final counted run on 68750b1: `test_escrow` 139, escrow unit 2, `cpi_caller` 1, two empty
+doc-test runs, 49 IDL error codes, no `cpi_caller` line and no stack-frame message in the
+`anchor build` output. That is SPEC section 12's 140 and satisfies D98's cut-off four days early.
+
+Each instruction landed twice: accounts and effects with no checks, its negative tests shown red
+at their own expected-error assertions, then the checks, then the commit. The guards the plan
+predicted behaved as predicted (101, 102, 116, 134, 136, 139, 140), and three more turned up that
+it had not: 127, 133 and the first three cases of 100 and 107, all caught by the associated-token
+constraint rather than by a check.
+
+Two rulings came out of the build. D99: settlement writes the terminal state before the token
+CPI, because SECURITY.md section 8 outranks the SPEC's effect order; closures through Anchor's
+`close` constraint necessarily follow the CPI and are the stated exception. D100: `approve`'s
+generated `try_accounts` exceeded SBF's 4096-byte stack frame by 8 bytes, `cargo build-sbf`
+printed an error, exited 0 and wrote an unusable `escrow.so`, and every approve transaction died
+inside validation; four accounts are now boxed, and the counted run fails on any stack-frame
+message whatever the exit status.
+
+Process facts, including what went wrong:
+
+- The build-5 commit script was run a second time after `release` had been written, and `COMMIT`
+  was answered. It staged the three shared files by name, so it committed release's registration
+  and tests without `release.rs`: commit 9044791 could not compile. Its own post-commit hash
+  check caught the mismatch, after the commit. Amended to 4b5eef2, which adds `release.rs` and
+  carries both instructions; nothing was pushed, so no rewritten commit left this machine.
+- The flaw was in the commit scripts, not in Claude Code's work. They now re-hash every file
+  immediately before staging and require the staged set to be exactly the expected files.
+- Build commit 5's own counted run, `approve` green at 118 without `release` present, was checked
+  in the architect chat but is under no commit. 4b5eef2 carries a single run of both.
+- Test 135 first failed at its own assertion with `AlreadyProcessed`: a byte-identical repeat is
+  refused by the runtime before the program sees it. Claude Code diagnosed it, expired the
+  blockhash as tests 19, 33 and 134 do, and re-ran.
+- SPEC task 25's review items have not been performed against the final source. They are the
+  section 11 rows marked "review item" and the check-1 invariants; owed before any devnet deploy.
+
+---
+
 ## Working rules
 
 - Read SECURITY.md before touching the escrow, auth, verifier, or any key (D50).
@@ -936,4 +990,8 @@ appears. Gate at the end: 140 SPEC tests plus `test_id` — `test_escrow` 139, e
   the second would silence the escrow's own id check (D90).
 - Claude Code sessions start in auto mode. Check the footer before the opening prompt; every
   write phase is manual with per-edit approval.
-- Answer a commit script's prompt only after the architect has checked the pasted output.
+- Answer a commit script's prompt only after the architect has checked the pasted output, and
+  answer it once. A script re-run later against a changed tree commits the wrong thing; this
+  produced 9044791, a commit that could not compile.
+- A commit script re-hashes every file immediately before staging and requires the staged set to
+  be exactly its own file list. A list of names alone stages whatever those files now contain.
