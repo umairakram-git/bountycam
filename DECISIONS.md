@@ -1881,3 +1881,39 @@ hole in the gate, not in the program.
 Tests, at minimum: none new. The suite runs against the real `escrow.so`, so test 96's positive
 path already fails when validation does not fit the frame, which is how this was found. SPEC
 section 13 gains the review item that the build output names no function over the limit.
+
+**D101 — A counted run must prove the program was compiled, not that a file was written.**
+D100 Ruling 2 requires every commit script to grep `anchor build`'s output for `Stack offset`.
+That grep is meaningless on an up-to-date tree: an incremental build recompiles nothing, the
+backend emits no stack-frame diagnostic, and the guard passes having tested nothing. It is
+weakest exactly when the tree looks safest.
+
+Observed twice on 18 September. First, during the SPEC task 25 review: `anchor build` ran at
+16:28, printed `Finished release profile ... in 0.21s` with no compile line for the sbpf unit,
+and left both `escrow.so` artifacts at their 12:52 modification times. The grep passed.
+
+Second, in the guard written to close that hole. It deleted `target/deploy/escrow.so`, ran
+`cargo clean -p escrow` — 45,354 files, 1.7 GiB — and required the artifact to be newer than
+the run. It passed. Nothing had compiled. `cargo clean -p` removes host-target output and
+leaves `target/sbpf-solana-solana/release/escrow.so`, which kept its 12:52 mtime while the
+release profile reported finishing in 0.23 seconds; `anchor build` then re-derived the deploy
+copy from that stale object. The two files differ in both size, 565,544 against 456,736, and
+hash, which is how the substitution was found.
+
+Ruling. A counted run removes `target/sbpf-solana-solana` outright before `anchor build`, since
+`cargo clean -p escrow` does not reach it. It records a start timestamp and requires
+`target/sbpf-solana-solana/release/escrow.so` — the compiled object — to be newer than it.
+`target/deploy/escrow.so` is a derived copy and is never the freshness subject. The build log
+must also carry a compile line for the escrow crate. D100 Ruling 2's `Stack offset` grep stands,
+runs after those checks, and is evidence only once they pass.
+
+The general form, which outlives this toolchain: a timestamp on a build artifact shows that a
+file was written, not that a compiler ran. Freshness is asserted against the object the
+compiler emits and against the log, never against a copy of it.
+
+This changes the gate, not the program. No source, test, error code or account layout changes.
+SPEC section 13 task 19a's review item is discharged only by a run passing these checks. The
+runs recorded before this entry ran cold at 68750b1 and did compile, so the item is carried
+forward as unverified-since rather than treated as failed.
+
+Tests, at minimum: none new.
