@@ -585,8 +585,11 @@ Handler checks:
 4. `bounty_vault.amount` is at least `reward_amount` — `VaultBalanceBelowReward`.
 
 Checks 1 and 2 cannot fail through the instructions: `submit_attestation` writes `submitted_at`
-as it enters `Submitted`, and `submitted_at` is at most `deadline`, far below the `i64` limit.
-They are review items (section 13), as `submit_attestation` check 2 is.
+as it enters `Submitted`, and the review window end is `submitted_at` plus `review_window_secs`,
+which section 7.2 check 5 caps at 86400. No instruction argument or account feeds
+`submitted_at`; it is the cluster clock at submission, so overflow needs a cluster clock within
+86400 seconds of the `i64` limit rather than a value the program accepts. They are review items
+(section 13), as `submit_attestation` check 2 is.
 
 Effects: as section 7.6.
 
