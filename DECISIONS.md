@@ -1852,3 +1852,32 @@ Tests, at minimum: none new. Effect order inside one handler is not observable, 
 CPI reverts the whole transaction. The positives of tests 96, 103, 114, 115, 123 and 128 assert
 the final state and balances, and section 13's review item — every Session 9 check precedes its
 token CPI — now covers the state write too.
+
+**D100 — Boxed accounts where validation overflows the SBF stack frame, and a counted-run guard
+for it.** SBF gives every function a 4096-byte stack frame. Anchor's generated `try_accounts`
+for `Approve`, with eight accounts and SPEC 7.6's constraints, was estimated at 4160 bytes.
+`cargo build-sbf` printed an error naming the function, exited 0, and wrote `escrow.so` anyway;
+every approve transaction then failed with an access violation inside validation, before any
+CPI. Tests 96 to 102 and 112 all failed, and the earlier 110 still passed.
+
+Ruling 1. An account may be held as `Box<Account<...>>` wherever validation would otherwise
+exceed the frame. Boxing moves the decoded account data to the heap and leaves a pointer in the
+frame. It changes no constraint, no error code, no check ordering and nothing observable on
+chain, so SPEC section 7's tables are satisfied by a boxed account. `approve` boxes `bounty`,
+`usdc_mint`, `bounty_vault` and `scout_payout`. `release` and `resolve` take the same shape if
+their builds need it; `expire_unaccepted` and `expire_accepted` compile without it and are left
+alone, because a change with nothing to fix is a change that can break something.
+
+The alternatives were rejected. Rewriting the `ScoutMismatch` expression to save its eight bytes
+leaves no margin for `resolve`, which carries more accounts. Moving that check into the handler
+would contradict SPEC 7.6, which places it on the `scout` account, and would change where Anchor
+reports it and what test 100's fourth case asserts.
+
+Ruling 2. D90's counted run treats a stack-frame message from `anchor build` as a failure
+whatever the exit status, because this build exited 0 while producing an unusable program. Every
+commit script greps the build output for `Stack offset` and stops if it appears. This closes a
+hole in the gate, not in the program.
+
+Tests, at minimum: none new. The suite runs against the real `escrow.so`, so test 96's positive
+path already fails when validation does not fit the frame, which is how this was found. SPEC
+section 13 gains the review item that the build output names no function over the limit.
