@@ -1947,3 +1947,42 @@ program id and therefore one mint for this deployment. Changing it later needs a
 upgrade carrying a migration, or a second program id.
 
 Tests, at minimum: none new. No source, error code or account layout changes.
+
+**D103 — `deployment_id` allocation, and devnet is 2.** MESSAGES.md sections 3 and 4 place
+`deployment_id` at offset 26 of both signed layouts, one byte, sourced from the configuration
+account. No document assigned values to clusters, and `initialize` writes the field once and
+immutably (D83), so the value is fixed here rather than at the keyboard.
+
+What is already taken. `gen_vectors.py` lines 126 and 144 build the nominal vectors with 1, and
+`messages.rs:135` and `test_escrow.rs:46` compile `DEPLOYMENT_ID = 1` to reproduce them byte for
+byte. Vectors ATT-09 and ATT-10 pin 0 and 255 as the boundary cases. `test_escrow.rs:1321` uses
+7 as a mismatch fixture.
+
+Allocation:
+
+| Value | Use |
+|---|---|
+| 0 | never deployed — what a zeroed struct yields; vector ATT-09 |
+| 1 | golden vectors, litesvm suite, localnet |
+| 2 | devnet — the deployment at `6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS` |
+| 7 | reserved — already a mismatch fixture |
+| 10 | mainnet, when it exists |
+| 255 | never deployed — vector ATT-10 |
+
+Reasoning. The field exists so a signature issued for one deployment cannot replay against
+another (D70). Reusing the vectors' own value on a live cluster spends that separation for
+nothing, and 0 is the value a bug or an uninitialised field produces, so neither belongs on a
+real deployment. The gap between 2 and 10 leaves room for staging and preview clusters without
+renumbering anything already signed.
+
+Binding off-chain. MESSAGES.md section 5 sources the field from config, so the verifier, the
+relayer, the mobile client and the Session 17 independent verifier read it from the
+configuration account and never compile it in. A hardcoded value that disagrees with the chain
+makes every voucher and every attestation fail reconstruction, and because the configuration is
+immutable the correction would be a program upgrade carrying a migration (D83). The litesvm
+suite is the one exception, and only because it initialises its own configuration per test.
+
+Scope. This fixes the value for the devnet deployment named above. Another cluster takes another
+value under this table. Changing this one needs an upgrade with a migration, or a new program id.
+
+Tests, at minimum: none new. The suite keeps 1. No source, error code or account layout changes.
