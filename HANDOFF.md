@@ -909,7 +909,8 @@ appears. Gate at the end: 140 SPEC tests plus `test_id` — `test_escrow` 139, e
 ## Session 9 build — six instructions, the gate at 140 (18 September)
 
 Claude Code in manual mode, per-edit approval, every commit made by a hash- and count-guarded
-script. Nine commits on 16ae262; `origin/main` was still at 16ae262 when this was written.
+script. Eleven commits on 16ae262, the Session 9 specification baseline, in the nine rows below,
+then the two records commits. All of it is pushed: `origin/main` is 85abdf6.
 
 | Commit | Content |
 |---|---|
