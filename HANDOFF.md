@@ -3,8 +3,10 @@
 **Date:** 18 September 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
 spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification and build
-**Next session:** Session 10 — mobile MWA sign-in, SIWS on device, SGT verification. The escrow
-is feature-complete at eleven instructions and has never been deployed to devnet.
+**Next session:** Session 11 — rehearse and run `initialize` on devnet, then the mobile scope
+Session 10 did not reach: MWA sign-in, SIWS on device, SGT verification. The escrow is deployed
+at eleven instructions with no configuration account, so every instruction fails on the config
+PDA until `initialize` runs.
 **Deadline:** 8 October 2026 (20 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
@@ -49,11 +51,18 @@ sufficient for truth.
 | Device | Seeker, API 36, StrongBox present | |
 
 **Keys** — `~/bountycam-keys/`, mode 600, outside the repo:
-`upgrade-authority.json`, `relayer.json`, `attester.json`, `escrow-keypair.json`
+`upgrade-authority.json`, `relayer.json`, `attester.json`, `escrow-keypair.json`,
+`eligibility.json`, `arbiter.json`, `usdc-mint.json`
 
-**Devnet balances:** upgrade authority ~3.87 SOL, relayer 5 SOL
+**Devnet balances:** upgrade authority ~2.44 SOL after the extend and upgrade, relayer 5 SOL
 
-**Deployed program:** `6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS` (devnet, IDL published)
+**Deployed program:** `6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS`, carrying the eleven-
+instruction layout since 18 September. ProgramData `EMHjBWwTWVMyucASSXTZ3YN1uGAs5awDD6rX4UpZRaKf`,
+488736 bytes. The published IDL is still the Session 4 one: the upgrade landed, the IDL metadata
+write failed. No configuration account exists, so every instruction fails on the config PDA.
+
+**Devnet USDC mint (D102):** `ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR`, 6 decimals, mint
+authority the upgrade authority, no freeze authority.
 
 ---
 
@@ -927,6 +936,10 @@ then the two records commits. All of it is pushed: `origin/main` is 85abdf6.
 The final counted run on 68750b1: `test_escrow` 139, escrow unit 2, `cpi_caller` 1, two empty
 doc-test runs, 49 IDL error codes, no `cpi_caller` line and no stack-frame message in the
 `anchor build` output. That is SPEC section 12's 140 and satisfies D98's cut-off four days early.
+The breakdown sums to 142 because `declare_id!` generates a `test_id` test that the escrow crate
+and `cpi_caller` each carry; a grep for the test attribute cannot see them and returns 139, 1 and
+0. Two reviews have now read this line as an arithmetic error. 139 integration tests plus SPEC
+test 90 in `messages.rs` make 140; the two generated tests make 142 executed.
 
 Each instruction landed twice: accounts and effects with no checks, its negative tests shown red
 at their own expected-error assertions, then the checks, then the commit. The guards the plan
@@ -956,8 +969,66 @@ Process facts, including what went wrong:
 - Test 135 first failed at its own assertion with `AlreadyProcessed`: a byte-identical repeat is
   refused by the runtime before the program sees it. Claude Code diagnosed it, expired the
   blockhash as tests 19, 33 and 134 do, and re-ran.
-- SPEC task 25's review items have not been performed against the final source. They are the
-  section 11 rows marked "review item" and the check-1 invariants; owed before any devnet deploy.
+- ~~SPEC task 25's review items have not been performed against the final source. They are the
+  section 11 rows marked "review item" and the check-1 invariants; owed before any devnet
+  deploy.~~ Done in Session 10 against fe70f34, no findings.
+
+---
+
+## Session 10 — records, SPEC task 25, the devnet deploy (18 September)
+
+Planned as mobile. Ruled at the start that the deploy and task 25 came first: the deploy was the
+only remaining item of unbounded duration, and one step in it looked irreversible. Mobile moves to
+Session 11 and the sessions after it shift by one.
+
+Five commits, no program source touched: 0a4fc40 D101, fe70f34 the SPEC 7.7 wording, c5db706
+D102, df7e418 D103, 4fbe8b4 BACKLOG.
+
+**SPEC task 25 — discharged, no findings.** Read against the source at fe70f34 in a read-only
+session, with `cancel` added to the Session 9 set. Every settlement instruction writes its
+terminal state before its token CPI (D99); the two `close`-constraint closures follow the CPI as
+the stated exception. None of the untested checks can be made to fail. `reject` issues no token
+CPI, proved from its account struct rather than from the SPEC: it declares only `requester` and
+`bounty`, so the accounts needed to move tokens are not in its context.
+
+**Two corrections came out of that review.** D101: a counted run must prove the program was
+compiled. D100 Ruling 2's `Stack offset` grep passes vacuously on an incremental build, and a
+first freshness guard also passed while nothing compiled, because `cargo clean -p escrow` leaves
+the sbpf object and `anchor build` re-derives the deploy copy from it. The rule now deletes
+`target/sbpf-solana-solana`, measures freshness on the compiled object rather than the derived
+copy, and requires dependency compile lines in the log. The SPEC 7.7 amendment: release check 2
+rested on a bound the program does not establish; the accurate reason is that nothing but the
+cluster clock feeds `submitted_at`, and `review_window_secs` is capped at 86400.
+
+**One finding rejected.** The review read the counted-run breakdown above as wrong because a grep
+counts 139, 1 and 0. `declare_id!` generates a `test_id` test the grep cannot see; the runner
+reported 139, 2 and 1 on five subsequent cold runs.
+
+**The deploy.** `getProgramAccounts` returned empty before anything was touched, which removed the
+irreversible step: the program owned no accounts, so none held test USDC and none needed
+cancelling. ProgramData extended by 270000 bytes to 488736 for 1.37 SOL, 32000 more than this
+build needs. Upgraded, then verified from the chain rather than from the tool: the first 456736
+bytes of `solana program dump` hash to 04dd0c29, equal to `target/deploy/escrow.so`, and the rest
+is zero. No buffer stranded. The IDL metadata write failed afterwards at 2.44 SOL available.
+
+**The build is reproducible.** Five cold rebuilds from a deleted target tree produced the same
+565544-byte object, bbf2e314, whose stripped 456736-byte copy is what devnet holds. That is what
+makes "the chain holds the reviewed bytes" checkable rather than assumed.
+
+**The four immutable configuration values, approved and generated, not yet written.**
+
+| Field | Value |
+|---|---|
+| `deployment_id` | 2 (D103) |
+| `usdc_mint` | `ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR` (D102) |
+| `attester_authority` | `2KAuf8WWHGDm4rA1MCCQ9UciEAiqyTHaKeyBHZFF3wZ5` |
+| `eligibility_authority` | `Bg6SsTTH6EX5AaeQQ9i4yhDTwsSjxnHx9AV8cqa97xmp` |
+| `arbiter_authority` | `6YPX1obwh62N2DDyxtNa2RwkriWUUWLzjAvEWJFbvK1K` |
+
+SPEC 7.1 check 3 requires the signer to be the on-chain upgrade authority, so
+`upgrade-authority.json` signs `initialize` and the other three are arguments, never signers.
+Checks 4 and 5 hold: three distinct keys, none all-zero. The localnet rehearsal with these exact
+keys is still owed (D83).
 
 ---
 
