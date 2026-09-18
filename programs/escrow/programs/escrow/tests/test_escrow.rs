@@ -334,7 +334,12 @@ fn create_and_fund_ix(
 }
 
 fn create_and_fund_ix_with(s: &Setup, args: CreateArgs, accounts: TokenAccounts) -> Instruction {
-    let requester = s.requester.pubkey();
+    create_and_fund_ix_for(s.requester.pubkey(), args, accounts)
+}
+
+/// `create_and_fund` for any requester wallet; test 118 funds as the
+/// configured arbiter.
+fn create_and_fund_ix_for(requester: Pubkey, args: CreateArgs, accounts: TokenAccounts) -> Instruction {
     let bounty = bounty_pda(&requester, &args.bounty_id);
     Instruction::new_with_bytes(
         escrow::id(),
@@ -3977,4 +3982,324 @@ fn t107_release_with_substituted_payout_fails() {
         let res = send(&mut s.svm, &payer, &[ix], &[&payer]);
         assert_named_error_at(res, expected, account);
     }
+}
+
+// ---------------------------------------------------------------------------
+// SPEC 12.11: resolve (D94)
+// ---------------------------------------------------------------------------
+
+use escrow::ResolveOutcome;
+
+/// Fund, accept, submit and reject: the state every resolve test starts from
+/// unless it says otherwise.
+fn disputed_bounty(s: &mut Setup, bounty_id: [u8; 16]) -> (Pubkey, Keypair) {
+    let (bounty, scout) = submitted_bounty(s, bounty_id);
+    reject_default(s, bounty).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Disputed);
+    (bounty, scout)
+}
+
+/// `resolve` (SPEC 7.9). `arbiter` signs; `requester` is the unsigned rent
+/// destination; `destination` is the paid party's token account, chosen by
+/// the test since the handler checks it against the outcome.
+fn resolve_ix(
+    s: &Setup,
+    arbiter: Pubkey,
+    requester: Pubkey,
+    bounty: Pubkey,
+    outcome: ResolveOutcome,
+    destination: Pubkey,
+) -> Instruction {
+    Instruction::new_with_bytes(
+        escrow::id(),
+        &escrow::instruction::Resolve { outcome }.data(),
+        escrow::accounts::Resolve {
+            arbiter,
+            config: s.config,
+            requester,
+            bounty,
+            usdc_mint: s.usdc_mint,
+            bounty_vault: associated_token::get_associated_token_address(&bounty, &s.usdc_mint),
+            destination,
+            token_program: spl_token::id(),
+        }
+        .to_account_metas(None),
+    )
+}
+
+/// A valid resolve: the configured arbiter co-signs with an arbitrary fee
+/// payer, naming the bounty's requester and the given destination.
+fn resolve_default(
+    s: &mut Setup,
+    bounty: Pubkey,
+    outcome: ResolveOutcome,
+    destination: Pubkey,
+) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+    let payer = arbitrary_fee_payer(s);
+    let ix = resolve_ix(s, s.arbiter.pubkey(), s.requester.pubkey(), bounty, outcome, destination);
+    send(&mut s.svm, &payer, &[ix], &[&payer, &s.arbiter])
+}
+
+// SPEC test 114: PayScout after a real reject, with tokens donated to the
+// vault: the Scout payout account receives the entire balance; the vault is
+// closed with its rent to the requester; state Paid; the bounty account open,
+// every other field unchanged.
+#[test]
+fn t114_resolve_pay_scout_succeeds() {
+    let mut s = setup();
+    let (bounty, scout) = disputed_bounty(&mut s, [114u8; 16]);
+    let requester = s.requester.pubkey();
+    let vault = associated_token::get_associated_token_address(&bounty, &s.usdc_mint);
+    let payout = scout_payout_ata(&mut s, &scout.pubkey());
+
+    const DONATION: u64 = 1_234_567;
+    donate_to_vault(&mut s, &vault, DONATION);
+    assert_eq!(token_balance(&s.svm, &vault), REWARD + DONATION);
+    let before = read_bounty(&s.svm, &bounty);
+    let vault_rent = s.svm.get_account(&vault).unwrap().lamports;
+    let requester_before = s.svm.get_balance(&requester).unwrap();
+
+    resolve_default(&mut s, bounty, ResolveOutcome::PayScout, payout).unwrap();
+
+    assert_eq!(token_balance(&s.svm, &payout), REWARD + DONATION);
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE - REWARD);
+    assert!(is_closed(&s.svm, &vault), "vault closed");
+    let requester_after = s.svm.get_balance(&requester).unwrap();
+    assert_eq!(requester_after - requester_before, vault_rent);
+
+    assert!(!is_closed(&s.svm, &bounty), "bounty open");
+    let after = read_bounty(&s.svm, &bounty);
+    assert_eq!(after.state, BountyState::Paid);
+    assert_fixed_fields_equal(&before, &after);
+    assert_eq!(after.scout, Some(scout.pubkey()));
+    assert_eq!(after.deadline, before.deadline);
+    assert_eq!(after.submitted_at, before.submitted_at);
+    assert_eq!(after.evidence_root, before.evidence_root);
+    assert_eq!(after.achieved_assurance, before.achieved_assurance);
+    assert_eq!(after.failed_requirement_id, Some(REQUIREMENT_ID));
+}
+
+// SPEC test 115: RefundRequester, the same setup: the requester's associated
+// token account receives the entire balance; state Refunded.
+#[test]
+fn t115_resolve_refund_requester_succeeds() {
+    let mut s = setup();
+    let (bounty, scout) = disputed_bounty(&mut s, [115u8; 16]);
+    let vault = associated_token::get_associated_token_address(&bounty, &s.usdc_mint);
+    let payout = scout_payout_ata(&mut s, &scout.pubkey());
+
+    const DONATION: u64 = 1_234_567;
+    donate_to_vault(&mut s, &vault, DONATION);
+    let before = read_bounty(&s.svm, &bounty);
+
+    let requester_ata = s.requester_ata;
+    resolve_default(&mut s, bounty, ResolveOutcome::RefundRequester, requester_ata).unwrap();
+
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE + DONATION);
+    assert_eq!(token_balance(&s.svm, &payout), 0);
+    assert!(is_closed(&s.svm, &vault), "vault closed");
+    assert!(!is_closed(&s.svm, &bounty), "bounty open");
+    let after = read_bounty(&s.svm, &bounty);
+    assert_eq!(after.state, BountyState::Refunded);
+    assert_fixed_fields_equal(&before, &after);
+    assert_eq!(after.failed_requirement_id, Some(REQUIREMENT_ID));
+}
+
+// SPEC test 116: outcome byte 2. One fault: the argument. Decoding fails
+// before any account is loaded; the bounty is unchanged.
+#[test]
+fn t116_resolve_with_outcome_byte_2_fails() {
+    let mut s = setup();
+    let (bounty, scout) = disputed_bounty(&mut s, [116u8; 16]);
+    let payout = scout_payout_ata(&mut s, &scout.pubkey());
+    let payer = arbitrary_fee_payer(&mut s);
+
+    let mut ix = resolve_ix(
+        &s,
+        s.arbiter.pubkey(),
+        s.requester.pubkey(),
+        bounty,
+        ResolveOutcome::PayScout,
+        payout,
+    );
+    assert_eq!(ix.data.len(), 9, "discriminator plus one outcome byte");
+    ix.data[8] = 2;
+    let res = send(&mut s.svm, &payer, &[ix], &[&payer, &s.arbiter]);
+    assert_named_error(res, "InstructionDidNotDeserialize");
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Disputed);
+}
+
+// SPEC test 117: signer other than the arbiter, five cases: the eligibility
+// authority, the attester authority, a fresh key, the requester and the
+// Scout. One fault each: the signer; a separate fee payer pays.
+#[test]
+fn t117_resolve_by_non_arbiter_fails() {
+    let mut s = setup();
+    let (bounty, scout) = disputed_bounty(&mut s, [117u8; 16]);
+    let payout = scout_payout_ata(&mut s, &scout.pubkey());
+    let fresh = Keypair::new();
+    let payer = arbitrary_fee_payer(&mut s);
+
+    let cases: [(&str, &Keypair); 5] = [
+        ("the eligibility authority", &s.eligibility),
+        ("the attester authority", &s.attester),
+        ("a fresh key", &fresh),
+        ("the requester", &s.requester),
+        ("the Scout", &scout),
+    ];
+    assert_eq!(cases.len(), 5);
+    for (name, signer) in cases {
+        eprintln!("case: {name}");
+        let ix = resolve_ix(
+            &s,
+            signer.pubkey(),
+            s.requester.pubkey(),
+            bounty,
+            ResolveOutcome::PayScout,
+            payout,
+        );
+        let res = send(&mut s.svm, &payer, &[ix], &[&payer, signer]);
+        assert_named_error(res, "UnauthorizedArbiter");
+    }
+}
+
+// SPEC test 118: the configured arbiter key as the bounty's requester: it
+// funds, a Scout accepts and attests, it rejects, then resolves. One fault:
+// the arbiter is a party.
+#[test]
+fn t118_resolve_by_arbiter_who_is_requester_fails() {
+    let mut s = setup();
+    let arbiter = s.arbiter.insecure_clone();
+    s.svm.airdrop(&arbiter.pubkey(), 10_000_000_000).unwrap();
+    let arbiter_ata = create_funded_ata(
+        &mut s.svm,
+        &s.requester,
+        &arbiter.pubkey(),
+        &s.usdc_mint,
+        INITIAL_BALANCE,
+    );
+    let bounty_id = [118u8; 16];
+    let bounty = bounty_pda(&arbiter.pubkey(), &bounty_id);
+    let accounts = token_accounts(&s, &bounty, arbiter_ata);
+    let fund = create_and_fund_ix_for(arbiter.pubkey(), create_args(bounty_id, REWARD, 3), accounts);
+    send(&mut s.svm, &arbiter, &[fund], &[&arbiter]).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).requester, arbiter.pubkey());
+
+    let scout = new_scout(&mut s);
+    accept_with_voucher(&mut s, &scout, bounty, NOW + VOUCHER_TTL).unwrap();
+    submit_default(&mut s, bounty).unwrap();
+    let reject = reject_ix(arbiter.pubkey(), bounty, REQUIREMENT_ID);
+    send(&mut s.svm, &arbiter, &[reject], &[&arbiter]).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Disputed);
+    let payout = scout_payout_ata(&mut s, &scout.pubkey());
+
+    let ix = resolve_ix(
+        &s,
+        arbiter.pubkey(),
+        arbiter.pubkey(),
+        bounty,
+        ResolveOutcome::PayScout,
+        payout,
+    );
+    let res = send(&mut s.svm, &arbiter, &[ix], &[&arbiter]);
+    assert_named_error(res, "ArbiterIsParty");
+}
+
+// SPEC test 119: the configured arbiter key as the bounty's Scout, accepting
+// with a valid voucher naming it. One fault: the arbiter is a party.
+#[test]
+fn t119_resolve_by_arbiter_who_is_scout_fails() {
+    let mut s = setup();
+    let arbiter = s.arbiter.insecure_clone();
+    s.svm.airdrop(&arbiter.pubkey(), 1_000_000_000).unwrap();
+    let bounty = fund_bounty(&mut s, [119u8; 16]);
+    accept_with_voucher(&mut s, &arbiter, bounty, NOW + VOUCHER_TTL).unwrap();
+    assert_eq!(read_bounty(&s.svm, &bounty).scout, Some(arbiter.pubkey()));
+    submit_default(&mut s, bounty).unwrap();
+    reject_default(&mut s, bounty).unwrap();
+    let payout = scout_payout_ata(&mut s, &arbiter.pubkey());
+
+    let ix = resolve_ix(
+        &s,
+        arbiter.pubkey(),
+        s.requester.pubkey(),
+        bounty,
+        ResolveOutcome::PayScout,
+        payout,
+    );
+    let res = send(&mut s.svm, &arbiter, &[ix], &[&arbiter]);
+    assert_named_error(res, "ArbiterIsParty");
+}
+
+// SPEC test 120: from Submitted. One fault: the state.
+#[test]
+fn t120_resolve_when_submitted_fails() {
+    let mut s = setup();
+    let (bounty, scout) = submitted_bounty(&mut s, [120u8; 16]);
+    let payout = scout_payout_ata(&mut s, &scout.pubkey());
+
+    let res = resolve_default(&mut s, bounty, ResolveOutcome::PayScout, payout);
+    assert_named_error(res, "BountyNotResolvable");
+}
+
+// SPEC test 121: destination substitutes, six cases, each one fault, the
+// destination. The handler reports the owner mismatch first and the address
+// mismatch second, as the associated-token constraint does elsewhere.
+#[test]
+fn t121_resolve_with_substituted_destination_fails() {
+    let mut s = setup();
+    let (bounty, scout) = disputed_bounty(&mut s, [121u8; 16]);
+    let requester = s.requester.pubkey();
+    let requester_ata = s.requester_ata;
+    let scout_ata = scout_payout_ata(&mut s, &scout.pubkey());
+    let attacker = Keypair::new();
+    let attacker_ata = scout_payout_ata(&mut s, &attacker.pubkey());
+    let other_mint = create_mint(&mut s.svm, &s.requester);
+    let scout_other_mint_ata =
+        create_funded_ata(&mut s.svm, &s.requester, &scout.pubkey(), &other_mint, 0);
+    let requester_other_mint_ata =
+        create_funded_ata(&mut s.svm, &s.requester, &requester, &other_mint, 0);
+
+    use ResolveOutcome::{PayScout, RefundRequester};
+    let cases: [(&str, ResolveOutcome, Pubkey, &str); 6] = [
+        ("PayScout to the requester's account", PayScout, requester_ata, "TokenAccountOwnerMismatch"),
+        ("PayScout to an attacker's account", PayScout, attacker_ata, "TokenAccountOwnerMismatch"),
+        ("RefundRequester to the Scout's account", RefundRequester, scout_ata, "TokenAccountOwnerMismatch"),
+        ("RefundRequester to an attacker's account", RefundRequester, attacker_ata, "TokenAccountOwnerMismatch"),
+        ("PayScout to the Scout's second-mint account", PayScout, scout_other_mint_ata, "DestinationAccountMismatch"),
+        (
+            "RefundRequester to the requester's second-mint account",
+            RefundRequester,
+            requester_other_mint_ata,
+            "DestinationAccountMismatch",
+        ),
+    ];
+    assert_eq!(cases.len(), 6);
+    for (name, outcome, destination, expected) in cases {
+        eprintln!("case: {name}");
+        let res = resolve_default(&mut s, bounty, outcome, destination);
+        assert_named_error(res, expected);
+    }
+}
+
+// SPEC test 122: a requester account other than the bounty's requester. One
+// fault: that account, which here is only the rent destination.
+#[test]
+fn t122_resolve_with_other_requester_fails() {
+    let mut s = setup();
+    let (bounty, scout) = disputed_bounty(&mut s, [122u8; 16]);
+    let payout = scout_payout_ata(&mut s, &scout.pubkey());
+    let other = Keypair::new();
+    let payer = arbitrary_fee_payer(&mut s);
+
+    let ix = resolve_ix(
+        &s,
+        s.arbiter.pubkey(),
+        other.pubkey(),
+        bounty,
+        ResolveOutcome::PayScout,
+        payout,
+    );
+    let res = send(&mut s.svm, &payer, &[ix], &[&payer, &s.arbiter]);
+    assert_named_error(res, "RequesterAccountMismatch");
 }

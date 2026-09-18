@@ -7,6 +7,7 @@ pub mod expire_unaccepted;
 pub mod initialize;
 pub mod reject;
 pub mod release;
+pub mod resolve;
 pub mod submit_attestation;
 
 pub use accept::*;
@@ -18,4 +19,5 @@ pub use expire_unaccepted::*;
 pub use initialize::*;
 pub use reject::*;
 pub use release::*;
+pub use resolve::*;
 pub use submit_attestation::*;

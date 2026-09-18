@@ -107,4 +107,8 @@ pub mod escrow {
     pub fn release(ctx: Context<Release>) -> Result<()> {
         instructions::release::handle_release(ctx)
     }
+
+    pub fn resolve(ctx: Context<Resolve>, outcome: ResolveOutcome) -> Result<()> {
+        instructions::resolve::handle_resolve(ctx, outcome)
+    }
 }
