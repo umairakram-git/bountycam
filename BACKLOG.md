@@ -330,6 +330,20 @@ find the parent; decide whether it matters (Session 7).
 - **Rent in settled bounty accounts.** 2797920 lamports per `Paid` or `Refunded` bounty stay
   locked (D96). Reclaiming them needs its own D-entry and must not reopen D86's replay trigger.
 
+## Open items from Session 9 build (18 September)
+
+- **SPEC task 25's review items are not done.** The build stopped at the gate. Task 25 covers
+  section 11's rows marked "review item" and the check-1 state invariants, read against the final
+  source. Owed before any devnet deploy.
+- **The escrow has never been deployed to devnet.** Eleven instructions, 140 tests, no deploy.
+  Whoever schedules it re-reads SECURITY.md section 16 and D90's deploy rules first.
+- **`approve` and `release` share one commit.** 4b5eef2 carries both, after a mis-run commit
+  script produced an uncompilable 9044791 that was amended away. No single commit holds
+  `approve` alone, and build commit 5's own counted run is in the architect chat only.
+- **Anchor's stack frame is close to full on the payout instructions.** D100 boxed four accounts
+  in `approve`; `release` and `resolve` were written boxed. Any account added to a settlement
+  instruction risks the 4096-byte limit again, and the build reports it while still exiting 0.
+
 ---
 
 ## Notes owed to `solana-dev-notes`
@@ -425,7 +439,8 @@ find the parent; decide whether it matters (Session 7).
 
 Revised from the original four-week plan after the D10 positioning change.
 Sessions 1 to 6, 7a and 7b complete; Session 8's escrow build complete, its capture nonce
-issuance not built; Session 9's specification complete, its build open.
+issuance not built; Session 9 complete, specification and build, with SPEC task 25's review
+items and the devnet deploy outstanding.
 
 ### Week 1 remainder
 
@@ -440,7 +455,7 @@ issuance not built; Session 9's specification complete, its build open.
 | # | Scope |
 |---|---|
 | 8 | Escrow — `accept`, `submit_attestation` **done 17 Sep**; capture nonce issuance open |
-| 9 | Escrow — spec **done 17 Sep** (D92 to D98); build six instructions, tests 96 to 140 |
+| 9 | Escrow — spec **done 17 Sep** (D92 to D98); build **done 18 Sep**, gate 140 at 68750b1 |
 | 10 | Mobile — MWA sign-in, SIWS on device, SGT verification |
 | 11 | Mobile — discovery, bounty detail, accept, assignment race test |
 | 12 | Mobile — guided capture via c2pa-android |
@@ -476,7 +491,8 @@ issuance not built; Session 9's specification complete, its build open.
 ~~**If Session 8 or 9 slips past day 14** — drop to a three-instruction escrow
 (fund / release / refund) and move dispute entirely off-chain.~~ Replaced for Session 9 by
 D98: if no committed build shows every Session 9 SPEC test passing by the end of 22 September,
-Sydney time, Umair rules on this contingency before further build work.
+Sydney time, Umair rules on this contingency before further build work. **Not triggered:**
+68750b1 on 18 September shows `test_escrow` 139, escrow unit 2 and `cpi_caller` 1.
 
 ~~**If MWA misbehaves in Session 10** — stop everything. It blocks the whole
 mobile path.~~ Answered 12 September (MWA spike): all three MWA questions pass
@@ -494,7 +510,7 @@ Four things where a false pass is not discovered until week four.
 
 | Gate | Session | How to check |
 |---|---|---|
-| Escrow cannot be drained | 9 | Negative tests: wrong signer approves, wrong scout claims, double-approve |
+| Escrow cannot be drained | 9 | **Passed 18 Sep**, 68750b1: tests 98, 100, 117, 121, 134 |
 | Assignment cannot double-book | 11 | Two physical devices accept within a second; exactly one wins |
 | Hash is reproducible | 17 | A standalone script reproduces the Merkle root byte-for-byte |
 | Payout actually landed | 16 | Solana explorer, not the app UI |
