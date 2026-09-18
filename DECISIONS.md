@@ -1917,3 +1917,33 @@ runs recorded before this entry ran cold at 68750b1 and did compile, so the item
 forward as unverified-since rather than treated as failed.
 
 Tests, at minimum: none new.
+
+**D102 — The devnet deployment's USDC mint is one BountyCam controls, not Circle's devnet USDC.**
+`initialize` writes `config.usdc_mint` once and it cannot be changed afterwards (D83), so the
+choice is made here rather than at the keyboard. The devnet deployment uses a mint created by
+this project with 6 decimals, not Circle's canonical devnet USDC at
+`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`.
+
+Circle's testnet faucet issues 20 USDC per address and allows one request per asset per network
+every two hours. Sessions 11 and 13 to 16 run the bounty lifecycle repeatedly and need a
+requester and two Scouts funded to known balances on demand. Distributing one faucet grant with
+`spl-token transfer` covers some of that, but a test asserting an exact balance then computes
+against a shared pool, and a run that strands tokens waits two hours for more. A rate limiter
+inside an automated test loop produces failures that are not about the program.
+
+The program cannot tell the two apart. Every instruction checks `address == config.usdc_mint`
+and passes the mint's own decimals to `transfer_checked`; nothing reads an issuer, a name or a
+registry. At 6 decimals, matching USDC, the amounts, the serialised message bytes and every
+test behave identically either way.
+
+Scope. This is a development-cluster choice and nothing more. A production deployment sets
+`config.usdc_mint` to the real USDC mint on mainnet and runs the same program with no change to
+its source, its tests or its message layouts — only a different value at `initialize`. Free
+tokens exist on devnet because devnet tokens are worthless; the escrow, the transfers and the
+decimal arithmetic exercised here are the ones mainnet would run.
+
+Consequence. The configuration PDA uses seeds `[b"config"]`, so there is one configuration per
+program id and therefore one mint for this deployment. Changing it later needs a program
+upgrade carrying a migration, or a second program id.
+
+Tests, at minimum: none new. No source, error code or account layout changes.
