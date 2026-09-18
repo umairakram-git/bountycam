@@ -1,17 +1,21 @@
 pub mod accept;
+pub mod approve;
 pub mod cancel;
 pub mod create_and_fund;
 pub mod expire_accepted;
 pub mod expire_unaccepted;
 pub mod initialize;
 pub mod reject;
+pub mod release;
 pub mod submit_attestation;
 
 pub use accept::*;
+pub use approve::*;
 pub use cancel::*;
 pub use create_and_fund::*;
 pub use expire_accepted::*;
 pub use expire_unaccepted::*;
 pub use initialize::*;
 pub use reject::*;
+pub use release::*;
 pub use submit_attestation::*;

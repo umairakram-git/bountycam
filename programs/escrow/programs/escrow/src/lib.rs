@@ -99,4 +99,12 @@ pub mod escrow {
     pub fn expire_accepted(ctx: Context<ExpireAccepted>) -> Result<()> {
         instructions::expire_accepted::handle_expire_accepted(ctx)
     }
+
+    pub fn approve(ctx: Context<Approve>) -> Result<()> {
+        instructions::approve::handle_approve(ctx)
+    }
+
+    pub fn release(ctx: Context<Release>) -> Result<()> {
+        instructions::release::handle_release(ctx)
+    }
 }

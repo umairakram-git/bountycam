@@ -3071,6 +3071,34 @@ fn t113_reject_with_zero_requirement_id_fails() {
     assert_named_error(res, "InvalidRequirementId");
 }
 
+// SPEC test 112: outside Submitted, three cases: Accepted; Disputed after a
+// first reject; Paid after approve, each reached through real instructions.
+// One fault each: the state. The blockhash is expired before the loop so the
+// Disputed case's repeat of an identical reject is not refused as a duplicate.
+#[test]
+fn t112_reject_outside_submitted_fails() {
+    let mut s = setup();
+    let (accepted, _scout) = accepted_bounty(&mut s, [112u8; 16]);
+    let (disputed, _scout) = submitted_bounty(&mut s, [122u8; 16]);
+    reject_default(&mut s, disputed).unwrap();
+    let (paid, scout) = submitted_bounty(&mut s, [142u8; 16]);
+    scout_payout_ata(&mut s, &scout.pubkey());
+    approve_default(&mut s, paid, &scout.pubkey()).unwrap();
+    assert_eq!(read_bounty(&s.svm, &accepted).state, BountyState::Accepted);
+    assert_eq!(read_bounty(&s.svm, &disputed).state, BountyState::Disputed);
+    assert_eq!(read_bounty(&s.svm, &paid).state, BountyState::Paid);
+    s.svm.expire_blockhash();
+
+    let cases: [(&str, Pubkey); 3] =
+        [("Accepted", accepted), ("Disputed", disputed), ("Paid", paid)];
+    assert_eq!(cases.len(), 3);
+    for (name, bounty) in cases {
+        eprintln!("case: {name}");
+        let res = reject_default(&mut s, bounty);
+        assert_named_error(res, "BountyNotRejectable");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // SPEC 12.12: expire_unaccepted (D95)
 // ---------------------------------------------------------------------------
@@ -3490,5 +3518,463 @@ fn t133_expire_accepted_with_substituted_refund_account_fails() {
         let ix = expire_accepted_ix_with(requester, bounty, accounts);
         let res = send(&mut s.svm, &payer, &[ix], &[&payer]);
         assert_named_error_at(res, expected, "requester_ata");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SPEC 12.8: approve (D92)
+// ---------------------------------------------------------------------------
+
+/// The Scout payout account (D92): the Scout's associated token account for
+/// the configured mint, created by the requester as payer, holding nothing.
+fn scout_payout_ata(s: &mut Setup, scout: &Pubkey) -> Pubkey {
+    create_funded_ata(&mut s.svm, &s.requester, scout, &s.usdc_mint, 0)
+}
+
+/// The non-signer accounts of `approve` (SPEC 7.6). Tests that substitute one
+/// account build the default and replace one field.
+struct ApproveAccounts {
+    config: Pubkey,
+    usdc_mint: Pubkey,
+    bounty_vault: Pubkey,
+    scout: Pubkey,
+    scout_payout: Pubkey,
+    token_program: Pubkey,
+}
+
+fn approve_accounts(s: &Setup, bounty: &Pubkey, scout: Pubkey) -> ApproveAccounts {
+    ApproveAccounts {
+        config: s.config,
+        usdc_mint: s.usdc_mint,
+        bounty_vault: associated_token::get_associated_token_address(bounty, &s.usdc_mint),
+        scout,
+        scout_payout: associated_token::get_associated_token_address(&scout, &s.usdc_mint),
+        token_program: spl_token::id(),
+    }
+}
+
+fn approve_ix(s: &Setup, signer: Pubkey, bounty: Pubkey, scout: Pubkey) -> Instruction {
+    approve_ix_with(signer, bounty, approve_accounts(s, &bounty, scout))
+}
+
+fn approve_ix_with(signer: Pubkey, bounty: Pubkey, accounts: ApproveAccounts) -> Instruction {
+    Instruction::new_with_bytes(
+        escrow::id(),
+        &escrow::instruction::Approve {}.data(),
+        escrow::accounts::Approve {
+            requester: signer,
+            config: accounts.config,
+            bounty,
+            usdc_mint: accounts.usdc_mint,
+            bounty_vault: accounts.bounty_vault,
+            scout: accounts.scout,
+            scout_payout: accounts.scout_payout,
+            token_program: accounts.token_program,
+        }
+        .to_account_metas(None),
+    )
+}
+
+/// A valid approve: the requester signs and pays, naming the stored Scout.
+fn approve_default(
+    s: &mut Setup,
+    bounty: Pubkey,
+    scout: &Pubkey,
+) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+    let ix = approve_ix(s, s.requester.pubkey(), bounty, *scout);
+    send(&mut s.svm, &s.requester, &[ix], &[&s.requester])
+}
+
+// SPEC test 96: after a real submit_attestation, the Scout payout account
+// rises by the vault's entire balance; the vault is closed with its rent to
+// the requester; state Paid; the bounty account open, every other field
+// unchanged. A separate fee payer signs as payer so the requester's lamport
+// delta is exactly the vault's rent, as test 29 does.
+#[test]
+fn t96_approve_succeeds() {
+    let mut s = setup();
+    let (bounty, scout) = submitted_bounty(&mut s, [96u8; 16]);
+    let requester = s.requester.pubkey();
+    let vault = associated_token::get_associated_token_address(&bounty, &s.usdc_mint);
+    let payout = scout_payout_ata(&mut s, &scout.pubkey());
+    assert_eq!(token_balance(&s.svm, &payout), 0);
+    let before = read_bounty(&s.svm, &bounty);
+
+    let payer = arbitrary_fee_payer(&mut s);
+    let vault_rent = s.svm.get_account(&vault).unwrap().lamports;
+    let requester_before = s.svm.get_balance(&requester).unwrap();
+
+    let ix = approve_ix(&s, requester, bounty, scout.pubkey());
+    send(&mut s.svm, &payer, &[ix], &[&payer, &s.requester]).unwrap();
+
+    assert_eq!(token_balance(&s.svm, &payout), REWARD);
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE - REWARD);
+    assert!(is_closed(&s.svm, &vault), "vault closed");
+    let requester_after = s.svm.get_balance(&requester).unwrap();
+    assert_eq!(requester_after - requester_before, vault_rent);
+
+    assert!(!is_closed(&s.svm, &bounty), "bounty open");
+    let after = read_bounty(&s.svm, &bounty);
+    assert_eq!(after.state, BountyState::Paid);
+    assert_fixed_fields_equal(&before, &after);
+    assert_eq!(after.scout, Some(scout.pubkey()));
+    assert_eq!(after.deadline, before.deadline);
+    assert_eq!(after.submitted_at, before.submitted_at);
+    assert_eq!(after.evidence_root, before.evidence_root);
+    assert_eq!(after.achieved_assurance, before.achieved_assurance);
+    assert_eq!(after.failed_requirement_id, None);
+}
+
+// SPEC test 97: tokens donated to the vault first; the Scout receives reward
+// plus donation (D92).
+#[test]
+fn t97_approve_pays_donated_tokens_to_scout() {
+    let mut s = setup();
+    let (bounty, scout) = submitted_bounty(&mut s, [97u8; 16]);
+    let vault = associated_token::get_associated_token_address(&bounty, &s.usdc_mint);
+    let payout = scout_payout_ata(&mut s, &scout.pubkey());
+
+    const DONATION: u64 = 1_234_567;
+    donate_to_vault(&mut s, &vault, DONATION);
+    assert_eq!(token_balance(&s.svm, &vault), REWARD + DONATION);
+
+    approve_default(&mut s, bounty, &scout.pubkey()).unwrap();
+    assert_eq!(token_balance(&s.svm, &payout), REWARD + DONATION);
+    assert!(is_closed(&s.svm, &vault), "vault closed");
+    assert_eq!(read_bounty(&s.svm, &bounty).state, BountyState::Paid);
+}
+
+// SPEC test 98: signer other than the requester, two cases: the Scout and a
+// fresh key. One fault each: the signer, who also pays.
+#[test]
+fn t98_approve_by_non_requester_fails() {
+    let mut s = setup();
+    let (bounty, scout) = submitted_bounty(&mut s, [98u8; 16]);
+    scout_payout_ata(&mut s, &scout.pubkey());
+    let fresh = new_scout(&mut s);
+    let cases: [(&str, &Keypair); 2] = [("the Scout", &scout), ("a fresh key", &fresh)];
+    assert_eq!(cases.len(), 2);
+    for (name, signer) in cases {
+        eprintln!("case: {name}");
+        let ix = approve_ix(&s, signer.pubkey(), bounty, scout.pubkey());
+        let res = send(&mut s.svm, signer, &[ix], &[signer]);
+        assert_named_error(res, "UnauthorizedRequester");
+    }
+}
+
+// SPEC test 99: outside Submitted, two cases: Accepted with no attestation,
+// and Disputed after a real reject. One fault each: the state.
+#[test]
+fn t99_approve_outside_submitted_fails() {
+    let mut s = setup();
+    let (accepted, accepted_scout) = accepted_bounty(&mut s, [99u8; 16]);
+    scout_payout_ata(&mut s, &accepted_scout.pubkey());
+    let (disputed, disputed_scout) = submitted_bounty(&mut s, [109u8; 16]);
+    scout_payout_ata(&mut s, &disputed_scout.pubkey());
+    reject_default(&mut s, disputed).unwrap();
+    assert_eq!(read_bounty(&s.svm, &disputed).state, BountyState::Disputed);
+
+    let cases: [(&str, Pubkey, Pubkey); 2] = [
+        ("Accepted", accepted, accepted_scout.pubkey()),
+        ("Disputed", disputed, disputed_scout.pubkey()),
+    ];
+    assert_eq!(cases.len(), 2);
+    for (name, bounty, scout) in cases {
+        eprintln!("case: {name}");
+        let res = approve_default(&mut s, bounty, &scout);
+        assert_named_error(res, "BountyNotApprovable");
+    }
+}
+
+// SPEC test 100: payout substitutes, four cases, each one fault. The first
+// three substitute scout_payout alone; the fourth substitutes the scout
+// account and derives scout_payout from it, so ScoutMismatch is the only
+// fault. Each is pinned to the account the SPEC names.
+#[test]
+fn t100_approve_with_substituted_payout_fails() {
+    let mut s = setup();
+    let (bounty, scout) = submitted_bounty(&mut s, [100u8; 16]);
+    let requester = s.requester.pubkey();
+    scout_payout_ata(&mut s, &scout.pubkey());
+    let attacker = Keypair::new();
+    let attacker_ata = scout_payout_ata(&mut s, &attacker.pubkey());
+    let other_mint = create_mint(&mut s.svm, &s.requester);
+    let other_mint_ata =
+        create_funded_ata(&mut s.svm, &s.requester, &scout.pubkey(), &other_mint, 0);
+    let other_wallet = Keypair::new();
+    let other_wallet_ata = scout_payout_ata(&mut s, &other_wallet.pubkey());
+
+    let default = |s: &Setup| approve_accounts(s, &bounty, scout.pubkey());
+    let cases: [(&str, ApproveAccounts, &str, &str); 4] = [
+        (
+            "the requester's associated token account",
+            ApproveAccounts { scout_payout: s.requester_ata, ..default(&s) },
+            "ConstraintTokenOwner",
+            "scout_payout",
+        ),
+        (
+            "an attacker's associated token account",
+            ApproveAccounts { scout_payout: attacker_ata, ..default(&s) },
+            "ConstraintTokenOwner",
+            "scout_payout",
+        ),
+        (
+            "the Scout's account for a second mint",
+            ApproveAccounts { scout_payout: other_mint_ata, ..default(&s) },
+            "ConstraintAssociated",
+            "scout_payout",
+        ),
+        (
+            "another wallet as scout with its own account",
+            ApproveAccounts {
+                scout: other_wallet.pubkey(),
+                scout_payout: other_wallet_ata,
+                ..default(&s)
+            },
+            "ScoutMismatch",
+            "scout",
+        ),
+    ];
+    assert_eq!(cases.len(), 4);
+    for (name, accounts, expected, account) in cases {
+        eprintln!("case: {name}");
+        let ix = approve_ix_with(requester, bounty, accounts);
+        let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+        assert_named_error_at(res, expected, account);
+    }
+}
+
+// SPEC test 101: scout_payout set to the vault address. One fault: the token
+// account. Anchor's duplicate-mutable-account check names the later-declared
+// field, scout_payout (D87's mechanism).
+#[test]
+fn t101_approve_with_vault_as_scout_payout_fails() {
+    let mut s = setup();
+    let (bounty, scout) = submitted_bounty(&mut s, [101u8; 16]);
+    scout_payout_ata(&mut s, &scout.pubkey());
+    let vault = associated_token::get_associated_token_address(&bounty, &s.usdc_mint);
+
+    let accounts = ApproveAccounts {
+        scout_payout: vault,
+        ..approve_accounts(&s, &bounty, scout.pubkey())
+    };
+    let ix = approve_ix_with(s.requester.pubkey(), bounty, accounts);
+    let res = send(&mut s.svm, &s.requester, &[ix], &[&s.requester]);
+    assert_named_error_at(res, "ConstraintDuplicateMutableAccount", "scout_payout");
+}
+
+// SPEC test 102: the Scout has no associated token account for the configured
+// mint. One fault: the missing account. Anchor's load fails before any
+// constraint; the bounty account and vault balance are unchanged (D92).
+#[test]
+fn t102_approve_without_scout_payout_account_fails() {
+    let mut s = setup();
+    let (bounty, scout) = submitted_bounty(&mut s, [102u8; 16]);
+    let vault = associated_token::get_associated_token_address(&bounty, &s.usdc_mint);
+    let payout = associated_token::get_associated_token_address(&scout.pubkey(), &s.usdc_mint);
+    assert!(s.svm.get_account(&payout).is_none(), "no payout account exists");
+    let snapshot = s.svm.get_account(&bounty).unwrap().data;
+
+    let res = approve_default(&mut s, bounty, &scout.pubkey());
+    assert_named_error(res, "AccountNotInitialized");
+    assert_eq!(s.svm.get_account(&bounty).unwrap().data, snapshot, "byte-identical");
+    assert_eq!(token_balance(&s.svm, &vault), REWARD);
+}
+
+// ---------------------------------------------------------------------------
+// SPEC 12.9: release (D92)
+// ---------------------------------------------------------------------------
+
+/// `release` over `approve`'s account list (SPEC 7.7); `requester` is the
+/// unsigned account that receives the vault's rent.
+fn release_ix(s: &Setup, requester: Pubkey, bounty: Pubkey, scout: Pubkey) -> Instruction {
+    release_ix_with(requester, bounty, approve_accounts(s, &bounty, scout))
+}
+
+fn release_ix_with(requester: Pubkey, bounty: Pubkey, accounts: ApproveAccounts) -> Instruction {
+    Instruction::new_with_bytes(
+        escrow::id(),
+        &escrow::instruction::Release {}.data(),
+        escrow::accounts::Release {
+            requester,
+            config: accounts.config,
+            bounty,
+            usdc_mint: accounts.usdc_mint,
+            bounty_vault: accounts.bounty_vault,
+            scout: accounts.scout,
+            scout_payout: accounts.scout_payout,
+            token_program: accounts.token_program,
+        }
+        .to_account_metas(None),
+    )
+}
+
+/// Sets the clock one second after the bounty's review window end and returns
+/// that end.
+fn set_clock_past_review_window(s: &mut Setup, bounty: &Pubkey) -> i64 {
+    let end = review_window_end(&s.svm, bounty);
+    assert_eq!(end, NOW + REVIEW_WINDOW);
+    set_clock(&mut s.svm, end + 1);
+    end
+}
+
+/// A valid release: an arbitrary fee payer submits it with no other signer,
+/// naming the bounty's requester and stored Scout.
+fn release_default(
+    s: &mut Setup,
+    bounty: Pubkey,
+    scout: &Pubkey,
+) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+    let payer = arbitrary_fee_payer(s);
+    let ix = release_ix(s, s.requester.pubkey(), bounty, *scout);
+    send(&mut s.svm, &payer, &[ix], &[&payer])
+}
+
+// SPEC test 103: one second after the review window end, submitted by an
+// arbitrary fee payer with no other signer: test 96's effects, state Paid.
+#[test]
+fn t103_release_succeeds() {
+    let mut s = setup();
+    let (bounty, scout) = submitted_bounty(&mut s, [103u8; 16]);
+    let requester = s.requester.pubkey();
+    let vault = associated_token::get_associated_token_address(&bounty, &s.usdc_mint);
+    let payout = scout_payout_ata(&mut s, &scout.pubkey());
+    assert_eq!(token_balance(&s.svm, &payout), 0);
+    let before = read_bounty(&s.svm, &bounty);
+    set_clock_past_review_window(&mut s, &bounty);
+
+    let vault_rent = s.svm.get_account(&vault).unwrap().lamports;
+    let requester_before = s.svm.get_balance(&requester).unwrap();
+
+    release_default(&mut s, bounty, &scout.pubkey()).unwrap();
+
+    assert_eq!(token_balance(&s.svm, &payout), REWARD);
+    assert_eq!(token_balance(&s.svm, &s.requester_ata), INITIAL_BALANCE - REWARD);
+    assert!(is_closed(&s.svm, &vault), "vault closed");
+    let requester_after = s.svm.get_balance(&requester).unwrap();
+    assert_eq!(requester_after - requester_before, vault_rent);
+
+    assert!(!is_closed(&s.svm, &bounty), "bounty open");
+    let after = read_bounty(&s.svm, &bounty);
+    assert_eq!(after.state, BountyState::Paid);
+    assert_fixed_fields_equal(&before, &after);
+    assert_eq!(after.scout, Some(scout.pubkey()));
+    assert_eq!(after.deadline, before.deadline);
+    assert_eq!(after.submitted_at, before.submitted_at);
+    assert_eq!(after.evidence_root, before.evidence_root);
+    assert_eq!(after.achieved_assurance, before.achieved_assurance);
+    assert_eq!(after.failed_requirement_id, None);
+}
+
+// SPEC test 104: at exactly the review window end. One fault: the clock.
+#[test]
+fn t104_release_at_exactly_review_window_end_fails() {
+    let mut s = setup();
+    let (bounty, scout) = submitted_bounty(&mut s, [104u8; 16]);
+    scout_payout_ata(&mut s, &scout.pubkey());
+    let end = review_window_end(&s.svm, &bounty);
+    set_clock(&mut s.svm, end);
+
+    let res = release_default(&mut s, bounty, &scout.pubkey());
+    assert_named_error(res, "ReviewWindowOpen");
+}
+
+// SPEC test 105: outside Submitted, test 99's two cases: Accepted with no
+// attestation, and Disputed after a real reject. One fault each: the state;
+// the clock is past the review window end, so time is not one.
+#[test]
+fn t105_release_outside_submitted_fails() {
+    let mut s = setup();
+    let (accepted, accepted_scout) = accepted_bounty(&mut s, [105u8; 16]);
+    scout_payout_ata(&mut s, &accepted_scout.pubkey());
+    let (disputed, disputed_scout) = submitted_bounty(&mut s, [115u8; 16]);
+    scout_payout_ata(&mut s, &disputed_scout.pubkey());
+    reject_default(&mut s, disputed).unwrap();
+    assert_eq!(read_bounty(&s.svm, &disputed).state, BountyState::Disputed);
+    set_clock(&mut s.svm, NOW + REVIEW_WINDOW + 1);
+
+    let cases: [(&str, Pubkey, Pubkey); 2] = [
+        ("Accepted", accepted, accepted_scout.pubkey()),
+        ("Disputed", disputed, disputed_scout.pubkey()),
+    ];
+    assert_eq!(cases.len(), 2);
+    for (name, bounty, scout) in cases {
+        eprintln!("case: {name}");
+        let res = release_default(&mut s, bounty, &scout);
+        assert_named_error(res, "BountyNotReleasable");
+    }
+}
+
+// SPEC test 106: a requester account other than the bounty's requester. One
+// fault: that account, which here is only the rent destination.
+#[test]
+fn t106_release_with_other_requester_fails() {
+    let mut s = setup();
+    let (bounty, scout) = submitted_bounty(&mut s, [106u8; 16]);
+    scout_payout_ata(&mut s, &scout.pubkey());
+    set_clock_past_review_window(&mut s, &bounty);
+    let other = Keypair::new();
+
+    let payer = arbitrary_fee_payer(&mut s);
+    let ix = release_ix(&s, other.pubkey(), bounty, scout.pubkey());
+    let res = send(&mut s.svm, &payer, &[ix], &[&payer]);
+    assert_named_error(res, "RequesterAccountMismatch");
+}
+
+// SPEC test 107: payout substitutes, test 100's four cases and errors, each
+// one fault, pinned to the same accounts.
+#[test]
+fn t107_release_with_substituted_payout_fails() {
+    let mut s = setup();
+    let (bounty, scout) = submitted_bounty(&mut s, [107u8; 16]);
+    let requester = s.requester.pubkey();
+    scout_payout_ata(&mut s, &scout.pubkey());
+    let attacker = Keypair::new();
+    let attacker_ata = scout_payout_ata(&mut s, &attacker.pubkey());
+    let other_mint = create_mint(&mut s.svm, &s.requester);
+    let other_mint_ata =
+        create_funded_ata(&mut s.svm, &s.requester, &scout.pubkey(), &other_mint, 0);
+    let other_wallet = Keypair::new();
+    let other_wallet_ata = scout_payout_ata(&mut s, &other_wallet.pubkey());
+    set_clock_past_review_window(&mut s, &bounty);
+
+    let default = |s: &Setup| approve_accounts(s, &bounty, scout.pubkey());
+    let cases: [(&str, ApproveAccounts, &str, &str); 4] = [
+        (
+            "the requester's associated token account",
+            ApproveAccounts { scout_payout: s.requester_ata, ..default(&s) },
+            "ConstraintTokenOwner",
+            "scout_payout",
+        ),
+        (
+            "an attacker's associated token account",
+            ApproveAccounts { scout_payout: attacker_ata, ..default(&s) },
+            "ConstraintTokenOwner",
+            "scout_payout",
+        ),
+        (
+            "the Scout's account for a second mint",
+            ApproveAccounts { scout_payout: other_mint_ata, ..default(&s) },
+            "ConstraintAssociated",
+            "scout_payout",
+        ),
+        (
+            "another wallet as scout with its own account",
+            ApproveAccounts {
+                scout: other_wallet.pubkey(),
+                scout_payout: other_wallet_ata,
+                ..default(&s)
+            },
+            "ScoutMismatch",
+            "scout",
+        ),
+    ];
+    assert_eq!(cases.len(), 4);
+    for (name, accounts, expected, account) in cases {
+        eprintln!("case: {name}");
+        let payer = arbitrary_fee_payer(&mut s);
+        let ix = release_ix_with(requester, bounty, accounts);
+        let res = send(&mut s.svm, &payer, &[ix], &[&payer]);
+        assert_named_error_at(res, expected, account);
     }
 }
