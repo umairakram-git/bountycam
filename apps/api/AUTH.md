@@ -572,20 +572,36 @@ two expected versions (section 3.2).
   possession only. Session 11 ruled it out of the mobile scope: it has no specification, and the
   check belongs server-side at voucher issuance over the SIWS-proved wallet, not on the device.
 
-### 14.2 OPEN — `domain` value for a native Android app
+### 14.2 RESOLVED — `domain` value for a native Android app (D106)
 
-Item e is **not settled by the sources**. The SIWS spec says the wallet "must determine
-the domain" when the dapp does not provide one, with no rule for native apps. The MWA
-spec (commit `0e6d7e75`) delegates `sign_in_payload` fields to the SIWS spec and ties
-app identity to a web domain via Digital Asset Links, but never states what a wallet
-places in — or whether it honours — a dapp-supplied `domain` for a native app.
+The sources did not settle it. The SIWS spec says the wallet "must determine the domain"
+when the dapp does not provide one, with no rule for native apps. The MWA spec (commit
+`0e6d7e75`) delegates `sign_in_payload` fields to the SIWS spec and ties app identity to a
+web domain via Digital Asset Links, but never states what a wallet places in — or whether it
+honours — a dapp-supplied `domain` for a native app.
 
-Interim behaviour: the server issues the configured `SIWS_DOMAIN` (placeholder
-`app.example.com`) and requires exact match on verify. **Validate on device in Session
-10**: confirm the Seeker wallet echoes the supplied domain unchanged; if it substitutes
-its own value, record what it sends and revisit the configured value. Do not guess.
+Measured on device, 20 September (D106). Seeker with Seed Vault Wallet, two runs, app
+identity `uri` deliberately set to `https://bountycam.invalid` while the server issued
+`app.example.com`. **The wallet echoes the supplied domain unchanged.** The decoded message
+carried `app.example.com`, no `URI:` line appeared, and `Chain ID: devnet` passed through in
+canonical form. All eight issued fields appeared in the signed message with identical
+values.
 
-Also OPEN — the fallback signing path. On device in Session 10, confirm that a signature
-obtained via MWA `sign_messages` verifies over the exact message bytes with **no prefix**:
-some signing paths prepend their own framing, which would break step 4 of section 6.
-Record the result either way.
+**A signature returned in `sign_in_result` verifies over the exact bytes with no prefix.**
+Both runs returned 200 from verify, which applies section 6 step 1's 64-byte length check
+and step 4's ed25519 verification over the exact received bytes.
+
+Also measured: a second `authorize` carrying `auth_token` and `sign_in_payload` together
+returns `sign_in_result`, so sign-in costs one wallet approval rather than two.
+
+The server continues to issue the configured `SIWS_DOMAIN` and require exact match on
+verify. The placeholder `app.example.com` stands until a real host is chosen; that is now a
+configuration change plus a smoke test, and it is the same question as the app identity
+`uri` and the Digital Asset Links file. Owed by Session 24's packaging.
+
+Still OPEN — the fallback signing path. The `sign_messages` fallback of section 2 is
+unimplemented and unmeasured. Whether a signature obtained that way verifies over the exact
+message bytes with no prefix is untested for the SIWS message specifically; the September
+MWA spike showed Seed Vault Wallet returning a bare 64-byte signature over an arbitrary
+message, which is suggestive but not the same test. Solflare is untested for
+`sign_in_payload` on either path.
