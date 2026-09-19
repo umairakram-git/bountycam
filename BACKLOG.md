@@ -1,6 +1,6 @@
 # BountyCam — Backlog
 
-**As at:** 19 September 2026 · 19 days to deadline
+**As at:** 20 September 2026 · 18 days to deadline
 
 ---
 
@@ -396,6 +396,60 @@ find the parent; decide whether it matters (Session 7).
   `bc-initialize-negatives.mjs`, sha
   `c3b04c139fac65378fa3236d161c222af34d2b4f9077b0411130f8595e0d2ba1`, ran from `/tmp/bc-init`.
   Decide whether operational scripts belong under version control before the next one is written.
+
+
+---
+
+## Session 12 (20 September)
+
+**Closed.** Each of these is recorded here rather than struck through in place; the items
+above still read as open.
+
+- `MEMORY.md` names a missing file — the file itself does not exist anywhere in the repo.
+  Verified by `find` at 20 September. Stale rather than open.
+- `apps/mobile/.claude/settings.json` from the Expo template — gone. `apps/mobile` holds no
+  `.claude` directory.
+- pnpm is not pinned — `packageManager: pnpm@11.22.0` is in the root manifest.
+- Mobile pre-decisions, three of five: pnpm's build gate fired when web3.js landed and was
+  answered with `allowBuilds: false` for `bufferutil` and `utf-8-validate`; the
+  `@noble/hashes` 1.8.0 against 2.4.0 split is closed by D104's evidence, since
+  `apps/mobile` has no `@noble` symlink at all and cannot reach 1.8.0 through
+  `packages/shared`; the app identity `uri` question is answered by D106. The TypeScript 5.9
+  against Expo's 6.0.3 split remains open.
+- Whether operational scripts belong under version control — yes, and their values do not.
+  `apps/api/scripts/dev.sh` is committed; `~/bountycam-env/api.env` is mode 600 outside the
+  repo.
+
+**New.**
+
+- **`userInterfaceStyle` is inert on Android** without `expo-system-ui`. `expo prebuild`
+  says so and `app.json` declares `light`. Nothing breaks today; it matters at Session 21,
+  whose Dark Mode work assumes an appearance setting that currently does nothing.
+- **The dev-client APK is not reproducible from the repo alone.** `android/` is ignored, so
+  the build depends on the repo plus the lockfile plus the Expo version. Enough for devnet,
+  not enough for a store submission. Session 24 needs a recorded build procedure, not just a
+  signing key.
+- **`com.anonymous.mobile` is still the template package id**, in `namespace`,
+  `applicationId` and the Kotlin package path. Because `android/` is generated, renaming
+  means editing `app.json` and regenerating — not hand-editing Kotlin. Deferred to Session
+  24, where the release certificate and the Digital Asset Links file arrive together.
+- **The `sign_messages` fallback is unimplemented.** AUTH.md section 2 names it and section
+  14.2 records it as still open. Adding it means `@solana/wallet-standard-util` in
+  `apps/mobile`, which is a dependency review under SECURITY.md section 17. Solflare is
+  untested for `sign_in_payload`, so the requester side on the A30 is unproven.
+- **The diagnostic sign-in screen is throwaway.** D105's exception is scoped to a debug
+  build; `App.tsx` and the log pane are deleted when the real sign-in UI lands.
+- **No HTTP probe on the Seeker.** No `curl` in the shell; `nc` exists but returns nothing
+  against a reverse-forwarded port, cause unknown. Test through the app, not through
+  `adb shell`. The tunnel itself is proven by Metro on `tcp:8081`.
+- **MWA 2.3.0 upstream warnings.** It sets its namespace via the manifest `package`
+  attribute, which current AGP ignores, and uses the deprecated `TurboReactPackage`. Both
+  are upstream and both will surface again when React Native moves.
+
+**Restated, still open.** The eligibility service has no owning session and is the critical
+path: no voucher, no on-chain `accept`, no end-to-end run. Session numbering drifted again —
+Session 11's mobile block became Session 12, so discovery, bounty detail, accept and the
+assignment race test have no number.
 
 ---
 
