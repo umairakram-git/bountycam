@@ -260,7 +260,12 @@ Rules:
   `git ls-files` that no key is tracked.
 - Never log keys, seeds, bearer tokens, `Authorization` headers, JWTs, authentication
   signatures, presigned URLs, raw evidence or full request bodies. Public transaction
-  signatures may be logged.
+  signatures may be logged. One exception (D105): a debug-build diagnostic screen may
+  display a SIWS message and its signature, because a SIWS message is public by
+  construction and its signature authenticates a single-use nonce that is consumed on
+  first verify. Display only — not persistence, not transmission, not a release build,
+  not a log file. The exception does not extend to JWTs, MWA authorization tokens,
+  presigned URLs or key material.
 - Test keys are published RFC vectors or generated per run. A test key never signs
   anything on devnet or beyond.
 - Devnet uses disposable development keys, never production keys.
