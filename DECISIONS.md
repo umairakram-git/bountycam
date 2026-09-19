@@ -1963,7 +1963,7 @@ Allocation:
 | Value | Use |
 |---|---|
 | 0 | never deployed — what a zeroed struct yields; vector ATT-09 |
-| 1 | golden vectors, litesvm suite, localnet |
+| 1 | golden vectors, litesvm suite, ordinary localnet development |
 | 2 | devnet — the deployment at `6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS` |
 | 7 | reserved — already a mismatch fixture |
 | 10 | mainnet, when it exists |
@@ -1981,6 +1981,12 @@ configuration account and never compile it in. A hardcoded value that disagrees 
 makes every voucher and every attestation fail reconstruction, and because the configuration is
 immutable the correction would be a program upgrade carrying a migration (D83). The litesvm
 suite is the one exception, and only because it initialises its own configuration per test.
+
+Rehearsals. A rehearsal of a cluster's `initialize` passes that cluster's `deployment_id`, not
+localnet's. The point of the rehearsal is that the bytes signed in it are the bytes sent for real,
+so an argument that differs makes it a resemblance rather than a proof. Session 11 rehearsed devnet
+on localnet with `deployment_id` 2. Row 1 above governs ordinary localnet development, where no
+devnet run is being rehearsed. Amended 19 September; no program behaviour changes.
 
 Scope. This fixes the value for the devnet deployment named above. Another cluster takes another
 value under this table. Changing this one needs an upgrade with a migration, or a new program id.

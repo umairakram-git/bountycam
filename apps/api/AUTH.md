@@ -558,8 +558,9 @@ two expected versions (section 3.2).
 - **No rate limiting** on auth endpoints. Accepted for devnet.
 - **Trusted relayer for liveness** (D2): the relayer can stall but cannot move funds.
 - **Devnet only.** Mainnet is a configuration change (section 4), not a code change.
-- **Seeker SGT verification deferred to Session 10.** Sign-in proves key possession
-  only; Seeker-gating arrives with the mobile session.
+- **Seeker SGT verification deferred to the eligibility-service session.** Sign-in proves key
+  possession only. Session 11 ruled it out of the mobile scope: it has no specification, and the
+  check belongs server-side at voucher issuance over the SIWS-proved wallet, not on the device.
 
 ### 14.2 OPEN — `domain` value for a native Android app
 

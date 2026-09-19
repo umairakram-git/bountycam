@@ -1,6 +1,6 @@
 # BountyCam — Backlog
 
-**As at:** 17 September 2026 · 21 days to deadline
+**As at:** 19 September 2026 · 19 days to deadline
 
 ---
 
@@ -209,12 +209,16 @@ find the parent; decide whether it matters (Session 7).
   can hold a valid attestation. Any one requires a program-bound bounty
   incarnation identifier. Session 9 assessment (D96): the third trigger is not
   tripped; only `expire_unaccepted` closes a bounty, from `Funded`.
-- **Rehearse `initialize` on localnet (D83).** The eligibility and arbiter keys
+- ~~**Rehearse `initialize` on localnet (D83).** The eligibility and arbiter keys
   were generated 18 September under `~/bountycam-keys/`, mode 600: eligibility
   `Bg6SsTTH6EX5AaeQQ9i4yhDTwsSjxnHx9AV8cqa97xmp`, arbiter
   `6YPX1obwh62N2DDyxtNa2RwkriWUUWLzjAvEWJFbvK1K`. The rehearsal with the exact
   devnet public keys is still owed before `initialize` runs on devnet: the
-  configuration is immutable, so a mistake costs an upgrade with a migration.
+  configuration is immutable, so a mistake costs an upgrade with a migration.~~
+  Done 19 September: rehearsed on localnet with the same program id, ProgramData
+  address, mint address, upgrade authority and script file, only `--url` differing,
+  then run on devnet. SPEC section 13's three operational steps are now all
+  discharged.
 - ~~**Escrow test dev-dependencies are caret ranges.** `litesvm`,
   `solana-message`, `solana-transaction`, `solana-signer` and `solana-keypair`
   in `programs/escrow/programs/escrow/Cargo.toml` violate SECURITY.md section
@@ -356,18 +360,42 @@ find the parent; decide whether it matters (Session 7).
 
 ## Open items from Session 10 (18 September)
 
-- **`initialize` has not run on devnet.** The program is deployed with no configuration account,
-  so every instruction fails on the config PDA. Owed: the localnet rehearsal, then `initialize`
-  with `deployment_id` 2 (D103), mint `ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR` (D102),
-  attester `2KAuf8WWHGDm4rA1MCCQ9UciEAiqyTHaKeyBHZFF3wZ5`, eligibility
-  `Bg6SsTTH6EX5AaeQQ9i4yhDTwsSjxnHx9AV8cqa97xmp` and arbiter
-  `6YPX1obwh62N2DDyxtNa2RwkriWUUWLzjAvEWJFbvK1K`, signed by the upgrade authority.
+- ~~**`initialize` has not run on devnet.** The program is deployed with no configuration account,
+  so every instruction fails on the config PDA.~~ Done 19 September. Configuration account
+  `DqHBCi3KYaZSSgMGcPY8QftYnns8k2vcg9GCJejKBaAb`, bump 255, 138 bytes, signature
+  `s2ebAtTqPC7jPcujaf1ciCAWEEc6rk35RVDmpzVMSV1V8Z7G2Rpdu22FBTke5SSpf5aYGQLZ95HrQ4gNezmCkhD`,
+  finalized slot 500795088. It is immutable.
 - **The devnet IDL is still the Session 4 one.** The upgrade landed; the IDL metadata write did
   not. Clients build from the local IDL file, so nothing is blocked.
 - **MESSAGES.md section 7 says `submit_attestation` does not exist.** It does. The owed check is
   its real account list against the eighteen-account ceiling. Session 13.
 - **MESSAGES.md section 10 lists seven implementation discrepancies as open.** All seven have
   since landed. The section is stale rather than wrong; it needs a wording pass.
+
+---
+
+## Open items from Session 11 (19 September)
+
+- **The eligibility service has no owning session.** Voucher issuance (D68) is a hard dependency
+  of on-chain `accept`: without it no bounty can be accepted at all. It also owns SGT verification,
+  which must run server-side over the SIWS-proved wallet — a client asserting Seeker ownership
+  proves nothing — and it must rule OPEN-1 first, because every bounty names an eligibility
+  profile and only `A4_SEEKER_V1` is defined. Specification before code, as always. Assign a
+  session before Session 12 specifies the accept flow.
+- **Seeker gating is out of the demo until that session lands.** The second handset is a Samsung
+  A30, so a Seeker-only profile would also block the two-device race gate.
+- **Session numbering drifted after Session 10.** The remaining-plan rows and the verification-gate
+  table were written before the shift. The race gate is Session 12, not 11.
+- **Mobile pre-decisions, owed before the mobile build opens.** pnpm 11's build-approval gate fires
+  when web3.js lands in `apps/mobile` (`allowBuilds: false` for `bufferutil` and `utf-8-validate`);
+  the `@noble/hashes` 1.8.0 against 2.4.0 split; the TypeScript 5.9 against Expo's own;
+  `apps/mobile/.claude/settings.json` from the template; and the app identity `uri`, which is the
+  same question as AUTH.md section 14.2's domain value.
+- **The rehearsal client is not in the repo.** `bc-initialize.mjs`, sha
+  `0c6ee7549b8ee57ba9144f3537f211a2ea5b64cc7b37206c830db8dc2c930f0e`, and
+  `bc-initialize-negatives.mjs`, sha
+  `c3b04c139fac65378fa3236d161c222af34d2b4f9077b0411130f8595e0d2ba1`, ran from `/tmp/bc-init`.
+  Decide whether operational scripts belong under version control before the next one is written.
 
 ---
 
@@ -474,8 +502,9 @@ find the parent; decide whether it matters (Session 7).
 Revised from the original four-week plan after the D10 positioning change.
 Sessions 1 to 6, 7a and 7b complete; Session 8's escrow build complete, its capture nonce
 issuance not built; Session 9 complete, specification and build. Session 10 discharged SPEC task
-25 and deployed the escrow to devnet; `initialize` has not run, so the mobile scope Session 10
-planned moves to Session 11 and the sessions after it shift by one.
+25 and deployed the escrow to devnet. Session 11 rehearsed and ran `initialize`, then took the
+mobile sign-in scope Session 10 had planned; SGT verification left it for the eligibility-service
+session. Every row from 10 onward therefore shifts by one against the numbering below.
 
 ### Week 1 remainder
 
@@ -546,7 +575,7 @@ Four things where a false pass is not discovered until week four.
 | Gate | Session | How to check |
 |---|---|---|
 | Escrow cannot be drained | 9 | **Passed 18 Sep**, 68750b1: tests 98, 100, 117, 121, 134 |
-| Assignment cannot double-book | 11 | Two physical devices accept within a second; exactly one wins |
+| Assignment cannot double-book | 12 | Two physical devices accept within a second; exactly one wins |
 | Hash is reproducible | 17 | A standalone script reproduces the Merkle root byte-for-byte |
 | Payout actually landed | 16 | Solana explorer, not the app UI |
 

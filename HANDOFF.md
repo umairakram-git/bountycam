@@ -1,13 +1,15 @@
 # BountyCam — Handoff
 
-**Date:** 18 September 2026
+**Date:** 19 September 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
-spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification and build
-**Next session:** Session 11 — rehearse and run `initialize` on devnet, then the mobile scope
-Session 10 did not reach: MWA sign-in, SIWS on device, SGT verification. The escrow is deployed
-at eleven instructions with no configuration account, so every instruction fails on the config
-PDA until `initialize` runs.
-**Deadline:** 8 October 2026 (20 days remaining)
+spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification and build;
+Session 10; Session 11 escrow initialisation
+**Next session:** Session 12 — mobile discovery, bounty detail, accept, the assignment race test.
+Session 11 ran `initialize` on devnet; its mobile block, MWA sign-in and SIWS on device, follows
+in the same session. SGT verification moved to the eligibility-service session, which has no
+number yet. The escrow is deployed at eleven instructions and initialised: the configuration
+account exists on devnet at `DqHBCi3KYaZSSgMGcPY8QftYnns8k2vcg9GCJejKBaAb`.
+**Deadline:** 8 October 2026 (19 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
 
@@ -59,7 +61,15 @@ sufficient for truth.
 **Deployed program:** `6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS`, carrying the eleven-
 instruction layout since 18 September. ProgramData `EMHjBWwTWVMyucASSXTZ3YN1uGAs5awDD6rX4UpZRaKf`,
 488736 bytes. The published IDL is still the Session 4 one: the upgrade landed, the IDL metadata
-write failed. No configuration account exists, so every instruction fails on the config PDA.
+write failed. The configuration account was created on 19 September and is described in the
+Session 11 section below.
+
+**Devnet configuration account (D83):** `DqHBCi3KYaZSSgMGcPY8QftYnns8k2vcg9GCJejKBaAb`, canonical
+bump 255, 138 bytes, owned by the escrow program. `deployment_id` 2, mint
+`ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR`, eligibility
+`Bg6SsTTH6EX5AaeQQ9i4yhDTwsSjxnHx9AV8cqa97xmp`, attester
+`2KAuf8WWHGDm4rA1MCCQ9UciEAiqyTHaKeyBHZFF3wZ5`, arbiter
+`6YPX1obwh62N2DDyxtNa2RwkriWUUWLzjAvEWJFbvK1K`. Immutable.
 
 **Devnet USDC mint (D102):** `ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR`, 6 decimals, mint
 authority the upgrade authority, no freeze authority.
@@ -1027,8 +1037,66 @@ makes "the chain holds the reviewed bytes" checkable rather than assumed.
 
 SPEC 7.1 check 3 requires the signer to be the on-chain upgrade authority, so
 `upgrade-authority.json` signs `initialize` and the other three are arguments, never signers.
-Checks 4 and 5 hold: three distinct keys, none all-zero. The localnet rehearsal with these exact
-keys is still owed (D83).
+Checks 4 and 5 hold: three distinct keys, none all-zero. ~~The localnet rehearsal with these
+exact keys is still owed (D83).~~ Rehearsed and written on 19 September; see Session 11 below.
+
+---
+
+## Session 11 — `initialize` rehearsed and run on devnet (19 September)
+
+No Claude Code session and no repo source touched. The rehearsal client lives outside the repo at
+`/tmp/bc-init` with `@solana/web3.js` 1.99.0 installed by npm, so the pnpm workspace is untouched.
+
+**The rehearsal was a replica, not an analogue.** Localnet ran the same program id from
+`escrow-keypair.json`, therefore the same ProgramData address
+`EMHjBWwTWVMyucASSXTZ3YN1uGAs5awDD6rX4UpZRaKf` and the same config PDA; the same mint address
+from `usdc-mint.json`; the same upgrade authority as the recorded one; and the same script file,
+sha `0c6ee7549b8ee57ba9144f3537f211a2ea5b64cc7b37206c830db8dc2c930f0e`, with every argument
+embedded in it rather than typed. Only `--url` differed between the rehearsal
+and the devnet run. A rehearsal that changes an argument is not a rehearsal, which is why
+`deployment_id` 2 was used on localnet as well (D103 amended).
+
+**Preconditions read from the chain first.** HEAD and origin/main at 49d0c82, clean tree. A cold
+counted run under D101 produced the 565544-byte object `bbf2e314...`, whose stripped copy `cmp`
+reports byte-identical to the first 456736 bytes of `solana program dump`; the remaining 32000 are
+zero. `test_escrow` 139, escrow unit 2, `cpi_caller` 1. `getProgramAccounts` empty on devnet. The
+mint verified as an account for the first time: classic SPL Token owner, 6 decimals, initialised,
+no freeze authority.
+
+**The real loader path ran for the first time outside litesvm**, where the harness had always
+overwritten ProgramData. Three rejections on localnet, each at its own source line: a stranger
+signing gives `UnauthorizedInitializer` 6014 at `initialize.rs:46`; an all-zero eligibility key
+gives `InvalidAuthorityKey` 6016 at line 54; attester equal to arbiter gives
+`AuthoritiesNotDistinct` 6015 at line 60. The logs show Anchor's `init` allocating through the
+system program *before* the handler rejects, so the account's absence afterwards is the rollback,
+not an early return — worth knowing before reading any future failed `initialize`.
+
+**Devnet.** Signature
+`s2ebAtTqPC7jPcujaf1ciCAWEEc6rk35RVDmpzVMSV1V8Z7G2Rpdu22FBTke5SSpf5aYGQLZ95HrQ4gNezmCkhD`,
+finalized at slot 500795088, 12102 compute units — the same figure as localnet. Cost 1356280
+lamports, rent 1351280 plus a 5000 fee; 2.4439 SOL remains. Devnet quotes rent lower than the test
+validator does; the cluster enforces its own figure.
+
+**Verified twice, by different routes.** The script read the account back at `finalized` and
+decoded it by the SPEC section 3 offsets; `solana account` was then decoded independently from its
+hex dump, and `solana confirm -v` printed the instruction's 105 data bytes. All three agree, and
+the 96 authority bytes stored in the account equal bytes 9 to 105 of the instruction that was
+signed. The stored bytes are identical to the localnet run's, character for character.
+
+**Retry is safe and is the recovery procedure.** A second `initialize` fails in the system program
+with `Allocate: account ... already in use`, `0x0`, leaving the account untouched; the script's own
+precondition refuses to send and prints the stored values, exit 3. If a devnet run ever reports
+failure, re-running the same command distinguishes "it landed" from "it did not" without risk.
+
+**Two decisions taken during the session.** SGT verification was dropped from Session 11: it has no
+specification, and its consumer is voucher issuance, which is API work blocked on OPEN-1. The
+`create_and_fund` smoke test was dropped from the rehearsal: 139 litesvm tests already exercise
+every instruction against a configuration account, and the loader path was the only gap the
+rehearsal could close.
+
+**Recorded because it will bite someone.** The solana CLI's default RPC is devnet and its default
+signer is `upgrade-authority.json`. Any command omitting `--url` runs against the live cluster
+signing with the live authority.
 
 ---
 
