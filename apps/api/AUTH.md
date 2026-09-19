@@ -120,9 +120,19 @@ Its sole dependency is `@noble/hashes` pinned exactly `2.4.0` — identical to t
 Dependency note: `@solana/wallet-standard-util` 1.1.2 depends on `@noble/curves` with a
 caret 1.8.0 range, which does not admit 2.4.0. Two instances therefore coexist in
 `node_modules`. Accepted: only 2.4.0 makes verification decisions; the 1.x copy is loaded
-transitively by the parser package and is otherwise unused. Gate in 6b: `pnpm why
-@noble/curves` must show exactly two versions — 2.4.0 as the direct dependency of
-`apps/api`, and one 1.x instance under `@solana/wallet-standard-util` only.
+transitively by the parser package and is otherwise unused.
+
+Gate (amended by D104, 20 September; the original workspace version count is superseded).
+`pnpm why` reports the whole workspace regardless of the directory it runs in, so it cannot
+express what one package's imports resolve to. The gate is instead three checks. First, each
+package's own symlink, which is what its imports follow:
+`apps/api/node_modules/@noble/curves` resolves to 2.4.0, and
+`packages/shared/node_modules/@noble/hashes` resolves to 2.4.0. Second, the only BountyCam
+source files importing `@noble` are `apps/api/src/auth/routes.ts`,
+`apps/api/test/auth.test.ts` and `packages/shared/src/index.ts`. Third, other versions in
+the tree are accepted and named: `@noble/curves` 1.9.7 and `@noble/hashes` 1.8.0, inside the
+isolated trees of `@solana/wallet-standard-util` and `@solana/web3.js`, neither imported by
+BountyCam code and neither making a verification decision.
 
 Parser behaviour notes (from the pinned source, commit `dbb6a98`):
 
