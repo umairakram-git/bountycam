@@ -2069,3 +2069,47 @@ transmission to a third party, not a release build, and not a log file. The diag
 screen that occasioned this is throwaway and is deleted when the real sign-in UI lands.
 
 Tests, at minimum: none new. No source, error code or account layout changes.
+
+**D106 — AUTH.md 14.2 resolved: Seed Vault Wallet echoes a dapp-supplied domain unchanged,
+and its SIWS signature verifies over the exact returned bytes.**
+
+Both questions were open because no source answered them. The SIWS spec says a wallet "must
+determine the domain" when the dapp supplies none and is silent on native apps; the MWA spec
+delegates `sign_in_payload` to SIWS and never states whether a wallet honours a
+dapp-supplied `domain`. The interim behaviour was to issue the configured `SIWS_DOMAIN` and
+require an exact match on verify, with the answer owed from a device.
+
+Test design. The app identity `uri` was set to `https://bountycam.invalid` — a reserved,
+permanently non-resolving domain — while the server issued `app.example.com`. The two were
+made deliberately different so the returned message would name its own source. Had they
+matched, a correct-looking result would not have distinguished "the wallet honoured our
+payload" from "the wallet used its own identity host".
+
+Result, 20 September, Seeker with Seed Vault Wallet, two runs. The decoded message reads
+`app.example.com wants you to sign in with your Solana account:`. The wallet echoed the
+supplied domain unchanged and did not substitute its identity host. No `URI:` line appeared,
+so `UNEXPECTED_FIELD` was never reached. `Chain ID: devnet` passed through in the canonical
+form the server issued. All eight issued fields appear in the signed message with identical
+values.
+
+The second question is answered by the verify result rather than by a separate check.
+AUTH.md section 6 step 1 rejects any signature that is not exactly 64 bytes, and step 4
+verifies ed25519 with `@noble/curves` 2.4.0 over the exact received bytes. Both runs
+returned HTTP 200. A bare 64-byte signature therefore verified over the exact message with
+no prefix and no framing, checked by the pinned library rather than by a separate script.
+
+A third question answered unasked. The second `authorize` carried `auth_token` from the
+first alongside `sign_in_payload`, and `sign_in_result` came back present. A reauthorize
+honours the payload, so sign-in costs one wallet approval rather than two.
+
+Consequence. The configured domain value is now a configuration decision rather than a
+research question: the wallet will echo whatever is supplied. Moving from the placeholder to
+a real host is a `SIWS_DOMAIN` change plus a smoke test. That decision is still owed, and is
+the same question as the app identity `uri` and the Digital Asset Links file; it belongs
+with Session 24's packaging, where the release signing certificate exists.
+
+What this does not establish. One wallet, one device. Solflare on the second handset is
+untested for `sign_in_payload`; the September spike exercised only `signMessages` there. The
+`signMessages` fallback path in AUTH.md section 2 remains unimplemented and unmeasured.
+
+Tests, at minimum: none new. No source, error code or account layout changes.
