@@ -2036,3 +2036,36 @@ does this package import". Only the resolution answers it.
 This changes a gate, not the program. No source, error code or account layout changes.
 
 Tests, at minimum: none new.
+
+**D105 — A debug-build diagnostic may display a SIWS message and its signature; the
+section 7 prohibition otherwise stands.**
+
+SECURITY.md section 7 forbids logging "keys, seeds, bearer tokens, `Authorization` headers,
+JWTs, authentication signatures, presigned URLs, raw evidence or full request bodies".
+Session 12's on-device sign-in screen displays the returned SIWS message and its signature,
+which the list forbids. The conflict is named rather than worked around, per the file's own
+instruction.
+
+The measurement required it. AUTH.md 14.2 asked whether a wallet echoes a supplied domain
+and whether an MWA signature verifies over the exact challenge bytes with no prefix. Neither
+question can be answered from evidence nobody can read: the first needs the decoded message
+text, the second needs the signature to verify against it.
+
+Ruling. A debug-build diagnostic screen may display a SIWS message and its signature. The
+prohibition is unchanged for everything else in the list, and specifically for JWTs, MWA
+authorization tokens, presigned URLs and key material.
+
+Why this is narrow rather than a hole. A SIWS message is public by construction — it is
+handed to a wallet to be shown to a user. Its signature authenticates exactly one challenge,
+and that challenge's nonce is single-use, consumed atomically on first verify (section 6
+step 5, D41). A displayed signature therefore authenticates nothing: replaying it returns
+`NONCE_CONSUMED`. Verified on device on 20 September — both runs' nonces show `consumed_at`
+set, and the second run produced an entirely different signature over a fresh nonce. The
+same reasoning does not extend to a JWT, which remains valid for seven days and has no
+single-use property, nor to an MWA auth token, which authorises further wallet sessions.
+
+Scope. Display, in a debug build, on the device operator's own screen. Not persistence, not
+transmission to a third party, not a release build, and not a log file. The diagnostic
+screen that occasioned this is throwaway and is deleted when the real sign-in UI lands.
+
+Tests, at minimum: none new. No source, error code or account layout changes.
