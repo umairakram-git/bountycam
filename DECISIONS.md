@@ -1992,3 +1992,47 @@ Scope. This fixes the value for the devnet deployment named above. Another clust
 value under this table. Changing this one needs an upgrade with a migration, or a new program id.
 
 Tests, at minimum: none new. The suite keeps 1. No source, error code or account layout changes.
+
+---
+
+## Session 12 rulings (20 September)
+
+**D104 — The `@noble/curves` gate is a per-package resolution check, not a workspace
+version count.**
+
+AUTH.md 3.2 required `pnpm why @noble/curves` to show exactly two versions: 2.4.0 as a
+direct dependency of `apps/api`, and one 1.x instance under `@solana/wallet-standard-util`
+only. Session 12 found both halves unusable.
+
+`pnpm why` ignores the working directory. Run from `apps/api` and from `apps/mobile` it
+produced byte-identical output, because it reports the whole workspace. A workspace-wide
+version count cannot express a claim about what one package's imports resolve to, which is
+the only claim worth making.
+
+The second half broke for a benign reason. When `apps/mobile` gained `@solana/web3.js`
+1.99.0, a second parent of the 1.x copy appeared. The count is still two; "under
+wallet-standard-util only" is now false. Nothing unsafe happened — the clause described the
+shape of the tree on 12 September rather than the property it was meant to protect.
+
+Ruling. The gate becomes three checks. First, `readlink` each package's own
+`node_modules/@noble/*` symlink, which is what that package's imports follow: `apps/api`
+resolves `@noble/curves` to 2.4.0, `packages/shared` resolves `@noble/hashes` to 2.4.0.
+Second, grep BountyCam source for `@noble` imports; the result must be exactly
+`apps/api/src/auth/routes.ts`, `apps/api/test/auth.test.ts` and
+`packages/shared/src/index.ts`. Third, versions elsewhere in the tree are accepted and
+named: 1.9.7 and 1.8.0 inside the isolated trees of `@solana/web3.js` and
+`@solana/wallet-standard-util`, neither imported by our code, neither making a verification
+decision.
+
+Evidence, 20 September: `apps/mobile` has no `@noble` link at all, so a mobile file
+importing `@noble/curves` would fail to resolve at bundle time rather than silently binding
+1.9.7. That is a stronger guarantee than the old gate claimed, and it closes the open item
+recording that mobile pulls `@noble/hashes` 1.8.0 while `packages/shared` pins 2.4.0: the
+two cannot meet.
+
+The general form: a version count answers "what exists in the tree". The question is "what
+does this package import". Only the resolution answers it.
+
+This changes a gate, not the program. No source, error code or account layout changes.
+
+Tests, at minimum: none new.
