@@ -2113,3 +2113,45 @@ untested for `sign_in_payload`; the September spike exercised only `signMessages
 `signMessages` fallback path in AUTH.md section 2 remains unimplemented and unmeasured.
 
 Tests, at minimum: none new. No source, error code or account layout changes.
+
+**D107 — OPEN-1 resolved: two eligibility profiles, hashed by contents, paired strictly to
+the assurance level.**
+
+D69 defined only `A4_SEEKER_V1`, and D84 requires every bounty to name a profile, so levels 0
+to 3 had no admissible profile and no bounty below A4 could be created. The item has been
+carried since 16 September. It blocks the voucher-issuance session, which in turn blocks
+on-chain `accept`, which blocks every end-to-end run.
+
+The registry has two entries. `BASE_V1` — the Scout's wallet is SIWS-proved and the user row
+is `ACTIVE`; nothing further. `A4_SEEKER_V1` — the same, plus a server-side Seeker Genesis
+Token check over that proved wallet.
+
+`BASE_V1` deliberately requires no completion history. A minimum-completed-bounties rule is
+the obvious addition and is rejected for version 1: no bounty has ever completed, so any
+positive minimum makes the first bounty unacceptable by anyone, the demo included.
+Reputation gating arrives as a new profile id once there is history to gate on.
+
+A profile is three fields and no more: `domain_tag`, `profile_id`, `requires_sgt`. A rule
+those cannot express is a new `domain_tag` version with its own object, never a fourth key.
+Format, derivation and vectors are `packages/shared/SPEC.md` section 7; the registry itself
+is `apps/api/POLICY.md`.
+
+The hash covers the contents, not the id. Hashing the id alone would let a redefinition
+change what every already-funded bounty meant with no hash changing anywhere — the failure
+recorded against the A4 rung in Session 8, where the integer sat inside the hashed policy
+and the meaning of the integer did not. Hashing the object makes a redefinition fail loudly
+at `VerificationMessageMismatch` against bounties funded under the old definition.
+
+Pairing is a strict bijection. A `required_assurance` of 4 admits only `A4_SEEKER_V1`; 0 to 3
+admit only `BASE_V1`. Any other pair is rejected at creation with
+`PROFILE_ASSURANCE_MISMATCH`.
+
+Accepted limitation, stated rather than hidden: a requester cannot demand a Seeker for a
+low-assurance job. Widening the admissible set is request validation and changes no stored
+hash, so it costs nothing later, and D34's rule against unreachable cases argues against
+building the wider form before a use for it exists.
+
+Tests, at minimum: both section 7.4 vectors reproduced by `packages/shared`; the id format
+accepting and rejecting the stated examples; a profile with a fourth key and one with a
+missing key both rejected; both lawful pairs accepted at creation and at least two unlawful
+pairs rejected.

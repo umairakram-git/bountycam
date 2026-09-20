@@ -534,3 +534,116 @@ which single code is thrown is **unspecified**; that a `SpecError` is thrown is 
 normative requirement. Test suites must not pin a specific code for such inputs. The
 cycle-versus-depth and plainness-first orders above are the exceptions: they are
 normative.
+
+---
+
+## 7. Eligibility profiles
+
+An eligibility profile is the committed rule set a Scout must satisfy to accept a
+bounty (D69, D84). The bounty account stores its 32-byte hash, and both binary
+signed messages carry that hash (MESSAGES.md sections 3 and 4), so the derivation
+below is on the money path and is normative.
+
+This section defines the object, the id format and the derivation only. Which
+profile ids exist, what each one requires operationally, and which is admissible
+for a given `required_assurance` are the registry, and the registry lives in
+`apps/api/POLICY.md`.
+
+### 7.1 The profile object
+
+A version 1 profile is a plain object with exactly three keys, shown here in
+canonical order (section 1.2):
+
+| Key | Type | Rule |
+|---|---|---|
+| `domain_tag` | string | exactly `BOUNTYCAM_ELIGIBILITY_PROFILE_V1` |
+| `profile_id` | string | the section 7.2 format |
+| `requires_sgt` | boolean | whether a Seeker Genesis Token is required |
+
+Exactly three keys. A profile carrying a fourth key, or missing one, is rejected;
+it is not canonicalised and no hash is produced.
+
+The field set is fixed for version 1. A profile needing a rule these three keys
+cannot express — a completed-bounty minimum, an identity check, a credential — is
+a new `domain_tag` version with its own object, never a fourth key here. This
+keeps every version 1 profile the same shape, so a hash mismatch always means a
+value differed and never that a schema drifted.
+
+The domain tag is a field rather than a prefix, for the reason section 3.2 gives
+for the policy hash.
+
+### 7.2 The profile id format
+
+One to forty characters. Uppercase ASCII letters, ASCII digits and the underscore
+only. The id must end with the two characters `_V` followed by one or more ASCII
+digits, and must not begin with an underscore or a digit.
+
+`BASE_V1` and `A4_SEEKER_V1` satisfy it. `base_v1`, `BASE`, `BASE_V`, `_BASE_V1`
+and `1_BASE_V1` do not.
+
+The trailing version is the point of the format. A profile whose meaning changes
+takes a new id, so the old id continues to name what it always named. The hash
+enforces this independently — see section 7.5 — but a reader inspecting a stored
+policy sees the version without computing anything.
+
+### 7.3 Derivation
+
+```
+eligibilityProfileHash(profile) = sha256(utf8(canonicalise(profile)))
+```
+
+`canonicalise` is section 1, `sha256` is section 2, and the UTF-8 encoding adds no
+byte-order mark. The result is the raw 32 bytes, not hex: the bounty account and
+both binary messages carry raw bytes (MESSAGES.md section 2).
+
+The TypeScript package exports `eligibilityProfileHash`. It validates the object
+against section 7.1 and the id against section 7.2 before canonicalising, and
+throws `SpecError` with `PROFILE_SHAPE_INVALID` or `PROFILE_ID_INVALID`
+respectively (section 6). Validation precedes canonicalisation, so a malformed
+profile never reaches the hash.
+
+### 7.4 Vectors
+
+Both registry profiles, with their canonical text, byte length and hash. Hex is
+lowercase per section 2.
+
+**P1 — `BASE_V1`**
+
+```
+{"domain_tag":"BOUNTYCAM_ELIGIBILITY_PROFILE_V1","profile_id":"BASE_V1","requires_sgt":false}
+```
+
+- length: 93 bytes as UTF-8
+- `eligibilityProfileHash`:
+  `0d2a8920d85f17637cff555ef00869418767b4de9cb72cc553c8944ccfd0deb9`
+
+**P2 — `A4_SEEKER_V1`**
+
+```
+{"domain_tag":"BOUNTYCAM_ELIGIBILITY_PROFILE_V1","profile_id":"A4_SEEKER_V1","requires_sgt":true}
+```
+
+- length: 97 bytes as UTF-8
+- `eligibilityProfileHash`:
+  `a1bcc81f8046565564915d5e7eead4cc1108003100c29f453de9325bd2198cbe`
+
+Provenance, stated because it matters: the two hashes above were computed while
+this section was written, by a standalone script, not by this package. The inputs
+are ASCII, need no escaping and are already in canonical key order, so a
+conforming canonicaliser cannot produce different text — but that is an argument,
+not a measurement. The implementing session reproduces both with the package's
+own `canonicalise` and `sha256`. If it produces different values, the package is
+right and this section is wrong: amend the vectors, do not amend the code.
+
+### 7.5 Why the contents are hashed rather than the id
+
+Hashing the id alone would commit to a label. Redefining what that label required
+would then change what every already-funded bounty meant, with no hash anywhere
+changing — the exact failure recorded against the A4 rung in Session 8, where the
+integer sat inside the hashed policy and the meaning of the integer did not.
+
+Hashing the object commits to the meaning. Changing `requires_sgt` for an existing
+id yields a different hash, which no longer matches the hash stored on any bounty
+funded under the old definition, so every voucher reconstruction for those
+bounties fails loudly at `VerificationMessageMismatch` rather than silently
+succeeding under new rules.
