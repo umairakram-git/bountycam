@@ -2,7 +2,14 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
-import { canonicalise, sha256, merkleRoot, SpecError } from "./index.js";
+import {
+  canonicalise,
+  sha256,
+  merkleRoot,
+  SpecError,
+  eligibilityProfileHash,
+} from "./index.js";
+import type { EligibilityProfile } from "./index.js";
 
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
 const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
@@ -621,5 +628,121 @@ describe("no configuration options (section 5)", () => {
     // @ts-expect-error merkleRoot accepts exactly one argument
     const r2 = hex(merkleRoot([leaf], true));
     assert.equal(r2, r1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SPEC.md section 7 - eligibility profiles
+// ---------------------------------------------------------------------------
+
+describe("eligibility profiles (section 7)", () => {
+  const TAG = "BOUNTYCAM_ELIGIBILITY_PROFILE_V1";
+
+  const BASE_V1: EligibilityProfile = {
+    domain_tag: TAG,
+    profile_id: "BASE_V1",
+    requires_sgt: false,
+  };
+
+  const A4_SEEKER_V1: EligibilityProfile = {
+    domain_tag: TAG,
+    profile_id: "A4_SEEKER_V1",
+    requires_sgt: true,
+  };
+
+  test("P1 BASE_V1 reproduces its section 7.4 text, length and hash", () => {
+    const text = canonicalise(BASE_V1);
+    assert.equal(
+      text,
+      '{"domain_tag":"BOUNTYCAM_ELIGIBILITY_PROFILE_V1",' +
+        '"profile_id":"BASE_V1","requires_sgt":false}',
+    );
+    assert.equal(utf8(text).length, 93);
+    assert.equal(
+      hex(eligibilityProfileHash(BASE_V1)),
+      "0d2a8920d85f17637cff555ef00869418767b4de9cb72cc553c8944ccfd0deb9",
+    );
+  });
+
+  test("P2 A4_SEEKER_V1 reproduces its section 7.4 text, length and hash", () => {
+    const text = canonicalise(A4_SEEKER_V1);
+    assert.equal(
+      text,
+      '{"domain_tag":"BOUNTYCAM_ELIGIBILITY_PROFILE_V1",' +
+        '"profile_id":"A4_SEEKER_V1","requires_sgt":true}',
+    );
+    assert.equal(utf8(text).length, 97);
+    assert.equal(
+      hex(eligibilityProfileHash(A4_SEEKER_V1)),
+      "a1bcc81f8046565564915d5e7eead4cc1108003100c29f453de9325bd2198cbe",
+    );
+  });
+
+  test("key order in the input never changes the hash", () => {
+    const reordered = {
+      requires_sgt: false,
+      profile_id: "BASE_V1",
+      domain_tag: TAG,
+    };
+    assert.equal(
+      hex(eligibilityProfileHash(reordered)),
+      hex(eligibilityProfileHash(BASE_V1)),
+    );
+  });
+
+  test("redefining requires_sgt under the same id changes the hash (7.5)", () => {
+    const redefined: EligibilityProfile = { ...BASE_V1, requires_sgt: true };
+    assert.notEqual(
+      hex(eligibilityProfileHash(redefined)),
+      hex(eligibilityProfileHash(BASE_V1)),
+    );
+  });
+
+  test("PROFILE_SHAPE_INVALID", () => {
+    const withGetter = Object.defineProperty(
+      { profile_id: "BASE_V1", requires_sgt: false },
+      "domain_tag",
+      { get: () => TAG, enumerable: true, configurable: true },
+    );
+    const bad: unknown[] = [
+      null,
+      "BASE_V1",
+      [BASE_V1],
+      Object.assign(Object.create({}), BASE_V1),
+      { domain_tag: TAG, profile_id: "BASE_V1" },
+      { ...BASE_V1, extra: 1 },
+      { ...BASE_V1, domain_tag: "BOUNTYCAM_ELIGIBILITY_PROFILE_V2" },
+      { ...BASE_V1, requires_sgt: "false" },
+      { ...BASE_V1, profile_id: 7 },
+      withGetter,
+    ];
+    for (const value of bad) {
+      rejectsWith(
+        () => eligibilityProfileHash(value as EligibilityProfile),
+        "PROFILE_SHAPE_INVALID",
+      );
+    }
+  });
+
+  test("PROFILE_ID_INVALID, and a 40-character id is accepted", () => {
+    const bad = [
+      "base_v1",
+      "BASE",
+      "BASE_V",
+      "_BASE_V1",
+      "1_BASE_V1",
+      "",
+      "BASE V1",
+      "B".repeat(38) + "_V1",
+    ];
+    for (const id of bad) {
+      rejectsWith(
+        () => eligibilityProfileHash({ ...BASE_V1, profile_id: id }),
+        "PROFILE_ID_INVALID",
+      );
+    }
+    const longest = "B".repeat(37) + "_V1";
+    assert.equal(longest.length, 40);
+    assert.equal(hex(eligibilityProfileHash({ ...BASE_V1, profile_id: longest })).length, 64);
   });
 });

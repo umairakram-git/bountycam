@@ -262,3 +262,97 @@ export function merkleRoot(hashes: Uint8Array[]): Uint8Array {
   }
   return level[0]!;
 }
+
+// ---------------------------------------------------------------------------
+// Eligibility profiles (SPEC.md section 7)
+// ---------------------------------------------------------------------------
+
+/**
+ * A version 1 eligibility profile (SPEC.md §7.1): exactly three keys, no more
+ * and no fewer. Which ids exist and what each one requires operationally is
+ * the registry, and the registry lives in apps/api/POLICY.md — not here.
+ */
+export interface EligibilityProfile {
+  readonly domain_tag: string;
+  readonly profile_id: string;
+  readonly requires_sgt: boolean;
+}
+
+const PROFILE_DOMAIN_TAG = "BOUNTYCAM_ELIGIBILITY_PROFILE_V1";
+
+// SPEC.md §7.2: uppercase ASCII letters, digits and underscore; the first
+// character a letter, so neither an underscore nor a digit can begin an id;
+// ending with _V and one or more digits. Length is checked separately so the
+// 1..40 bound reads as the spec states it.
+const PROFILE_ID_FORM = /^[A-Z][A-Z0-9_]*_V[0-9]+$/;
+
+function profileField(profile: object, key: string): unknown {
+  const desc = Object.getOwnPropertyDescriptor(profile, key);
+  if (desc === undefined || !("value" in desc) || !desc.enumerable) {
+    throw new SpecError(
+      "PROFILE_SHAPE_INVALID",
+      "profile key " + key + " must be an enumerable data property (SPEC.md 7.1)",
+    );
+  }
+  return desc.value;
+}
+
+/**
+ * The 32-byte commitment to an eligibility profile (SPEC.md §7.3).
+ *
+ * Hashes the profile's contents, never its id alone: changing what an id
+ * requires changes this hash, so a voucher for a bounty funded under the old
+ * definition fails loudly rather than passing under new rules (§7.5).
+ *
+ * Validation precedes canonicalisation. Shape faults throw
+ * `PROFILE_SHAPE_INVALID`; a malformed id throws `PROFILE_ID_INVALID`.
+ *
+ * @returns the raw 32-byte digest, not hex
+ */
+export function eligibilityProfileHash(profile: EligibilityProfile): Uint8Array {
+  const proto: unknown =
+    profile === null || typeof profile !== "object"
+      ? undefined
+      : Object.getPrototypeOf(profile);
+  if (proto !== Object.prototype && proto !== null) {
+    throw new SpecError(
+      "PROFILE_SHAPE_INVALID",
+      "a profile must be a plain object (SPEC.md 7.1)",
+    );
+  }
+  if (Reflect.ownKeys(profile).length !== 3) {
+    throw new SpecError(
+      "PROFILE_SHAPE_INVALID",
+      "a version 1 profile carries exactly three keys (SPEC.md 7.1)",
+    );
+  }
+  const domainTag = profileField(profile, "domain_tag");
+  const profileId = profileField(profile, "profile_id");
+  const requiresSgt = profileField(profile, "requires_sgt");
+  if (domainTag !== PROFILE_DOMAIN_TAG) {
+    throw new SpecError(
+      "PROFILE_SHAPE_INVALID",
+      "domain_tag must be exactly " + PROFILE_DOMAIN_TAG + " (SPEC.md 7.1)",
+    );
+  }
+  if (typeof profileId !== "string" || typeof requiresSgt !== "boolean") {
+    throw new SpecError(
+      "PROFILE_SHAPE_INVALID",
+      "profile_id must be a string and requires_sgt a boolean (SPEC.md 7.1)",
+    );
+  }
+  if (profileId.length < 1 || profileId.length > 40 || !PROFILE_ID_FORM.test(profileId)) {
+    throw new SpecError(
+      "PROFILE_ID_INVALID",
+      "profile_id does not satisfy the SPEC.md 7.2 format",
+    );
+  }
+  // Rebuilt from the three validated values, so the text that is hashed is
+  // exactly what this function checked.
+  const text = canonicalise({
+    domain_tag: domainTag,
+    profile_id: profileId,
+    requires_sgt: requiresSgt,
+  });
+  return sha256(new TextEncoder().encode(text));
+}
