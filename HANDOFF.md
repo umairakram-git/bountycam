@@ -3,13 +3,15 @@
 **Date:** 20 September 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
 spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification and build;
-Session 10; Session 11 escrow initialisation; Session 12 mobile sign-in
-**Next session:** two candidates, and the choice is a scope decision. The eligibility service
-is the critical path — voucher issuance (D68) gates on-chain `accept`, so without it no
-bounty can be accepted and no end-to-end run exists; it also owns OPEN-1 and SGT
-verification, and its specification must precede its code. The alternative is mobile
-discovery, bounty detail and accept with the assignment race test, which is blocked on
-voucher issuance at the accept step. The escrow is deployed at eleven instructions and
+Session 10; Session 11 escrow initialisation; Session 12 mobile sign-in; Session 13
+eligibility specification
+**Next session:** the eligibility build. `apps/api/ELIGIBILITY.md` specifies it and nothing
+in it is undecided: migrations 7 and 8, the profile registry in `packages/shared` against
+its section 7 vectors, the voucher endpoint, then the Seeker check last so an overrun costs
+the Seeker badge rather than the ability to accept a bounty. One external prerequisite: a
+Helius account and API key. After that build, on-chain `accept` works for the first time and
+mobile discovery, bounty detail and accept become buildable — they have no session number,
+because Session 11's mobile block took 12. The escrow is deployed at eleven instructions and
 initialised: the configuration account exists on devnet at
 `DqHBCi3KYaZSSgMGcPY8QftYnns8k2vcg9GCJejKBaAb`. Sign-in works on device against the live
 API.
@@ -1150,6 +1152,56 @@ repo; the template-supplied `apps/mobile/.claude/settings.json` is gone; pnpm is
 **Still the critical path.** The eligibility service has no owning session. Without voucher
 issuance there is no on-chain `accept`, and without `accept` no end-to-end run. It also owns
 OPEN-1, and specification precedes code.
+
+
+---
+
+## Session 13 — the eligibility specification (20 September)
+
+Three commits, `e4dd51d` to `d1d432e`. Pushed. No code; specification only, written before
+implementation as the rules require.
+
+**What this closes.** The eligibility service had no owning session and gates on-chain
+`accept`: no voucher, no acceptance, no end-to-end run. It had accumulated four jobs —
+issue vouchers, decide who qualifies, pay off the D82 and D84 amendment debt, and verify
+Seeker ownership — which is why it kept being skipped. All four are now specified.
+
+**The profile registry (D107).** OPEN-1, carried since 16 September, is resolved. Two
+profiles: `BASE_V1` for assurance 0 to 3, and `A4_SEEKER_V1` for assurance 4, paired as a
+strict bijection. A profile is three fields and its hash covers the contents, not the id —
+so redefining a profile fails loudly against bounties funded under the old definition
+rather than silently changing what they meant. That was the A4 failure recorded in Session
+8. `packages/shared/SPEC.md` gains section 7 with the derivation and two vectors.
+
+**The policy object changed shape (D108).** `attester_pubkey` out, `eligibility_profile_id`
+in, still sixteen fields. Both worked vectors regenerated: V1 is 606 bytes hashing to
+`711175ab…`, V2 is 549 bytes hashing to `44b067e6…`. They were derived by first reproducing
+the published Session 7a texts byte for byte, then verified against the built
+`packages/shared` by three independent routes, plus a re-canonicalisation confirming the
+document text is what the implementation produces. Done now because no bounty has ever been
+funded; the first funded bounty would have made it expensive and permanent.
+
+**The service specification (D109).** `apps/api/ELIGIBILITY.md`, 455 lines: the endpoint,
+the check order, the expiry, the reservation, the Seeker check, migration 8, 24 tests and
+the stated limits.
+
+**Two findings worth not rediscovering.** Solana Mobile's marketing calls the Seeker Genesis
+Token soulbound; their developer documentation says it transfers with a change of primary
+account and keeps its mint address. The documentation governs, and the consequence is that
+the check must record the mint and refuse a second claim on it, or one phone qualifies
+unlimited wallets. Separately, transferring the token leaves a zero-balance account behind
+forever, so a check that does not skip empty accounts admits every wallet that ever held a
+Seeker.
+
+**Reservation expiry needed two writers**, which closes POLICY.md section 14 item 6. A
+sweeper alone leaves a bounty invisible for the sweep interval; opportunistic flipping alone
+deadlocks, because discovery hides a bounty with a live reservation, so no request ever
+arrives to trigger the flip. Both, 30-second interval, 60-second lag bound.
+
+**Next is the build**, not another specification. Migrations 7 and 8, the profile registry in
+`packages/shared` against its vectors, the voucher endpoint, the Seeker check last. One
+prerequisite is external: a Helius account and API key, without which the Seeker half cannot
+run at all.
 
 ---
 
