@@ -2210,3 +2210,59 @@ session.
 Tests, at minimum: tests 24 and 25 rewritten for `PROFILE_UNKNOWN` and
 `PROFILE_ASSURANCE_MISMATCH`; test 71 rewritten to assert the environment variable is
 ignored; tests 5 to 7 reproduce the regenerated vectors. The test count is unchanged at 76.
+
+**D109 — The eligibility service: voucher issuance, the Seeker check, and reservation
+expiry.**
+
+D68 made a voucher a precondition of on-chain `accept`, and the escrow has enforced it since
+17 September, but no session ever owned issuing one. Nothing can be accepted, so no
+end-to-end run exists. `apps/api/ELIGIBILITY.md` is the specification; this entry records the
+rulings inside it and serves as the SECURITY.md section 17 review for a new secret and a new
+dependency on the authentication path.
+
+The endpoint is `POST /bounties/:id/voucher`, authenticated, no request body. It returns the
+signed 212-byte message, its signature, the expiry and the authority.
+
+Message fields come from the chain, not the database. A voucher built from a stale
+read-model row verifies at issuance and fails at `accept` with
+`VerificationMessageMismatch` — safe and useless. One account read is cheap next to the
+checks that may follow it.
+
+The reservation is taken after qualification, not before. Reserving first would let an
+ineligible Scout block an eligible one for the duration of a slow check. The cost is a
+wasted check for whoever loses the race, which is the cheaper failure.
+
+One expiry governs both. The voucher expires at the earlier of the app clock plus 300
+seconds and the bounty's `acceptance_cutoff`; the reservation expires at the same instant.
+Five minutes matches the SIWS challenge lifetime, giving the codebase one short-lived
+duration rather than two. The cutoff clamp exists because the program checks both conditions
+and a voucher outliving its window cannot work.
+
+Reservation expiry needs two writers, which closes POLICY.md section 14 item 6. A sweeper
+every 30 seconds, plus an opportunistic flip on any voucher request. Neither alone suffices:
+opportunistic flipping alone deadlocks, because discovery hides a bounty with an `ACTIVE`
+reservation, so no request ever arrives to trigger the flip. The lag bound is 60 seconds,
+twice the interval. A stale row makes a bounty temporarily invisible, never wrongly
+acceptable.
+
+The Seeker token is transferable, and the developer documentation governs. Solana Mobile's
+marketing describes it as soulbound; their developer documentation, fetched 20 September,
+says it moves with a change of primary account and keeps its mint address. Anything built on
+the soulbound reading is wrong. Consequences: the check records the mint address and refuses
+a second claim on it, one device to one account, enforced by a primary key; and zero-balance
+token accounts are skipped, because a transfer leaves the old account open forever.
+
+An outage is never a refusal. A failed Seeker check returns 503, never "no Seeker". Three
+distinct 403s separate "you hold none", "that one is claimed" and "we could not look".
+
+New dependency and new secret, reviewed here. The documented check uses
+`getTokenAccountsByOwnerV2`, a Helius extension rather than a standard RPC method, so this
+adds a third-party account and an API key on the authentication path. The key lives outside
+the repo, is never logged, is read once at startup, and a missing key is a startup failure
+rather than a runtime 503. The check runs against mainnet while the escrow runs on devnet;
+the two endpoints are never interchanged. Results are cached 24 hours per wallet against a
+check costing several round trips.
+
+Tests, at minimum: the 24 of ELIGIBILITY.md section 9, including the concurrent-reservation
+case required by SECURITY.md section 10 and the zero-balance case the documentation warns
+about. Migration 8 adds `assignments.expires_at` and the `seeker_devices` table.
