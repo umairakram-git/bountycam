@@ -2357,3 +2357,26 @@ amendable, because none of them changes a hashed byte.
 
 Citation. POLICY.md held no freeze statement at all before this commit. Section 2 gains one in
 the same commit, naming this SHA, as D84 requires.
+
+**D113 — Migration 8 also relaxes `assignments.accepted_at` to nullable.**
+
+D111 relaxed `challenge_nonce` and `deadline` because a reservation precedes the facts they
+record. It stopped one column short. `assignments.accepted_at` is `timestamptz NOT NULL` and
+records the instant the chain confirmed `accept`; at reservation time that instant does not
+exist either, and an insert written to ELIGIBILITY.md section 6 fails on it exactly as it
+would have failed on the other two. The Session 3 table was shaped as an acceptance and every
+one of its acceptance-time columns has to be found, not just the two D111 noticed.
+
+Rejected alternative: writing the reservation instant into `accepted_at`. It keeps the column
+NOT NULL at the cost of a row that has never been accepted reading as accepted — the exact
+confusion D111's closing paragraph names — and it leaves no column that answers "when was
+this reserved", since `expires_at` carries the end of the reservation, not its start.
+
+Ruling: migration 8 drops NOT NULL from `accepted_at` alongside `challenge_nonce` and
+`deadline`. All three are written together when the on-chain acceptance is observed. A row's
+meaning is now read from three columns: `ACTIVE` with all three null is a reservation;
+`ACTIVE` with all three set is an acceptance. Any other combination is invalid and, as D111
+already said of two columns, unenforced by constraint until the projection that writes the
+acceptance exists. The BACKLOG.md item recorded for that constraint covers the third column.
+
+ELIGIBILITY.md section 8 is amended in the same commit, before the migration lands.
