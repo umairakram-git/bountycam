@@ -28,6 +28,7 @@ const expectedTables = [
   "evidence_requirements",
   "policies",
   "reputation_events",
+  "seeker_devices",
   "submissions",
   "users",
 ];
