@@ -78,13 +78,13 @@ the server at creation.
 | Field | Source | Type | Rule |
 |---|---|---|---|
 | `acceptance_window_seconds` | request | integer | 60 to 2592000 inclusive |
-| `attester_pubkey` | request | string | base58, 32 bytes; in the configured allowlist |
 | `capture_radius_m` | request | integer | 10 to 10000 inclusive |
 | `chain` | constant | string | exactly `solana` |
 | `challenge_window_seconds` | request | integer | 60 to 86400 inclusive |
 | `cluster` | request, optional | string | the configured cluster; currently `devnet` |
 | `completion_window_seconds` | request | integer | 60 to 2592000 inclusive |
 | `domain_tag` | constant | string | exactly `BOUNTYCAM_POLICY_V1` |
+| `eligibility_profile_id` | request | string | a section 2.5 registry id; see 2.5 |
 | `evidence_requirements` | request | array | 1 to 20 items, each per section 2.2 |
 | `fee_amount` | constant | string | exactly the one-character string `0` (D24) |
 | `lat` | request | string | GPS profile (section 5); -90 to 90 |
@@ -105,10 +105,17 @@ Notes:
   the fee is exactly 0; Session 4's invented fee constant is the incident this rule
   exists to prevent). A future non-zero fee is a new policy version behind a D-entry
   with its own spec, never a wider validation rule here.
-- `attester_pubkey` is request-supplied per D11 — the requester names the attester at
-  creation — and validated against the configured allowlist (`ATTESTER_PUBKEYS`), which
-  currently holds exactly one key: the development attester. Naming any other key fails
-  closed. More attesters later is a configuration change, not a spec change.
+- `attester_pubkey` was a policy field until D82 and is gone. The attester is read
+  from the immutable on-chain configuration account, the currently configured key
+  governs at submission, and no bounty snapshots it. A policy carrying the field is an
+  unknown field and fails as `INVALID_REQUEST`.
+- `eligibility_profile_id` names the committed rule set a Scout must satisfy to accept
+  the bounty (D69, D84, D107). It must be a registry id from section 2.5 and must be
+  admissible for the requested `required_assurance`; section 2.5 gives both rules and
+  their codes. Its 32-byte hash, derived per `packages/shared/SPEC.md` section 7, is
+  what `create_and_fund` stores on the bounty account and what both binary signed
+  messages carry — so the id is hashed inside the policy and its meaning is hashed
+  separately, which is the point of D107.
 - `required_assurance` is the integer form of the D13 ladder: 0 is A0 through 4 is A4.
   A5 does not exist (D13 defers it), so 5 is rejected. The integer form matches the
   database smallint and the program's numeric comparison (D17); the A-names are display
@@ -192,7 +199,8 @@ prompt) is `INVALID_REQUEST`.
 |---|---|---|
 | `INVALID_REQUEST` | 400 | body shape: missing or unknown field, wrong type, `SpecError` |
 | `INVALID_ASSURANCE` | 400 | `required_assurance` integer but outside 0 to 4 |
-| `ATTESTER_NOT_ALLOWED` | 400 | `attester_pubkey` not base58 for 32 bytes, or not allowlisted |
+| `PROFILE_UNKNOWN` | 400 | `eligibility_profile_id` is not a section 2.5 registry id |
+| `PROFILE_ASSURANCE_MISMATCH` | 400 | the profile is not admissible for `required_assurance` |
 | `CLUSTER_NOT_ALLOWED` | 400 | `cluster` present and not the configured cluster |
 | `MINT_NOT_ALLOWED` | 400 | `settlement_mint` present and not the configured mint |
 | `INVALID_GPS` | 400 | `lat` or `lon` fails the section 5 profile or range |
@@ -213,7 +221,8 @@ Inside the hashed policy — everything the verifier or the escrow program relie
 | Group | Fields | Relied on by |
 |---|---|---|
 | money | `chain`, `cluster`, `settlement_mint`, `reward_amount`, `fee_amount` | escrow |
-| proof | `required_assurance`, `attester_pubkey`, `evidence_requirements` | verifier, escrow |
+| proof | `required_assurance`, `evidence_requirements` | verifier, escrow |
+| who | `eligibility_profile_id` | eligibility service (2.5) |
 | place | `lat`, `lon`, `capture_radius_m` | verifier |
 | time | the three window fields (section 2.1) | verifier, escrow (D12) |
 | format | `domain_tag` | every consumer |
@@ -245,6 +254,68 @@ the task; the parties are bound where binding is enforced — the requester and 
 wallets in the on-chain bounty account, and both, plus the policy hash, inside the
 attestation (SECURITY.md section 6). Keeping identity out of the policy also leaves
 policy reuse open as a later endpoint rather than a schema change.
+
+### 2.5 The eligibility profile registry
+
+Two profiles exist (D107). `packages/shared/SPEC.md` section 7 gives the object, the
+id format, the hash derivation and the vectors; this table is the registry.
+
+| `eligibility_profile_id` | `requires_sgt` | Qualifying rule |
+|---|---|---|
+| `BASE_V1` | false | the Scout's wallet is SIWS-proved and the user row is `ACTIVE` |
+| `A4_SEEKER_V1` | true | the same, plus a server-side Seeker Genesis Token check |
+
+An id outside this table is `PROFILE_UNKNOWN`, whatever its syntax.
+
+Admissibility is a strict bijection against `required_assurance`:
+
+| `required_assurance` | admissible profile |
+|---|---|
+| 0, 1, 2, 3 | `BASE_V1` only |
+| 4 | `A4_SEEKER_V1` only |
+
+Any other pair is `PROFILE_ASSURANCE_MISMATCH`. The check runs at step 5 of section
+8.3, in the canonical field position of `eligibility_profile_id`, and therefore after
+`required_assurance` has passed its own range rule — a pair cannot be judged against an
+assurance level that is itself invalid.
+
+Accepted limitation (D107): a requester cannot demand a Seeker for a job below
+assurance 4. Widening the admissible set is a change to this table and to request
+validation; it changes no stored hash.
+
+A consequence worth recording: because the pairing is a bijection,
+`required_assurance` determines the profile. The list item view (section 8.2)
+therefore already tells a Scout whether they qualify, and carries no profile field;
+adding one would duplicate a fact the caller can already derive.
+
+The qualifying rules above are what the eligibility service enforces before it issues
+a voucher. They are stated here because the policy commits to the id and a reader of a
+policy must be able to learn what the id meant; the issuance mechanics are
+`apps/api/ELIGIBILITY.md`.
+
+### 2.6 The binding register
+
+Three values are committed in more than one place, and every copy must agree before a
+bounty is discoverable (D79, D84). The register exists so that "every binding agrees"
+in section 7.2 names a closed set rather than a sentiment.
+
+Every row is checked when funding is confirmed.
+
+| Value | In the policy | On chain |
+|---|---|---|
+| `policy_hash` | hash of the canonical text | `bounty.policy_hash` |
+| `eligibility_profile_id` | a hashed field | `bounty.eligibility_profile_hash` |
+| `required_assurance` | a hashed field | `bounty.required_assurance` |
+
+The on-chain copy of the profile is the 32-byte hash, not the id, so the check is
+`eligibilityProfileHash(registry[id]) == bounty.eligibility_profile_hash`. A
+disagreement in any row leaves the bounty unprojected: it never reaches `AVAILABLE`,
+so it is never discoverable and never acceptable. The reconciler reports it; nothing
+repairs it, because a bounty funded against a policy it does not match is not a
+recoverable state.
+
+The three windows are deliberately absent. They are stored on chain and verified by
+the attester against the policy (MESSAGES.md section 3), not by this projection.
 
 ---
 
@@ -505,7 +576,7 @@ The single `POST /bounties` transaction (section 8.3) inserts three kinds of row
 
 - **one `policies` row** — `canonical_json` (section 3.4), `policy_hash` (32-byte
   bytea, section 3.3), `requester_id`, `created_at`, and the read-model copies
-  `required_assurance` and `attester_pubkey`;
+  `required_assurance` and `eligibility_profile_id` (migration 7, section 11.3);
 - **one `evidence_requirements` row per item** — `id` is the assigned uuid inside the
   hash (section 2.2), with `policy_id`, `type`, `required`, the prompt, and `sequence`
   holding the 1-based array position as a derived copy. The Session 3 `title` and
@@ -637,9 +708,10 @@ missing or malformed:
 |---|---|
 | `SOLANA_CLUSTER` | optional; default `devnet`; the policy `cluster` value |
 | `SETTLEMENT_MINT` | required; base58 for exactly 32 bytes; no default |
-| `ATTESTER_PUBKEYS` | required; comma-separated base58 keys, each 32 bytes, at least one |
 
-`ATTESTER_PUBKEYS` currently holds exactly one key, the development attester (D11).
+`ATTESTER_PUBKEYS` is gone (D82). The attester is the key in the immutable on-chain
+configuration account, so the API neither reads nor validates an attester at startup.
+The variable may remain set in an environment without effect; nothing consults it.
 No default for `SETTLEMENT_MINT`: a wrong-environment mint must fail at startup, not
 create policies against the wrong token.
 
@@ -707,8 +779,8 @@ view. The body is a JSON object with exactly four keys:
 | `policy` | object | the request-source fields of section 2.1, and nothing else |
 
 `policy` carries exactly the fields whose source is request or request-optional:
-`acceptance_window_seconds`, `attester_pubkey`, `capture_radius_m`,
-`challenge_window_seconds`, `completion_window_seconds`, `evidence_requirements`,
+`acceptance_window_seconds`, `capture_radius_m`, `challenge_window_seconds`,
+`completion_window_seconds`, `eligibility_profile_id`, `evidence_requirements`,
 `lat`, `lon`, `required_assurance`, `reward_amount`, and optionally `cluster` and
 `settlement_mint`. `challenge_window_seconds` is the review window (section 2.1
 mapping note). A constant or assigned field in the request — `chain`,
@@ -854,7 +926,7 @@ state change, never a deletion (section 4).
 ### 8.8 Error codes new in this document
 
 The complete Session 7 surface is: the three middleware codes (AUTH.md section 7),
-the twelve section 2.3 policy codes, and these seven:
+the thirteen section 2.3 policy codes, and these seven:
 
 | Code | Status | Failure |
 |---|---|---|
@@ -1026,12 +1098,12 @@ already has one.
 
 ## 11. Migrations — prose
 
-Two migrations, numbered 5 and 6, continuing the existing four. Prose here; code in
-Session 7b. Every table touched is empty in every environment — no code before
+Three migrations, numbered 5, 6 and 7, continuing the existing four. Prose here; code
+in Session 7b. Every table touched is empty in every environment — no code before
 Session 7b writes `policies`, `evidence_requirements`, or `bounties` — so no data
 movement arises, and rollbacks that re-add NOT NULL columns are valid for exactly as
-long as the tables stay empty (section 11.3). The
-verification pattern is Session 6b's: apply both and roll back both on a scratch
+long as the tables stay empty (section 11.4). The
+verification pattern is Session 6b's: apply all three and roll back all three on a scratch
 database in one test whose summary must read exactly `tests 1, pass 1, fail 0`, then
 apply for real and verify the shapes with `\d` against `bountycam_dev` from raw
 `psql` output.
@@ -1075,9 +1147,21 @@ check; drop the GIST index and `location_public`; re-add `review_window_seconds`
 The existing `location` column (exact point) and every other column are untouched.
 `policies.canonical_json` is not touched by any migration, ever (section 3.4).
 
-### 11.3 Rollback validity expires with the first data
+### 11.3 Migration 7 — the policy read-model column
 
-Both rollbacks are valid **only against empty tables**, and both are affected:
+Up: on `policies`, drop `attester_pubkey` and add `eligibility_profile_id text NOT
+NULL`. Down: the reverse. Both are read-model copies of a hashed field, never
+authoritative — the canonical text is (section 2.4) — so neither carries a constraint
+beyond NOT NULL, and a value disagreeing with the canonical text is a bug in creation,
+not a state the column is expected to police.
+
+The rollback is subject to section 11.4: re-adding `attester_pubkey` as NOT NULL
+without a default fails once a single row exists.
+
+### 11.4 Rollback validity expires with the first data
+
+All three rollbacks are valid **only against empty tables**, and all three are
+affected: migration 7's rollback re-adds `attester_pubkey` as `text NOT NULL`,
 migration 5's rollback re-adds `instructions` as `text NOT NULL`, and migration 6's
 rollback re-adds `deadline` as `timestamptz NOT NULL` and `review_window_seconds` as
 `integer NOT NULL` — the Session 3 definitions. Re-adding a NOT NULL column without
@@ -1159,8 +1243,12 @@ Create — body shape (`INVALID_REQUEST`, 400):
 Create — field rules (400, one code each):
 
 23. `required_assurance` -1 and 5 — `INVALID_ASSURANCE`.
-24. `attester_pubkey` not base58 for 32 bytes — `ATTESTER_NOT_ALLOWED`.
-25. `attester_pubkey` valid base58 but not allowlisted — `ATTESTER_NOT_ALLOWED`.
+24. `eligibility_profile_id` syntactically valid but not in the section 2.5 registry —
+    `PROFILE_UNKNOWN`. A well-formed id outside the table is the case that matters; a
+    malformed id is a section 2.3 type failure and is covered by test 21.
+25. Each inadmissible pair of `required_assurance` and profile — assurance 4 with
+    `BASE_V1`, and assurance 0 and 3 with `A4_SEEKER_V1` —
+    `PROFILE_ASSURANCE_MISMATCH`. Both lawful pairs create successfully.
 26. `cluster` present, not the configured value — `CLUSTER_NOT_ALLOWED`.
 27. `settlement_mint` present, not the configured value — `MINT_NOT_ALLOWED`.
 28. `capture_radius_m` 9 and 10001 — `INVALID_CAPTURE_RADIUS`.
@@ -1250,7 +1338,8 @@ Cancel:
 Configuration:
 
 70. Missing `SETTLEMENT_MINT` — the process exits non-zero before listening.
-71. Malformed `ATTESTER_PUBKEYS` — the process exits non-zero before listening.
+71. `ATTESTER_PUBKEYS` present in the environment — ignored (D82). The process
+    starts, and a policy created afterwards carries no attester field.
 72. `SOLANA_CLUSTER` absent — a created policy carries `devnet`.
 
 Snap unit tests:
@@ -1288,6 +1377,24 @@ bytes in-process, and `shasum -a 256` over the canonical text written byte-exact
 to a file — a different hash implementation in a different process. All three agree
 for both vectors. Session 7b's tests 5 to 7 must reproduce these values.
 
+**Superseded and regenerated (D108).** V1 and V2 below are not the values Session 7a
+published. D82 removed `attester_pubkey` from the policy and D84 added
+`eligibility_profile_id`, so the hashed object changed shape and both vectors changed
+with it. The Session 7a values were V1 `60b987301f7731a32c6de0ec871fae6e2e6f30dc99e2d1b
+202ca267d408591ea` over 624 bytes and V2 `2dec8d20e7e49d2a4be1c3c67d6866a6cd77bcf8cf8b6
+82847bc5a57e55d8a60` over 567 bytes, both shown wrapped here as elsewhere in this
+section. They are recorded so a reader who saw them can tell what happened, and they
+are not a compatibility surface: no bounty was ever funded against either, and no
+second implementation ever verified them. `MESSAGES.md` vectors are on the signed path
+and keep their immutability rule unchanged (its section 8).
+
+The values below were derived while D108 was written, by replaying the published
+Session 7a texts to confirm they reproduce the published hashes, then applying the
+field change — and then verified on 20 September against the built
+`packages/shared` by all three routes. That verification also re-canonicalised each
+parsed object and confirmed it reproduces the text below byte for byte, so the wrap
+is display-only and the key order is canonical.
+
 Canonical texts below are single lines with no line breaks, shown wrapped at 88
 characters (D31 — the wrap is display only). Every character is printable ASCII, so
 characters equal UTF-8 bytes and the text can be reconstructed by joining the lines
@@ -1297,21 +1404,23 @@ with nothing between them; the byte length and hash confirm the reconstruction.
 
 The full sixteen-field policy object. The assigned values are fixed for the vector:
 the salt is the 32 bytes 00 through 1f in order, hex-encoded; the requirement id is
-a fixed uuid with valid version and variant nibbles. `attester_pubkey` and
-`settlement_mint` use the base58 string of 32 zero bytes — syntactically valid
-32-byte keys; the vector exercises canonicalisation and hashing, not the config
-allowlists. Input fields, in canonical order:
+a fixed uuid with valid version and variant nibbles. `settlement_mint` uses the
+base58 string of 32 zero bytes — a syntactically valid 32-byte key; the vector
+exercises canonicalisation and hashing, not the config allowlists. The profile is
+`BASE_V1`, which is the admissible one for `required_assurance` 3 (section 2.5), so
+the vector is internally consistent with the pairing rule. Input fields, in canonical
+order:
 
 | Field | Value |
 |---|---|
 | `acceptance_window_seconds` | 86400 |
-| `attester_pubkey` | `11111111111111111111111111111111` |
 | `capture_radius_m` | 50 |
 | `chain` | `solana` |
 | `challenge_window_seconds` | 3600 |
 | `cluster` | `devnet` |
 | `completion_window_seconds` | 7200 |
 | `domain_tag` | `BOUNTYCAM_POLICY_V1` |
+| `eligibility_profile_id` | `BASE_V1` |
 | `evidence_requirements` | one item; see below |
 | `fee_amount` | `0` |
 | `lat` | `40.4405556` |
@@ -1324,25 +1433,24 @@ allowlists. Input fields, in canonical order:
 The single requirement: `id` `11111111-1111-4111-8111-111111111111`, `prompt`
 `Storefront with signage visible`, `required` true, `type` `PHOTO`.
 
-Canonical text — 624 characters, 624 UTF-8 bytes:
+Canonical text — 606 characters, 606 UTF-8 bytes:
 
 ```
-{"acceptance_window_seconds":86400,"attester_pubkey":"11111111111111111111111111111111",
-"capture_radius_m":50,"chain":"solana","challenge_window_seconds":3600,"cluster":"devnet
-","completion_window_seconds":7200,"domain_tag":"BOUNTYCAM_POLICY_V1","evidence_requirem
-ents":[{"id":"11111111-1111-4111-8111-111111111111","prompt":"Storefront with signage vi
-sible","required":true,"type":"PHOTO"}],"fee_amount":"0","lat":"40.4405556","lon":"-79.9
-961111","required_assurance":3,"reward_amount":"5000000","salt":"000102030405060708090a0
-b0c0d0e0f101112131415161718191a1b1c1d1e1f","settlement_mint":"11111111111111111111111111
-111111"}
+{"acceptance_window_seconds":86400,"capture_radius_m":50,"chain":"solana","challenge_win
+dow_seconds":3600,"cluster":"devnet","completion_window_seconds":7200,"domain_tag":"BOUN
+TYCAM_POLICY_V1","eligibility_profile_id":"BASE_V1","evidence_requirements":[{"id":"1111
+1111-1111-4111-8111-111111111111","prompt":"Storefront with signage visible","required":
+true,"type":"PHOTO"}],"fee_amount":"0","lat":"40.4405556","lon":"-79.9961111","required_
+assurance":3,"reward_amount":"5000000","salt":"000102030405060708090a0b0c0d0e0f101112131
+415161718191a1b1c1d1e1f","settlement_mint":"11111111111111111111111111111111"}
 ```
 
-Policy hash, all three routes:
+Policy hash, all three routes (verified 20 September, D108):
 
 ```
-sha256 (packages/shared): 60b987301f7731a32c6de0ec871fae6e2e6f30dc99e2d1b202ca267d408591ea
-sha256 (node:crypto):     60b987301f7731a32c6de0ec871fae6e2e6f30dc99e2d1b202ca267d408591ea
-shasum -a 256:            60b987301f7731a32c6de0ec871fae6e2e6f30dc99e2d1b202ca267d408591ea
+sha256 (packages/shared): 711175ab7b0ed6107e2a0f5510c07813d5c1771e4e934574f145615a894a253b
+sha256 (node:crypto):     711175ab7b0ed6107e2a0f5510c07813d5c1771e4e934574f145615a894a253b
+shasum -a 256:            711175ab7b0ed6107e2a0f5510c07813d5c1771e4e934574f145615a894a253b
 ```
 
 ### 13.2 Vector V2 — request digest
@@ -1351,26 +1459,27 @@ The four-key request body (section 8.3) that would create V1's bounty: `category
 `verification`, `idempotency_key` `22222222-2222-4222-8222-222222222222`, `title`
 `Photograph the storefront`, and `policy` holding the twelve request-source fields —
 no `chain`, no `domain_tag`, no `fee_amount`, no `salt`, and the requirement item
-without `id`.
+without `id`. The count is still twelve: `attester_pubkey` left and
+`eligibility_profile_id` arrived.
 
-Canonical text — 567 characters, 567 UTF-8 bytes:
+Canonical text — 549 characters, 549 UTF-8 bytes:
 
 ```
 {"category":"verification","idempotency_key":"22222222-2222-4222-8222-222222222222","pol
-icy":{"acceptance_window_seconds":86400,"attester_pubkey":"11111111111111111111111111111
-111","capture_radius_m":50,"challenge_window_seconds":3600,"cluster":"devnet","completio
-n_window_seconds":7200,"evidence_requirements":[{"prompt":"Storefront with signage visib
-le","required":true,"type":"PHOTO"}],"lat":"40.4405556","lon":"-79.9961111","required_as
-surance":3,"reward_amount":"5000000","settlement_mint":"11111111111111111111111111111111
-"},"title":"Photograph the storefront"}
+icy":{"acceptance_window_seconds":86400,"capture_radius_m":50,"challenge_window_seconds"
+:3600,"cluster":"devnet","completion_window_seconds":7200,"eligibility_profile_id":"BASE
+_V1","evidence_requirements":[{"prompt":"Storefront with signage visible","required":tru
+e,"type":"PHOTO"}],"lat":"40.4405556","lon":"-79.9961111","required_assurance":3,"reward
+_amount":"5000000","settlement_mint":"11111111111111111111111111111111"},"title":"Photog
+raph the storefront"}
 ```
 
-`request_digest` (section 10.2), all three routes:
+`request_digest` (section 10.2), all three routes (verified 20 September, D108):
 
 ```
-sha256 (packages/shared): 2dec8d20e7e49d2a4be1c3c67d6866a6cd77bcf8cf8b682847bc5a57e55d8a60
-sha256 (node:crypto):     2dec8d20e7e49d2a4be1c3c67d6866a6cd77bcf8cf8b682847bc5a57e55d8a60
-shasum -a 256:            2dec8d20e7e49d2a4be1c3c67d6866a6cd77bcf8cf8b682847bc5a57e55d8a60
+sha256 (packages/shared): 44b067e66ae8dc9939fcf3b2d9ff340e6b0f0d4535fd9b0a01e319c20d86fc65
+sha256 (node:crypto):     44b067e66ae8dc9939fcf3b2d9ff340e6b0f0d4535fd9b0a01e319c20d86fc65
+shasum -a 256:            44b067e66ae8dc9939fcf3b2d9ff340e6b0f0d4535fd9b0a01e319c20d86fc65
 ```
 
 ### 13.3 Vector V3 — snap

@@ -2155,3 +2155,58 @@ Tests, at minimum: both section 7.4 vectors reproduced by `packages/shared`; the
 accepting and rejecting the stated examples; a profile with a fourth key and one with a
 missing key both rejected; both lawful pairs accepted at creation and at least two unlawful
 pairs rejected.
+
+**D108 — The policy object drops `attester_pubkey` and gains `eligibility_profile_id`; both
+worked vectors are regenerated.**
+
+D82 removed the attester from the policy in principle on 16 September and D84 added the
+profile id, but neither reached POLICY.md. The field list, the hashed boundary, the request
+body, the validation codes, the read-model column, the tests and the worked vectors all
+still described the Session 7a object. This entry lands the change.
+
+Why now rather than later. Both changes alter the hashed field set, so both invalidate every
+existing policy hash. No bounty has ever been funded — the escrow owned no accounts on 18
+September and none has been created since — so nothing is invalidated today. The first
+funded bounty makes this expensive and permanent. This was the cheapest moment it will ever
+be.
+
+The object is still sixteen fields. One left, one arrived. `eligibility_profile_id` sorts
+between `domain_tag` and `evidence_requirements`, so the canonical order changes in two
+places, not one. The request body still carries twelve request-source fields, and
+`policy_public` still discloses thirteen: the profile is not among the withheld values,
+because a Scout must know which rulebook applies before accepting.
+
+The vectors are replaced in place, not versioned. `packages/shared/SPEC.md` section 8 holds
+that published vectors are immutable and a change of meaning goes through an explicit
+version change. That rule is kept in force for `MESSAGES.md`, whose vectors are on the
+signed path and have a second implementation verifying them. POLICY.md's V1 and V2 are
+worked examples of the current policy object: nothing was ever funded against them, no
+second implementation ever verified them, and keeping the old pair alongside a new pair
+would leave the document showing two policy shapes, one of which can no longer be created.
+They are replaced, with the superseded hashes recorded in the section so a reader who saw
+them can tell what happened.
+
+The new values, verified rather than asserted. V1 is 606 bytes hashing to
+`711175ab7b0ed6107e2a0f5510c07813d5c1771e4e934574f145615a894a253b`; V2 is 549 bytes hashing
+to `44b067e66ae8dc9939fcf3b2d9ff340e6b0f0d4535fd9b0a01e319c20d86fc65`. They were derived by
+first reproducing the published Session 7a texts byte for byte and confirming they hash to
+the published values, then applying the field change. They were then verified on 20
+September against the built `packages/shared` by all three routes — the package,
+`node:crypto` in-process, and `shasum -a 256` on a file in a separate process — all
+agreeing. The verification also re-canonicalised each parsed object and confirmed it
+reproduces the document text byte for byte, which establishes that the wrap is display-only
+and the key order canonical.
+
+The V1 freeze SHA owed by D84 is still owed. It is the SHA of the first commit in which
+`packages/shared` and the API reproduce every regenerated vector. `packages/shared`
+reproduces them now, but the API does not yet build the new object, so that commit does not
+exist. It is owed by the session that implements the change.
+
+`ATTESTER_PUBKEYS` is no longer read. The API neither validates nor consults it; the
+variable may remain set without effect. `apps/api/src/config.ts` still requires it at
+startup, which is now a discrepancy against this spec and is fixed by the implementing
+session.
+
+Tests, at minimum: tests 24 and 25 rewritten for `PROFILE_UNKNOWN` and
+`PROFILE_ASSURANCE_MISMATCH`; test 71 rewritten to assert the environment variable is
+ignored; tests 5 to 7 reproduce the regenerated vectors. The test count is unchanged at 76.
