@@ -43,10 +43,10 @@ function fail(reply: FastifyReply, status: number, code: string): FastifyReply {
 function digestBody(body: ExtractedCreateBody): Record<string, unknown> {
   const policy: Record<string, unknown> = {
     acceptance_window_seconds: body.policy.acceptanceWindowSeconds,
-    attester_pubkey: body.policy.attesterPubkey,
     capture_radius_m: body.policy.captureRadiusM,
     challenge_window_seconds: body.policy.challengeWindowSeconds,
     completion_window_seconds: body.policy.completionWindowSeconds,
+    eligibility_profile_id: body.policy.eligibilityProfileId,
     evidence_requirements: body.policy.evidenceRequirements.map((item) => ({
       prompt: item.prompt,
       required: item.required,
@@ -269,7 +269,6 @@ export function registerBountyRoutes(
   const limits: PolicyLimits = {
     cluster: config.cluster,
     settlementMint: config.settlementMint,
-    attesterPubkeys: config.attesterPubkeys,
   };
 
   app.post("/bounties", { preHandler: requireAuth }, async (request, reply) => {
@@ -332,7 +331,7 @@ export function registerBountyRoutes(
       const policyResult = await client.query<{ id: string }>(
         `INSERT INTO policies
            (requester_id, canonical_json, policy_hash, required_assurance,
-            attester_pubkey)
+            eligibility_profile_id)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id`,
         [
@@ -340,7 +339,7 @@ export function registerBountyRoutes(
           built.canonicalJson,
           Buffer.from(built.policyHashBytes),
           body.policy.requiredAssurance,
-          body.policy.attesterPubkey,
+          body.policy.eligibilityProfileId,
         ],
       );
       const policyRow = policyResult.rows[0];

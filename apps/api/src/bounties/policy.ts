@@ -2,12 +2,46 @@
 // build, canonical form and hash. Hashing is packages/shared and nothing else
 // (SECURITY.md section 5); this module never reimplements it.
 import { canonicalise, sha256 } from "@hackathon/shared";
-import { isBase58For32Bytes } from "../base58.ts";
+import type { EligibilityProfile } from "@hackathon/shared";
 import type { Randomness } from "../randomness.ts";
 import { isValidLat, isValidLon } from "./gps.ts";
 
 export const DOMAIN_TAG = "BOUNTYCAM_POLICY_V1";
 export const FEE_AMOUNT = "0"; // D24: exactly the one-character string.
+
+// POLICY.md section 2.5, the registry. The objects are the SPEC.md section 7.1
+// shape; eligibilityProfileHash over them is what the on-chain binding check
+// compares against (section 2.6), so these values are on the money path.
+export const ELIGIBILITY_PROFILES: ReadonlyMap<string, EligibilityProfile> =
+  new Map([
+    [
+      "BASE_V1",
+      {
+        domain_tag: "BOUNTYCAM_ELIGIBILITY_PROFILE_V1",
+        profile_id: "BASE_V1",
+        requires_sgt: false,
+      },
+    ],
+    [
+      "A4_SEEKER_V1",
+      {
+        domain_tag: "BOUNTYCAM_ELIGIBILITY_PROFILE_V1",
+        profile_id: "A4_SEEKER_V1",
+        requires_sgt: true,
+      },
+    ],
+  ]);
+
+// Section 2.5, the bijection: assurance 0 to 3 admits BASE_V1 only, assurance 4
+// admits A4_SEEKER_V1 only. Indexed by assurance, so the admissible profile is
+// a lookup rather than a branch.
+const ADMISSIBLE_PROFILE: readonly string[] = [
+  "BASE_V1",
+  "BASE_V1",
+  "BASE_V1",
+  "BASE_V1",
+  "A4_SEEKER_V1",
+];
 
 // Section 6.1: ASCII digits, no leading zero — rejects "0", signs, full
 // stops, exponent markers and whitespace in one rule.
@@ -21,7 +55,6 @@ const UUID_V4 =
 export interface PolicyLimits {
   cluster: string;
   settlementMint: string;
-  attesterPubkeys: ReadonlySet<string>;
 }
 
 // Extracted field by field from the request body at step 2; the raw body
@@ -29,11 +62,11 @@ export interface PolicyLimits {
 // the hash (section 3.1).
 export interface ValidatedPolicyInput {
   acceptanceWindowSeconds: number;
-  attesterPubkey: string;
   captureRadiusM: number;
   challengeWindowSeconds: number;
   cluster: string | undefined;
   completionWindowSeconds: number;
+  eligibilityProfileId: string;
   evidenceRequirements: ReadonlyArray<{
     prompt: string;
     required: boolean;
@@ -48,7 +81,8 @@ export interface ValidatedPolicyInput {
 
 export type PolicyFieldError =
   | "INVALID_ASSURANCE"
-  | "ATTESTER_NOT_ALLOWED"
+  | "PROFILE_UNKNOWN"
+  | "PROFILE_ASSURANCE_MISMATCH"
   | "CLUSTER_NOT_ALLOWED"
   | "MINT_NOT_ALLOWED"
   | "INVALID_GPS"
@@ -82,12 +116,6 @@ export function validatePolicyFields(
   ) {
     return "INVALID_WINDOW";
   }
-  if (
-    !isBase58For32Bytes(input.attesterPubkey) ||
-    !limits.attesterPubkeys.has(input.attesterPubkey)
-  ) {
-    return "ATTESTER_NOT_ALLOWED";
-  }
   if (input.captureRadiusM < 10 || input.captureRadiusM > 10_000) {
     return "INVALID_CAPTURE_RADIUS";
   }
@@ -106,6 +134,11 @@ export function validatePolicyFields(
   ) {
     return "INVALID_WINDOW";
   }
+  // The canonical position of eligibility_profile_id: registry membership
+  // only, because it depends on no other field (section 2.5, D110).
+  if (!ELIGIBILITY_PROFILES.has(input.eligibilityProfileId)) {
+    return "PROFILE_UNKNOWN";
+  }
   if (
     input.evidenceRequirements.length < 1 ||
     input.evidenceRequirements.length > 20
@@ -116,6 +149,15 @@ export function validatePolicyFields(
   if (!isValidLon(input.lon)) return "INVALID_GPS";
   if (input.requiredAssurance < 0 || input.requiredAssurance > 4) {
     return "INVALID_ASSURANCE";
+  }
+  // Out of canonical position, deliberately (D110). This rule's operands span
+  // two field positions, so it is judged at the later one: at the profile's
+  // position an assurance of -1 would return PROFILE_ASSURANCE_MISMATCH where
+  // INVALID_ASSURANCE is required.
+  if (
+    ADMISSIBLE_PROFILE[input.requiredAssurance] !== input.eligibilityProfileId
+  ) {
+    return "PROFILE_ASSURANCE_MISMATCH";
   }
   if (!isValidRewardAmount(input.rewardAmount)) {
     return "INVALID_REWARD_AMOUNT";
@@ -205,13 +247,13 @@ export function buildPolicy(
   });
   const policy = {
     acceptance_window_seconds: input.acceptanceWindowSeconds,
-    attester_pubkey: input.attesterPubkey,
     capture_radius_m: input.captureRadiusM,
     chain: "solana",
     challenge_window_seconds: input.challengeWindowSeconds,
     cluster: input.cluster ?? limits.cluster,
     completion_window_seconds: input.completionWindowSeconds,
     domain_tag: DOMAIN_TAG,
+    eligibility_profile_id: input.eligibilityProfileId,
     evidence_requirements: requirements,
     fee_amount: FEE_AMOUNT,
     lat: input.lat,

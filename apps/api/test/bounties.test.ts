@@ -40,7 +40,7 @@ const clock: Clock = { now: () => new Date(nowMs) };
 //
 // The secret is generated per run and written to a file so loadConfig reads
 // it the way startup does. ZERO32 is the base58 string of 32 zero bytes —
-// the section 13 vector key for both the mint and the attester allowlist.
+// the section 13 vector key for the mint.
 // SOLANA_CLUSTER is deliberately absent from this env: test 72 asserts the
 // devnet default flows from here into a created policy.
 
@@ -53,7 +53,6 @@ writeFileSync(secretPath, Buffer.from(randomBytes(32)).toString("hex"));
 const configEnv: Record<string, string> = {
   JWT_SECRET_PATH: secretPath,
   SETTLEMENT_MINT: ZERO32,
-  ATTESTER_PUBKEYS: ZERO32,
 };
 const config = loadConfig(configEnv);
 
@@ -166,11 +165,11 @@ function validBody(): CreateBody {
     idempotency_key: randomUUID(),
     policy: {
       acceptance_window_seconds: 86_400,
-      attester_pubkey: ZERO32,
       capture_radius_m: 50,
       challenge_window_seconds: 3600,
       cluster: "devnet",
       completion_window_seconds: 7200,
+      eligibility_profile_id: "BASE_V1",
       evidence_requirements: [
         {
           prompt: "Storefront with signage visible",
@@ -256,7 +255,9 @@ test("04 each of the other four endpoints without a token is TOKEN_MISSING", asy
 // --- create: success and invariants (POLICY.md section 12, tests 5 to 11) ---
 
 const V1_HASH =
-  "60b987301f7731a32c6de0ec871fae6e2e6f30dc99e2d1b202ca267d408591ea";
+  "711175ab7b0ed6107e2a0f5510c07813d5c1771e4e934574f145615a894a253b";
+const V2_DIGEST =
+  "44b067e66ae8dc9939fcf3b2d9ff340e6b0f0d4535fd9b0a01e319c20d86fc65";
 const V1_REQ_UUID = "11111111-1111-4111-8111-111111111111";
 const UUID_V4_LOWER =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -284,13 +285,13 @@ test("05 valid create: owner view, sixteen fields, vector V1 hash end to end", a
   // so this also asserts the sixteen fields sit in canonical order.
   assert.deepEqual(Object.keys(view.policy), [
     "acceptance_window_seconds",
-    "attester_pubkey",
     "capture_radius_m",
     "chain",
     "challenge_window_seconds",
     "cluster",
     "completion_window_seconds",
     "domain_tag",
+    "eligibility_profile_id",
     "evidence_requirements",
     "fee_amount",
     "lat",
@@ -313,6 +314,18 @@ test("05 valid create: owner view, sixteen fields, vector V1 hash end to end", a
     new TextEncoder().encode(canonicalise(view.policy)),
   );
   assert.equal(Buffer.from(recomputed).toString("hex"), view.policy_hash);
+  // (c) The section 13.2 vector: this body IS V2, so the stored digest
+  // is the published value. Pinned here rather than in its own test so
+  // both regenerated vectors are covered without changing the count.
+  const storedDigest = firstRow(
+    (
+      await pool.query<{ request_digest: Buffer }>(
+        "SELECT request_digest FROM bounties WHERE id = $1",
+        [view.id],
+      )
+    ).rows,
+  );
+  assert.equal(storedDigest.request_digest.toString("hex"), V2_DIGEST);
 });
 
 test("06 stored canonical_json hashes to policy_hash: section 3.4 first invariant", async () => {
@@ -647,18 +660,35 @@ test("23 required_assurance -1 and 5 are INVALID_ASSURANCE", async () => {
   }
 });
 
-test("24 attester_pubkey not base58 for 32 bytes is ATTESTER_NOT_ALLOWED", async () => {
+test("24 a well-formed id outside the registry is PROFILE_UNKNOWN", async () => {
   const requester = await seedRequester();
   const body = validBody();
-  body.policy["attester_pubkey"] = "not-base58-!!!";
-  await rejects(requester.token, body, "ATTESTER_NOT_ALLOWED");
+  // Section 2.5: syntactically valid per SPEC.md 7.2, absent from the
+  // table. A malformed id is a section 2.3 type failure (test 21).
+  body.policy["eligibility_profile_id"] = "SOMETHING_ELSE_V1";
+  await rejects(requester.token, body, "PROFILE_UNKNOWN");
 });
 
-test("25 attester_pubkey valid base58 but not allowlisted is ATTESTER_NOT_ALLOWED", async () => {
+test("25 each inadmissible assurance and profile pair is PROFILE_ASSURANCE_MISMATCH", async () => {
   const requester = await seedRequester();
-  const body = validBody();
-  body.policy["attester_pubkey"] = ONES32;
-  await rejects(requester.token, body, "ATTESTER_NOT_ALLOWED");
+  const inadmissible: Array<[number, string]> = [
+    [4, "BASE_V1"],
+    [0, "A4_SEEKER_V1"],
+    [3, "A4_SEEKER_V1"],
+  ];
+  for (const [assurance, profile] of inadmissible) {
+    const body = validBody();
+    body.policy["required_assurance"] = assurance;
+    body.policy["eligibility_profile_id"] = profile;
+    await rejects(requester.token, body, "PROFILE_ASSURANCE_MISMATCH");
+  }
+  // Both lawful pairs create: the rule rejects the mismatch, not the
+  // profile. Assurance 3 with BASE_V1 is validBody and is covered above.
+  const lawful = validBody();
+  lawful.policy["required_assurance"] = 4;
+  lawful.policy["eligibility_profile_id"] = "A4_SEEKER_V1";
+  const res = await createBounty(requester.token, lawful);
+  assert.equal(res.statusCode, 201);
 });
 
 test("26 cluster not the configured value is CLUSTER_NOT_ALLOWED", async () => {
@@ -1390,13 +1420,13 @@ test("59 non-requester reads AVAILABLE: public view, thirteen fields, no leaks",
   // Exactly thirteen top-level fields: the sixteen minus lat, lon, salt.
   assert.deepEqual(Object.keys(view.policy_public).sort(), [
     "acceptance_window_seconds",
-    "attester_pubkey",
     "capture_radius_m",
     "chain",
     "challenge_window_seconds",
     "cluster",
     "completion_window_seconds",
     "domain_tag",
+    "eligibility_profile_id",
     "evidence_requirements",
     "fee_amount",
     "required_assurance",
@@ -1726,20 +1756,24 @@ test("70 missing SETTLEMENT_MINT: startup exits non-zero before listening", () =
   const env = { ...process.env, JWT_SECRET_PATH: secretPath };
   delete env["SETTLEMENT_MINT"];
   delete env["SOLANA_CLUSTER"];
-  env["ATTESTER_PUBKEYS"] = ZERO32;
   const result = spawnSync("node", [INDEX_PATH], { encoding: "utf8", env });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /SETTLEMENT_MINT/);
 });
 
-test("71 malformed ATTESTER_PUBKEYS: startup exits non-zero before listening", () => {
-  const env = { ...process.env, JWT_SECRET_PATH: secretPath };
-  delete env["SOLANA_CLUSTER"];
-  env["SETTLEMENT_MINT"] = ZERO32;
-  env["ATTESTER_PUBKEYS"] = "not-base58-!!!";
-  const result = spawnSync("node", [INDEX_PATH], { encoding: "utf8", env });
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /ATTESTER_PUBKEYS/);
+test("71 ATTESTER_PUBKEYS is ignored: a malformed value still loads", () => {
+  // D108: the variable is neither read nor validated. Asserted in
+  // process, not by spawning: a config that now loads successfully
+  // would start listening, which no exit code can distinguish from a
+  // hang. loadConfig returning at all is the observation.
+  const env: Record<string, string> = {
+    JWT_SECRET_PATH: secretPath,
+    SETTLEMENT_MINT: ZERO32,
+    ATTESTER_PUBKEYS: "not-base58-!!!",
+  };
+  const loaded = loadConfig(env);
+  assert.equal(loaded.settlementMint, ZERO32);
+  assert.equal("attesterPubkeys" in loaded, false);
 });
 
 test("72 SOLANA_CLUSTER absent: created policy carries devnet", async () => {

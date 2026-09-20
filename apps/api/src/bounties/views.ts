@@ -73,13 +73,13 @@ interface StoredRequirement {
 
 interface StoredPolicy {
   acceptance_window_seconds: number;
-  attester_pubkey: string;
   capture_radius_m: number;
   chain: string;
   challenge_window_seconds: number;
   cluster: string;
   completion_window_seconds: number;
   domain_tag: string;
+  eligibility_profile_id: string;
   evidence_requirements: StoredRequirement[];
   fee_amount: string;
   lat: string;
@@ -104,13 +104,13 @@ export function publicView(input: PublicViewInput): Record<string, unknown> {
     location_public: { lat: snapLat(policy.lat), lon: snapLon(policy.lon) },
     policy_public: {
       acceptance_window_seconds: policy.acceptance_window_seconds,
-      attester_pubkey: policy.attester_pubkey,
       capture_radius_m: policy.capture_radius_m,
       chain: policy.chain,
       challenge_window_seconds: policy.challenge_window_seconds,
       cluster: policy.cluster,
       completion_window_seconds: policy.completion_window_seconds,
       domain_tag: policy.domain_tag,
+      eligibility_profile_id: policy.eligibility_profile_id,
       evidence_requirements: policy.evidence_requirements.map((item) => ({
         prompt: item.prompt,
         required: item.required,

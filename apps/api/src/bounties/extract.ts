@@ -42,16 +42,16 @@ function hasExactKeys(
 const BODY_KEYS = ["idempotency_key", "title", "category", "policy"] as const;
 
 const POLICY_REQUIRED_KEYS = [
-  "acceptance_window_seconds",
-  "attester_pubkey",
-  "capture_radius_m",
-  "challenge_window_seconds",
-  "completion_window_seconds",
-  "evidence_requirements",
-  "lat",
-  "lon",
-  "required_assurance",
-  "reward_amount",
+  "acceptance_window_seconds",
+  "capture_radius_m",
+  "challenge_window_seconds",
+  "completion_window_seconds",
+  "eligibility_profile_id",
+  "evidence_requirements",
+  "lat",
+  "lon",
+  "required_assurance",
+  "reward_amount",
 ] as const;
 
 // Request-optional (section 2.1); a constant or assigned field — chain,
@@ -88,20 +88,20 @@ export function extractCreateBody(body: unknown): ExtractedCreateBody | null {
   }
 
   const acceptanceWindowSeconds = policy["acceptance_window_seconds"];
-  const attesterPubkey = policy["attester_pubkey"];
   const captureRadiusM = policy["capture_radius_m"];
   const challengeWindowSeconds = policy["challenge_window_seconds"];
   const completionWindowSeconds = policy["completion_window_seconds"];
+  const eligibilityProfileId = policy["eligibility_profile_id"];
   const evidenceRequirements = policy["evidence_requirements"];
   const lat = policy["lat"];
   const lon = policy["lon"];
   const requiredAssurance = policy["required_assurance"];
   const rewardAmount = policy["reward_amount"];
   if (!isSafeInteger(acceptanceWindowSeconds)) return null;
-  if (typeof attesterPubkey !== "string") return null;
   if (!isSafeInteger(captureRadiusM)) return null;
   if (!isSafeInteger(challengeWindowSeconds)) return null;
   if (!isSafeInteger(completionWindowSeconds)) return null;
+  if (typeof eligibilityProfileId !== "string") return null;
   if (!Array.isArray(evidenceRequirements)) return null;
   if (typeof lat !== "string") return null;
   if (typeof lon !== "string") return null;
@@ -145,11 +145,11 @@ export function extractCreateBody(body: unknown): ExtractedCreateBody | null {
     category,
     policy: {
       acceptanceWindowSeconds,
-      attesterPubkey,
       captureRadiusM,
       challengeWindowSeconds,
       cluster,
       completionWindowSeconds,
+      eligibilityProfileId,
       evidenceRequirements: items,
       lat,
       lon,
