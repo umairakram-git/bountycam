@@ -535,6 +535,23 @@ normative requirement. Test suites must not pin a specific code for such inputs.
 cycle-versus-depth and plainness-first orders above are the exceptions: they are
 normative.
 
+### 6.4 eligibilityProfileHash and eligibilityMessage codes
+
+| Code | Function | Rejected input |
+|---|---|---|
+| `PROFILE_SHAPE_INVALID` | `eligibilityProfileHash` | a profile failing any §7.1 shape rule |
+| `PROFILE_ID_INVALID` | `eligibilityProfileHash` | `profile_id` outside the §7.2 format |
+| `MESSAGE_FIELD_NOT_BYTES` | `eligibilityMessage` | a byte field that is not a `Uint8Array` |
+| `MESSAGE_FIELD_LENGTH` | `eligibilityMessage` | a byte field not at its MESSAGES.md §4 width |
+| `MESSAGE_FIELD_RANGE` | `eligibilityMessage` | a numeric field out of range; see below |
+
+`MESSAGE_FIELD_RANGE` covers `deploymentId` outside 0 to 255, `requiredAssurance` outside 0 to
+`MAX_ASSURANCE_LEVEL` (4), and `expiresAt` that is not a `bigint` within `i64`.
+
+`eligibilityMessage` checks fields in MESSAGES.md §4 offset order, each fully before the
+next; the first failure wins. It builds `BOUNTYCAM_ELIGIBILITY_V1` only; the attestation
+message has no producer in this package until the attester exists.
+
 ---
 
 ## 7. Eligibility profiles

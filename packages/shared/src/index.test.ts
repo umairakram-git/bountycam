@@ -1,6 +1,8 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, verify } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   canonicalise,
@@ -8,8 +10,13 @@ import {
   merkleRoot,
   SpecError,
   eligibilityProfileHash,
+  eligibilityMessage,
+  ELIGIBILITY_DOMAIN_TAG,
+  ELIGIBILITY_SCHEMA_VERSION,
+  ELIGIBILITY_MESSAGE_LENGTH,
+  MAX_ASSURANCE_LEVEL,
 } from "./index.js";
-import type { EligibilityProfile } from "./index.js";
+import type { EligibilityMessageFields, EligibilityProfile } from "./index.js";
 
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
 const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
@@ -744,5 +751,179 @@ describe("eligibility profiles (section 7)", () => {
     const longest = "B".repeat(37) + "_V1";
     assert.equal(longest.length, 40);
     assert.equal(hex(eligibilityProfileHash({ ...BASE_V1, profile_id: longest })).length, 64);
+  });
+});
+
+// MESSAGES.md section 4 - BOUNTYCAM_ELIGIBILITY_V1, against the published vectors.
+// vectors.json is read relative to the package root, which is the cwd when the
+// suite runs through pnpm --filter.
+describe("eligibility message (MESSAGES.md section 4)", () => {
+  const vectors = JSON.parse(
+    readFileSync(join(process.cwd(), "vectors", "vectors.json"), "utf8"),
+  ) as {
+    authorities: { eligibility_seed_ascii: string; eligibility_pubkey_hex: string };
+    layouts: Record<
+      string,
+      { total_bytes: number; fields: { offset: number; width: number; field: string }[] }
+    >;
+    vectors: { name: string; message_len: number; message_hex: string; signature_hex: string }[];
+  };
+  const voucherVectors = vectors.vectors.filter((v) => v.message_len === 212);
+  const hex = (h: string): Uint8Array => Uint8Array.from(Buffer.from(h, "hex"));
+  const SPKI_PREFIX = "302a300506032b6570032100";
+  const PKCS8_PREFIX = "302e020100300506032b657004220420";
+
+  function fieldsOf(m: Uint8Array): EligibilityMessageFields {
+    const dv = new DataView(m.buffer, m.byteOffset, m.byteLength);
+    return {
+      deploymentId: dv.getUint8(26),
+      programId: m.slice(27, 59),
+      bountyId: m.slice(59, 75),
+      requester: m.slice(75, 107),
+      scout: m.slice(107, 139),
+      policyHash: m.slice(139, 171),
+      eligibilityProfileHash: m.slice(171, 203),
+      requiredAssurance: dv.getUint8(203),
+      expiresAt: dv.getBigInt64(204, true),
+    };
+  }
+
+  const nominal = (): EligibilityMessageFields => fieldsOf(hex(voucherVectors[0]!.message_hex));
+
+  test("constants: 24-byte ASCII tag, length 212, schema version 1, ceiling 4", () => {
+    assert.equal(new TextEncoder().encode(ELIGIBILITY_DOMAIN_TAG).length, 24);
+    assert.equal(ELIGIBILITY_MESSAGE_LENGTH, 212);
+    assert.equal(ELIGIBILITY_SCHEMA_VERSION, 1);
+    assert.equal(MAX_ASSURANCE_LEVEL, 4);
+    assert.equal(voucherVectors.length, 4);
+  });
+
+  test("every 212-byte vector reproduces byte for byte from its parsed fields", () => {
+    for (const v of voucherVectors) {
+      const m = hex(v.message_hex);
+      const rebuilt = eligibilityMessage(fieldsOf(m));
+      assert.equal(Buffer.from(rebuilt).toString("hex"), v.message_hex, v.name);
+    }
+  });
+
+  test("every vector signature verifies under the published eligibility key", () => {
+    const pub = createPublicKey({
+      key: Buffer.from(SPKI_PREFIX + vectors.authorities.eligibility_pubkey_hex, "hex"),
+      format: "der",
+      type: "spki",
+    });
+    for (const v of voucherVectors) {
+      assert.ok(verify(null, hex(v.message_hex), pub, hex(v.signature_hex)), v.name);
+    }
+    const seed = Buffer.from(vectors.authorities.eligibility_seed_ascii, "ascii");
+    assert.equal(seed.length, 32);
+    const priv = createPrivateKey({
+      key: Buffer.concat([Buffer.from(PKCS8_PREFIX, "hex"), seed]),
+      format: "der",
+      type: "pkcs8",
+    });
+    const derived = createPublicKey(priv).export({ format: "der", type: "spki" });
+    assert.equal(
+      Buffer.from(derived).subarray(-32).toString("hex"),
+      vectors.authorities.eligibility_pubkey_hex,
+    );
+  });
+
+  test("published layout agrees with the offsets the builder writes", () => {
+    const layout = vectors.layouts["BOUNTYCAM_ELIGIBILITY_V1"]!;
+    assert.equal(layout.total_bytes, 212);
+    const expected: [string, number, number][] = [
+      ["domain_tag", 0, 24], ["schema_version", 24, 2], ["deployment_id", 26, 1],
+      ["program_id", 27, 32], ["bounty_id", 59, 16], ["requester", 75, 32],
+      ["scout", 107, 32], ["policy_hash", 139, 32], ["eligibility_profile_hash", 171, 32],
+      ["required_assurance", 203, 1], ["expires_at", 204, 8],
+    ];
+    assert.deepEqual(
+      layout.fields.map((f) => [f.field, f.offset, f.width]),
+      expected,
+    );
+  });
+
+  test("byte fields: wrong width is MESSAGE_FIELD_LENGTH, non-bytes is NOT_BYTES", () => {
+    const widths: [keyof EligibilityMessageFields, number][] = [
+      ["programId", 32], ["bountyId", 16], ["requester", 32],
+      ["scout", 32], ["policyHash", 32], ["eligibilityProfileHash", 32],
+    ];
+    for (const [name, width] of widths) {
+      for (const bad of [width - 1, width + 1, 0]) {
+        assert.throws(
+          () => eligibilityMessage({ ...nominal(), [name]: new Uint8Array(bad) }),
+          (e: unknown) => e instanceof SpecError && e.code === "MESSAGE_FIELD_LENGTH",
+          name + " at " + bad,
+        );
+      }
+      assert.throws(
+        () => eligibilityMessage({ ...nominal(), [name]: Array.from(new Uint8Array(width)) }),
+        (e: unknown) => e instanceof SpecError && e.code === "MESSAGE_FIELD_NOT_BYTES",
+        name,
+      );
+    }
+  });
+
+  test("u8 fields: out-of-range or non-integer is MESSAGE_FIELD_RANGE", () => {
+    const isRange = (e: unknown) => e instanceof SpecError && e.code === "MESSAGE_FIELD_RANGE";
+    for (const bad of [-1, 256, 1.5, NaN, "1"]) {
+      assert.throws(
+        () => eligibilityMessage({ ...nominal(), deploymentId: bad as number }),
+        isRange,
+      );
+    }
+    for (const bad of [-1, 5, 2.5]) {
+      assert.throws(
+        () => eligibilityMessage({ ...nominal(), requiredAssurance: bad }),
+        isRange,
+      );
+    }
+    for (const ok of [0, 255]) {
+      const m = eligibilityMessage({ ...nominal(), deploymentId: ok });
+      assert.equal(new DataView(m.buffer).getUint8(26), ok);
+    }
+    for (const ok of [0, 4]) {
+      const m = eligibilityMessage({ ...nominal(), requiredAssurance: ok });
+      assert.equal(new DataView(m.buffer).getUint8(203), ok);
+    }
+  });
+
+  test("expiresAt: i64 bounds round-trip; beyond them or a number is MESSAGE_FIELD_RANGE", () => {
+    const isRange = (e: unknown) => e instanceof SpecError && e.code === "MESSAGE_FIELD_RANGE";
+    const min = -(1n << 63n);
+    const max = (1n << 63n) - 1n;
+    for (const ok of [min, max, 0n]) {
+      const m = eligibilityMessage({ ...nominal(), expiresAt: ok });
+      assert.equal(new DataView(m.buffer).getBigInt64(204, true), ok);
+    }
+    for (const bad of [min - 1n, max + 1n]) {
+      assert.throws(() => eligibilityMessage({ ...nominal(), expiresAt: bad }), isRange);
+    }
+    assert.throws(
+      () => eligibilityMessage({ ...nominal(), expiresAt: 1 as unknown as bigint }),
+      isRange,
+    );
+  });
+
+  test("check order: the earliest-offset failure wins", () => {
+    assert.throws(
+      () =>
+        eligibilityMessage({
+          ...nominal(),
+          programId: new Uint8Array(31),
+          expiresAt: 1 as unknown as bigint,
+        }),
+      (e: unknown) => e instanceof SpecError && e.code === "MESSAGE_FIELD_LENGTH",
+    );
+    assert.throws(
+      () =>
+        eligibilityMessage({
+          ...nominal(),
+          deploymentId: 256,
+          programId: new Uint8Array(31),
+        }),
+      (e: unknown) => e instanceof SpecError && e.code === "MESSAGE_FIELD_RANGE",
+    );
   });
 });

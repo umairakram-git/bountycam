@@ -356,3 +356,109 @@ export function eligibilityProfileHash(profile: EligibilityProfile): Uint8Array 
   });
   return sha256(new TextEncoder().encode(text));
 }
+
+// ---------------------------------------------------------------------------
+// Eligibility voucher message (MESSAGES.md section 4)
+
+export const ELIGIBILITY_DOMAIN_TAG = "BOUNTYCAM_ELIGIBILITY_V1";
+export const ELIGIBILITY_SCHEMA_VERSION = 1;
+export const ELIGIBILITY_MESSAGE_LENGTH = 212;
+export const MAX_ASSURANCE_LEVEL = 4;
+
+const I64_MIN = -(1n << 63n);
+const I64_MAX = (1n << 63n) - 1n;
+
+/**
+ * The state-derived and caller-supplied fields of a BOUNTYCAM_ELIGIBILITY_V1
+ * message (MESSAGES.md sections 4 and 5). The domain tag, schema version and
+ * layout are fixed here. The program id is a per-deployment constant the caller
+ * passes, because this package carries no deployment knowledge.
+ */
+export interface EligibilityMessageFields {
+  readonly deploymentId: number;
+  readonly programId: Uint8Array;
+  readonly bountyId: Uint8Array;
+  readonly requester: Uint8Array;
+  readonly scout: Uint8Array;
+  readonly policyHash: Uint8Array;
+  readonly eligibilityProfileHash: Uint8Array;
+  readonly requiredAssurance: number;
+  readonly expiresAt: bigint;
+}
+
+function requireBytes(value: unknown, width: number, name: string): Uint8Array {
+  if (!(value instanceof Uint8Array)) {
+    throw new SpecError(
+      "MESSAGE_FIELD_NOT_BYTES",
+      name + " must be a Uint8Array (MESSAGES.md 4)",
+    );
+  }
+  if (value.length !== width) {
+    throw new SpecError(
+      "MESSAGE_FIELD_LENGTH",
+      name + " must be exactly " + width + " bytes (MESSAGES.md 4)",
+    );
+  }
+  return value;
+}
+
+function requireU8(value: unknown, max: number, name: string): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > max
+  ) {
+    throw new SpecError(
+      "MESSAGE_FIELD_RANGE",
+      name + " must be an integer from 0 to " + max + " (MESSAGES.md 4)",
+    );
+  }
+  return value;
+}
+
+/**
+ * Build the 212-byte BOUNTYCAM_ELIGIBILITY_V1 message (MESSAGES.md section 4).
+ * Little-endian throughout. Fields are checked in offset order; the first
+ * failure wins (SPEC.md section 6.4). Signing is the caller's concern.
+ */
+export function eligibilityMessage(fields: EligibilityMessageFields): Uint8Array {
+  const deploymentId = requireU8(fields.deploymentId, 255, "deploymentId");
+  const programId = requireBytes(fields.programId, 32, "programId");
+  const bountyId = requireBytes(fields.bountyId, 16, "bountyId");
+  const requester = requireBytes(fields.requester, 32, "requester");
+  const scout = requireBytes(fields.scout, 32, "scout");
+  const policyHash = requireBytes(fields.policyHash, 32, "policyHash");
+  const profileHash = requireBytes(
+    fields.eligibilityProfileHash,
+    32,
+    "eligibilityProfileHash",
+  );
+  const requiredAssurance = requireU8(
+    fields.requiredAssurance,
+    MAX_ASSURANCE_LEVEL,
+    "requiredAssurance",
+  );
+  const expiresAt = fields.expiresAt;
+  if (typeof expiresAt !== "bigint" || expiresAt < I64_MIN || expiresAt > I64_MAX) {
+    throw new SpecError(
+      "MESSAGE_FIELD_RANGE",
+      "expiresAt must be a bigint within i64 (MESSAGES.md 4)",
+    );
+  }
+
+  const out = new Uint8Array(ELIGIBILITY_MESSAGE_LENGTH);
+  const view = new DataView(out.buffer);
+  out.set(new TextEncoder().encode(ELIGIBILITY_DOMAIN_TAG), 0);
+  view.setUint16(24, ELIGIBILITY_SCHEMA_VERSION, true);
+  view.setUint8(26, deploymentId);
+  out.set(programId, 27);
+  out.set(bountyId, 59);
+  out.set(requester, 75);
+  out.set(scout, 107);
+  out.set(policyHash, 139);
+  out.set(profileHash, 171);
+  view.setUint8(203, requiredAssurance);
+  view.setBigInt64(204, expiresAt, true);
+  return out;
+}
