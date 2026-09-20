@@ -1,6 +1,6 @@
 # BountyCam — Backlog
 
-**As at:** 20 September 2026 · 18 days to deadline · eligibility specified, build next
+**As at:** 20 September 2026 · 18 days to deadline · Session 14 closed, eligibility build under way
 
 ---
 
@@ -501,6 +501,55 @@ open.
 - **Test targets for the build.** The eligibility suite is 24 (ELIGIBILITY.md section 9).
   POLICY.md's own suite stays at 76 — D108 swapped tests rather than adding them. Both are
   D36 gates: a run is evidence only when the summary reports the exact count.
+
+---
+
+## Session 14 (20 September)
+
+**Closed.** Recorded here rather than struck through in place; the items above still read as
+open.
+
+- **The V1 freeze SHA owed by D84** — earned at `dbc0ec7`, the first commit in which both
+  `packages/shared` and the API reproduce every regenerated vector with the expected counts
+  shown. Recorded as D112 in Session 15's opening commit and cited in POLICY.md section 2.
+  D112 also records that D84's own format and derivation text was superseded by D107 and
+  `packages/shared/SPEC.md` section 7 without D107 saying so; what is frozen is section 7 as
+  implemented.
+- **`apps/api/src/config.ts` requiring `ATTESTER_PUBKEYS`** — closed at `dbc0ec7`. The
+  variable is neither read nor validated; leaving it set has no effect.
+- **Migration 7** — written at `dbc0ec7` as
+  `apps/api/migrations/1757406000000_policy-eligibility-profile.cjs`. Applied to scratch
+  databases only; see below.
+- **Helius account and API key** — obtained. `HELIUS_API_KEY` in `~/bountycam-env/api.env`,
+  verified against mainnet on 20 September. Nothing reads it yet.
+
+**Still open, and stated rather than assumed closed.**
+
+- **Migration 7 is unapplied to `bountycam_dev`**, which sits at migration 6. It is the first
+  step of Session 15, before the API starts. Its rollback is valid only while `policies` is
+  empty (POLICY.md section 11.4).
+- **Migration 8 is specified and unwritten** — ELIGIBILITY.md section 8 as amended by D111:
+  `assignments.expires_at`, the `seeker_devices` table, and NOT NULL dropped from
+  `assignments.challenge_nonce` and `assignments.deadline`.
+- **The Seeker check is scheduled last within the build**, unchanged from Session 13.
+
+**New.**
+
+- **The API type check never sees its tests.** `apps/api/tsconfig.json` has
+  `include: ["src"]`, so `tsc` never reads `apps/api/test`, and `node --test` strips types
+  without checking them. A type error in a test surfaces nowhere: the gate can pass with a
+  test that would not compile. Fix is a tsconfig that includes `test` on the type-check path
+  only, so test-only types never reach the build. Found Session 14, recorded not fixed.
+- **`packages/shared/SPEC.md` section 6 has no code table for `eligibilityProfileHash`.**
+  Section 6 is normative for the package's rejection codes and lists tables for
+  `canonicalise`, `sha256` and `merkleRoot` only. Section 7's function throws
+  `PROFILE_SHAPE_INVALID` and `PROFILE_ID_INVALID`, named in the implementation's comments and
+  nowhere in the specification. A section 6.4 table is owed. Documentation only; the
+  behaviour is correct and covered by the section 7.4 vectors.
+- **`assignments` rows have no constraint pairing `deadline` and `challenge_nonce`.** After
+  D111 an `ACTIVE` row with both null is a reservation and with both set is an acceptance;
+  one null and one set is meaningless and nothing forbids it. The projection that writes the
+  acceptance is Session 15's; the constraint is owed once that projection exists.
 
 ---
 

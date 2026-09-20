@@ -87,12 +87,12 @@ authority the upgrade authority, no freeze authority.
 ```
 hackathon202609/
 ├── apps/
-│   ├── api/          Fastify + TS, SIWS auth, five bounty endpoints, 6 migrations
+│   ├── api/          Fastify + TS, SIWS auth, five bounty endpoints, 7 migrations
 │   └── mobile/       Expo + TS skeleton, android/ kept, ios/ deleted
 ├── packages/
-│   └── shared/       SPEC.md (normative) + implementation, 66 passing tests
+│   └── shared/       SPEC.md (normative) + implementation, 72 passing tests
 └── programs/
-    └── escrow/       Anchor 1.1.2, SPEC.md, 95 SPEC tests plus test_id passing
+    └── escrow/       Anchor 1.1.2, SPEC.md, eleven instructions, 140 tests, on devnet
 ```
 
 All work committed to `main`; Umair pushes. History: `git log`.
@@ -1202,6 +1202,67 @@ arrives to trigger the flip. Both, 30-second interval, 60-second lag bound.
 `packages/shared` against its vectors, the voucher endpoint, the Seeker check last. One
 prerequisite is external: a Helius account and API key, without which the Seeker half cannot
 run at all.
+
+---
+
+## Session 14 — profile hash, migration 7, the API's new policy object (20 September)
+
+Three commits, `638f058` to `dbc0ec7`. Pushed. `dbc0ec7` is HEAD and `origin/main`.
+
+**What landed.** `638f058`: `eligibilityProfileHash` in `packages/shared` against SPEC.md
+section 7, suite at 72 tests across 15 suites. `08ecd9a`: documentation only — D110 (the
+profile checks split: registry membership at the profile's canonical position, the assurance
+pairing after the range check) and D111 (migration 8 also drops NOT NULL from
+`assignments.challenge_nonce` and `assignments.deadline`), with POLICY.md section 2.5 and
+ELIGIBILITY.md section 8 amended. `dbc0ec7`: migration 7
+(`apps/api/migrations/1757406000000_policy-eligibility-profile.cjs`), the API policy object
+with `attester_pubkey` out and `eligibility_profile_id` in, `config.ts` no longer reading
+`ATTESTER_PUBKEYS`, and the API suite at 76.
+
+**The V1 freeze.** `dbc0ec7` is the first commit in which both `packages/shared` and the API
+reproduce every regenerated vector with the expected counts shown, so it is the D84 freeze
+SHA. It is recorded as D112 in Session 15's opening commit, together with a finding made while
+recording it: D84's own format and derivation text was superseded by D107 and SPEC.md section
+7 without D107 saying so. D112 says so. What is frozen is section 7 as implemented.
+
+**Seeker Genesis Token, confirmed on mainnet.** The one real user
+(`188b1a6a-b401-419c-a16f-b150418df598`, wallet `9BZ17sUdF2matCurxmdmUpD3BNabBTFmsmAVu5oY9qP3`)
+holds a genuine SGT: mint `9cDPQW5FuAj2tb2UREgTvzsAeTteXJ4FFgHcfq2ZHbMo`, group member 90515,
+checked 20 September against all three ELIGIBILITY.md section 5.1 values. The Helius key is in
+`~/bountycam-env/api.env` as `HELIUS_API_KEY`, verified against mainnet; nothing reads it yet.
+
+**Four Helius facts that shape the Seeker check, worth not rediscovering.**
+`getTokenAccountsByOwnerV2` nests its payload as `result.value.accounts`,
+`result.value.paginationKey` and `result.value.count`, not the flat shape in Helius's own
+example. `jsonParsed` expands Token-2022 extensions, so no raw-byte parsing is needed. The
+group must be read from `tokenGroupMember.state.group`, not from `groupMemberPointer`, whose
+`memberAddress` is the mint itself. The mint carries a `permanentDelegate` set to the Seeker
+authority, which is the mechanism behind the device claim in ELIGIBILITY.md section 5.2.
+
+**Two gaps recorded, not fixed.** `apps/api/tsconfig.json` has `include: ["src"]`, so the
+type check never sees `apps/api/test` and `node --test` strips types without checking them: a
+type error in a test surfaces nowhere. `packages/shared/SPEC.md` section 6 lists codes for
+three functions and none for `eligibilityProfileHash`, which throws `PROFILE_SHAPE_INVALID`
+and `PROFILE_ID_INVALID`. Both are in BACKLOG.md.
+
+**A tooling failure that changed the working rules.** Claude Code's edit tool inserted instead
+of replacing, three times out of three, whenever the old and new strings shared their opening
+lines. Such edits now go through a Python script run in Umair's terminal that counts every old
+string, applies all edits in memory in sequence, and writes only if every count is exactly 1.
+Pure insertions and deletions still go through Claude Code.
+
+**State the next session inherits.** `bountycam_dev` is at migration 6; migration 7 has run
+only on scratch databases, so `pnpm --filter @hackathon/api migrate up` is the first thing the
+API needs, and its rollback is valid only while `policies` is empty. No bounty has ever been
+funded, so the voucher endpoint is tested against doubles until `create_and_fund` lands. The
+endpoint needs a chain reader the API does not have: plain JSON-RPC over `fetch` with a
+hand-written borsh decode of the bounty account, no `@solana/web3.js`, whose `rpc-websockets`
+dependency trips pnpm's build-script block.
+
+**Next: Session 15**, in order — this wrap-up commit; migration 7 on `bountycam_dev`;
+migration 8 per ELIGIBILITY.md section 8 as amended by D111; the voucher endpoint with
+reservation and sweeper, non-Seeker half, 17 tests; then the Seeker check, 24 tests, with
+`dev.sh` and `config.ts` gaining the Helius endpoint as a full mainnet URL, never a bare key.
 
 ---
 

@@ -2318,3 +2318,42 @@ A row's meaning now depends on which columns are populated: `ACTIVE` with a null
 a reservation, `ACTIVE` with both set is an acceptance. No constraint enforces that pairing.
 Adding one is a change section 8 does not ask for, and the projection that writes the
 acceptance is Session 15's.
+
+**D112 — The `BOUNTYCAM_POLICY_V1` freeze SHA is
+`dbc0ec77ed55059db6d8019ea5e7631742178dc2`.**
+
+D84 set the freeze point as the first Git commit in which the production `packages/shared`
+implementation and the API both reproduce every regenerated V1 and V2 policy vector and every
+profile-hash vector, with the expected test count shown (D36). A commit cannot contain its own
+hash, so D84 required the SHA to be recorded afterwards in a new append-only entry rather than
+by editing the held one. This is that entry. D84, D107 and D108 are left exactly as written.
+
+Which commit, and why not an earlier one. `638f058` landed the profile-hash derivation and its
+vectors in `packages/shared`, whose suite reported 72 tests across 15 suites, so the package has
+reproduced them since that commit. `08ecd9a` changed three markdown files and no code, so the
+API still built the pre-D108 object there; it cannot be the freeze point regardless of what was
+specified in it. `dbc0ec7` is the first commit whose tree has the API building the sixteen-field
+object with `attester_pubkey` out and `eligibility_profile_id` in, with its suite at the expected
+count of 76. The full SHA is recorded above because a tag can be moved or deleted; an annotated
+`policy-v1-freeze` tag may point at the commit, but the SHA is the reference.
+
+What the profile-hash freeze covers, stated because D84's own text no longer describes it.
+D84 froze a format of one uppercase letter then up to 63 uppercase letters, digits or
+underscores, and a derivation of SHA-256 over a domain separator followed by the id's bytes.
+D107 then placed format, derivation and vectors in `packages/shared/SPEC.md` section 7, and
+section 7 as written and implemented differs on both: the id is 1 to 40 characters and must end
+in `_V` followed by digits (section 7.2), and the hash covers the canonicalised three-field
+profile object, contents rather than name (section 7.3). D107 superseded those two paragraphs
+of D84 without saying so; this entry says so. What `dbc0ec7` freezes is section 7 as
+implemented, reproduced by the section 7.4 vectors. D84's 65-byte rejection vector is
+consequently void, replaced by the 41-character bound of section 7.2.
+
+What is now fixed. From this commit the V1 canonical bytes, the field semantics, the
+profile-hash derivation and every published V1 and V2 vector are stable. Any change affecting
+them requires a new policy version and a new domain tag; the pre-freeze correction D84 permitted,
+and D108 used, is spent. The scope of the freeze is the policy object and its derivations, not
+the rest of POLICY.md: request validation, error codes, discovery and the read model remain
+amendable, because none of them changes a hashed byte.
+
+Citation. POLICY.md held no freeze statement at all before this commit. Section 2 gains one in
+the same commit, naming this SHA, as D84 requires.

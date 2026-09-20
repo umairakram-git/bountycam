@@ -65,6 +65,15 @@ Every value below is producible by Session 7 code (D34, D44, the `Cancelled` fin
 all sixteen fields are written at creation, and no allowed value exists that creation
 cannot store.
 
+**Frozen (D84, D112).** This version of the policy object is frozen at commit
+`dbc0ec77ed55059db6d8019ea5e7631742178dc2`, the first in which `packages/shared` and
+this API reproduce every vector in section 13 and every profile-hash vector in
+`packages/shared/SPEC.md` section 7.4. From that commit, any change to the canonical
+bytes, to a field's semantics, to the profile-hash derivation or to an existing V1 or
+V2 vector is a new policy version with a new domain tag. Request validation, error
+codes, discovery and the read model are outside the freeze and remain amendable,
+because none of them changes a hashed byte.
+
 ### 2.1 Fields
 
 Fields are listed in canonical order — ascending UTF-16 code unit order of the keys
