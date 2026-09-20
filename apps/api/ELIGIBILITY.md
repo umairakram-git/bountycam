@@ -348,6 +348,14 @@ On `assignments`, add `expires_at timestamptz NOT NULL`. Every reservation carri
 the instant it stops being `ACTIVE` (section 6.1). The existing unique partial index
 on `ACTIVE` rows is unchanged and remains the race mechanism.
 
+Also on `assignments`, drop NOT NULL from `challenge_nonce` and from `deadline` (D111).
+Session 3 shaped that table as an acceptance, and both columns are acceptance-time
+facts: the mission deadline is computed from the policy windows once the chain confirms
+`accept`, and the capture nonce belongs to an accepted assignment. A reservation
+precedes both, so neither value exists when the row is inserted; both are written when
+the on-chain acceptance is observed. The unique constraint on `challenge_nonce` is
+unchanged — Postgres admits many NULLs under it, so every real nonce is still bound.
+
 Create `seeker_devices`:
 
 | Column | Type | Constraint |
@@ -359,9 +367,11 @@ Create `seeker_devices`:
 The primary key is the whole rule of section 5.2. One row per device, first claim
 wins, enforced by the database rather than by application logic.
 
-Down: drop `seeker_devices`; drop `assignments.expires_at`. Subject to POLICY.md
-section 11.4 — re-adding a NOT NULL column without a default fails once a row exists,
-so the rollback is valid only against empty tables.
+Down: drop `seeker_devices`; drop `assignments.expires_at`; restore NOT NULL on
+`challenge_nonce` and `deadline`. Subject to POLICY.md section 11.4 — re-adding a NOT
+NULL column without a default fails once a row exists, and so does restoring a NOT NULL
+constraint over a column holding NULLs, so the rollback is valid only against empty
+tables.
 
 The Seeker result cache (section 5.3) is not a migration. It is process-local with a
 24-hour entry life, lost on restart, and a cold cache costs one extra RPC walk. A

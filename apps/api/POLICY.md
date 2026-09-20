@@ -265,7 +265,9 @@ id format, the hash derivation and the vectors; this table is the registry.
 | `BASE_V1` | false | the Scout's wallet is SIWS-proved and the user row is `ACTIVE` |
 | `A4_SEEKER_V1` | true | the same, plus a server-side Seeker Genesis Token check |
 
-An id outside this table is `PROFILE_UNKNOWN`, whatever its syntax.
+An id outside this table is `PROFILE_UNKNOWN`, whatever its syntax. That check runs at
+step 5 of section 8.3 in the canonical field position of `eligibility_profile_id`,
+because registry membership depends on no other field.
 
 Admissibility is a strict bijection against `required_assurance`:
 
@@ -274,10 +276,12 @@ Admissibility is a strict bijection against `required_assurance`:
 | 0, 1, 2, 3 | `BASE_V1` only |
 | 4 | `A4_SEEKER_V1` only |
 
-Any other pair is `PROFILE_ASSURANCE_MISMATCH`. The check runs at step 5 of section
-8.3, in the canonical field position of `eligibility_profile_id`, and therefore after
-`required_assurance` has passed its own range rule — a pair cannot be judged against an
-assurance level that is itself invalid.
+Any other pair is `PROFILE_ASSURANCE_MISMATCH`. That check also runs at step 5, but
+immediately after `required_assurance` has passed its own range rule rather than at the
+profile's canonical position (D110). It is the one field rule not evaluated where its
+field sorts, because a pair cannot be judged against an assurance level that is itself
+invalid: judged earlier, `required_assurance` of -1 beside `BASE_V1` would return
+`PROFILE_ASSURANCE_MISMATCH` where section 12 test 23 requires `INVALID_ASSURANCE`.
 
 Accepted limitation (D107): a requester cannot demand a Seeker for a job below
 assurance 4. Widening the admissible set is a change to this table and to request

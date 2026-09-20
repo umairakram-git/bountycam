@@ -2266,3 +2266,55 @@ check costing several round trips.
 Tests, at minimum: the 24 of ELIGIBILITY.md section 9, including the concurrent-reservation
 case required by SECURITY.md section 10 and the zero-balance case the documentation warns
 about. Migration 8 adds `assignments.expires_at` and the `seeker_devices` table.
+
+**D110 — The profile checks split: registry membership at the profile's canonical position,
+the assurance pairing after the range check.**
+
+POLICY.md section 2.5 said the pairing check runs "in the canonical field position of
+`eligibility_profile_id`, and therefore after `required_assurance` has passed its own range
+rule". Those clauses contradict each other: in canonical order the profile sits before
+`evidence_requirements` and well before `required_assurance`, so one check cannot be in both
+places.
+
+The contradiction has a failing test behind it. Test 23 sends `required_assurance` of -1 and
+5 with a `BASE_V1` profile and expects `INVALID_ASSURANCE`. Judged at the profile's canonical
+position, -1 is outside the set 0 to 3, so `PROFILE_ASSURANCE_MISMATCH` fires first and test
+23 fails — the exact outcome that sentence's own reasoning warns against.
+
+Ruling: two checks, not one. Registry membership yields `PROFILE_UNKNOWN` and is judged at
+the canonical position of `eligibility_profile_id`, because it depends on no other field. The
+bijection yields `PROFILE_ASSURANCE_MISMATCH` and is judged immediately after
+`required_assurance` passes its range rule. Both remain inside step 5 of section 8.3.
+
+The pairing is therefore the only field rule not evaluated at its own canonical position, and
+section 2.5 now says so rather than leaving it as a reader's surprise. A rule whose operands
+span two positions must be judged at the later one. The alternative — moving the
+`required_assurance` range check earlier — would put a second rule out of position to keep
+the first one in it.
+
+**D111 — Migration 8 also relaxes `assignments.challenge_nonce` and `assignments.deadline`
+to nullable.**
+
+ELIGIBILITY.md section 6 reuses the Session 3 `assignments` table as a reservation, and
+section 8 adds only `expires_at`. The table as built carries `challenge_nonce bytea NOT NULL
+UNIQUE` and `deadline timestamptz NOT NULL`, and section 8 addresses neither. An insert
+written to section 6 as specified fails on both columns.
+
+Neither value exists at reservation time, and that is not an oversight in the endpoint. The
+mission deadline is computed from the policy windows once the chain confirms `accept`. The
+capture nonce belongs to an accepted assignment: Session 8's issuance is unbuilt, and handing
+a nonce to a Scout who then loses the on-chain race would spend nonces on attempts that never
+land.
+
+Ruling: migration 8 drops NOT NULL from both. They are written when the on-chain acceptance
+is observed. The unique constraint on `challenge_nonce` stays — Postgres admits many NULLs
+under a unique index, so every real nonce is still bound.
+
+Rejected alternative: generating a nonce at reservation. It keeps the column NOT NULL at the
+cost of issuing capture nonces to Scouts who never accept, and leaves `deadline` with no
+defensible value regardless.
+
+A row's meaning now depends on which columns are populated: `ACTIVE` with a null deadline is
+a reservation, `ACTIVE` with both set is an acceptance. No constraint enforces that pairing.
+Adding one is a change section 8 does not ask for, and the projection that writes the
+acceptance is Session 15's.
