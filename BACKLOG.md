@@ -1,6 +1,6 @@
 # BountyCam — Backlog
 
-**As at:** 20 September 2026 · 18 days to deadline
+**As at:** 20 September 2026 · 18 days to deadline · eligibility specified, build next
 
 ---
 
@@ -450,6 +450,57 @@ above still read as open.
 path: no voucher, no on-chain `accept`, no end-to-end run. Session numbering drifted again —
 Session 11's mobile block became Session 12, so discovery, bounty detail, accept and the
 assignment race test have no number.
+
+
+---
+
+## Session 13 (20 September)
+
+**Closed.** Recorded here rather than struck through in place; the items above still read as
+open.
+
+- **OPEN-1, eligibility profiles below A4** — resolved by D107. Two profiles, `BASE_V1` for
+  assurance 0 to 3 and `A4_SEEKER_V1` for 4, paired as a strict bijection. The registry is
+  POLICY.md section 2.5; the derivation and vectors are `packages/shared/SPEC.md` section 7.
+  Carried since 16 September.
+- **POLICY.md amendments owed for D79, D82 and D84** — all landed (D108). Field table,
+  notes, hashed boundary, request body, validation codes, read-model column with migration
+  7, projection, tests 24, 25 and 71, and both worked vectors regenerated and verified.
+- **Reservation expiry mechanics**, POLICY.md section 14 item 6 — settled in
+  ELIGIBILITY.md section 6.1 and recorded as D109. The clock is the injectable one; two
+  writers, a 30-second sweeper and an opportunistic flip; 60-second lag bound.
+- **The eligibility service had no owning session** — specified as
+  `apps/api/ELIGIBILITY.md`, 455 lines. The build is the next session.
+
+**Still open, and stated rather than assumed closed.**
+
+- **The V1 freeze SHA owed by D84.** It is the SHA of the first commit in which
+  `packages/shared` and the API both reproduce every regenerated vector. The package
+  reproduces them now; the API does not yet build the new sixteen-field object, so that
+  commit does not exist. Owed by the build session.
+
+**New.**
+
+- **A Helius account and API key are an external prerequisite.** The documented Seeker check
+  uses `getTokenAccountsByOwnerV2`, a Helius extension rather than a standard RPC method, so
+  the Seeker half of the build cannot start or be tested without one. It is the only item in
+  the build that cannot be begun at the keyboard. The key goes in `~/bountycam-env/api.env`
+  alongside the rest, never in the repo.
+- **`apps/api/src/config.ts` still requires `ATTESTER_PUBKEYS` at startup**, which now
+  contradicts D108 — the attester comes from the on-chain configuration account and the API
+  neither reads nor validates one. A discrepancy against the spec, fixed by the build
+  session. Until then the variable must remain set or the process will not start.
+- **Migrations 7 and 8 are specified and unwritten.** Migration 7 swaps the policy
+  read-model column (POLICY.md section 11.3); migration 8 adds `assignments.expires_at` and
+  the `seeker_devices` table (ELIGIBILITY.md section 8). Neither exists as code.
+- **The Seeker check is scheduled last within the build**, deliberately. An overrun then
+  costs the Verified Seeker badge in the demo rather than the ability to accept a bounty at
+  all. The pitch consequence is real and was accepted with eyes open: Seeker-first remains a
+  true statement about distribution strategy, and the badge must not be shown or implied
+  until the check runs.
+- **Test targets for the build.** The eligibility suite is 24 (ELIGIBILITY.md section 9).
+  POLICY.md's own suite stays at 76 — D108 swapped tests rather than adding them. Both are
+  D36 gates: a run is evidence only when the summary reports the exact count.
 
 ---
 
