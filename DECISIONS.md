@@ -2380,3 +2380,28 @@ already said of two columns, unenforced by constraint until the projection that 
 acceptance exists. The BACKLOG.md item recorded for that constraint covers the third column.
 
 ELIGIBILITY.md section 8 is amended in the same commit, before the migration lands.
+
+**D114 — Migration 9 adds `SUSPENDED` to `user_status`, so `ACCOUNT_NOT_ACTIVE` is
+returnable.**
+
+Migration 4 created `user_status` with the single value `ACTIVE`, deliberately: the only
+status Session 6 code could produce, with later values to be added by migration when a
+session introduced suspension. ELIGIBILITY.md section 5 makes a non-`ACTIVE` row return
+`ACCOUNT_NOT_ACTIVE`, and its test 10 seeds one. No such row can exist: the enum admits
+nothing else. Under D34 a code nothing can return is a defect, and the test that proves the
+code is unwritable.
+
+Ruling: migration 9 adds the value `SUSPENDED` to `user_status`. No application code writes
+it; the only writer is test 10, by direct SQL. Suspension as a feature — who sets it, what it
+means for a Scout's open assignments, whether a requester can be suspended — is not decided
+here and is not implied; the value exists so that the one check the specification requires
+can be exercised and the code it names can be reached.
+
+Postgres cannot remove a value from an enum type. The migration's down is therefore a
+documented no-op. The scratch test's full rollback is unaffected: migration 4's down drops
+`user_status` entirely, taking the added value with it, so the tables-left-after-rollback
+assertion and the type-count assertion hold as before. A partial rollback to any point at or
+after migration 4 leaves `SUSPENDED` in the type, harmlessly — nothing reads the enum's value
+set, only its rows.
+
+ELIGIBILITY.md section 8 is amended in the same commit to describe migration 9.

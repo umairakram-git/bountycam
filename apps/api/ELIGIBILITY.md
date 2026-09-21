@@ -375,6 +375,12 @@ re-adding a NOT NULL column without a default fails once a row exists, and so do
 restoring a NOT NULL constraint over a column holding NULLs, so the rollback is valid
 only against empty tables.
 
+**Migration 9 (D114)** adds the value `SUSPENDED` to `user_status`. Migration 4 created
+the type with `ACTIVE` alone, so no row could fail the section 5 base check and
+`ACCOUNT_NOT_ACTIVE` was unreachable (D34). No application code writes `SUSPENDED`; test
+10 seeds it by direct SQL. Postgres cannot remove an enum value, so the down is a
+documented no-op; migration 4's down drops the type, so a full rollback is unaffected.
+
 The Seeker result cache (section 5.3) is not a migration. It is process-local with a
 24-hour entry life, lost on restart, and a cold cache costs one extra RPC walk. A
 shared cache is a scaling decision, not a correctness one.
