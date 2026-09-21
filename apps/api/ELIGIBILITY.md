@@ -381,6 +381,12 @@ the type with `ACTIVE` alone, so no row could fail the section 5 base check and
 10 seeds it by direct SQL. Postgres cannot remove an enum value, so the down is a
 documented no-op; migration 4's down drops the type, so a full rollback is unaffected.
 
+**Migration 10 (D115)** drops the `now()` default on `assignments.accepted_at`, which
+migration 1 declared and migration 8 left in place. With it, an insert naming no
+`accepted_at` received the current time and every reservation read as an acceptance, so
+the section 6.1 flip matched nothing. The down restores the default; a default constrains
+only future inserts, so the rollback is valid against any table state.
+
 The Seeker result cache (section 5.3) is not a migration. It is process-local with a
 24-hour entry life, lost on restart, and a cold cache costs one extra RPC walk. A
 shared cache is a scaling decision, not a correctness one.

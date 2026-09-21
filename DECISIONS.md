@@ -2405,3 +2405,25 @@ after migration 4 leaves `SUSPENDED` in the type, harmlessly — nothing reads t
 set, only its rows.
 
 ELIGIBILITY.md section 8 is amended in the same commit to describe migration 9.
+
+**D115 — Migration 10 drops the `now()` default on `assignments.accepted_at`.**
+
+Migration 1 declared `accepted_at timestamptz NOT NULL DEFAULT now()`. Migration 8 dropped
+the NOT NULL (D113) and left the default. The consequence surfaced in the first test that
+needed a reservation to expire: an insert that names no `accepted_at` receives `now()`, so
+every reservation is written as an acceptance and the section 6.1 flip, whose predicate is
+`accepted_at IS NULL`, matches nothing. ELIGIBILITY.md test 24 failed with `BOUNTY_RESERVED`
+where a fresh voucher was due. Tests 1 to 23 passed because none of them needs a flip.
+
+Ruling: migration 10 drops the default. Its down restores `DEFAULT now()`, which is valid
+against any table state — a default constrains only future inserts. D113's reading of the
+row stands unchanged: `ACTIVE` with `accepted_at`, `deadline` and `challenge_nonce` all null
+is a reservation; all three set is an acceptance; the projection that writes the acceptance
+sets all three explicitly and relies on no default. Test 4 of the eligibility suite now also
+asserts a reservation's `accepted_at` is null, so the class of fault — a column default
+contradicting a documented null — has a test on this table.
+
+The general lesson is recorded in BACKLOG.md rather than as a rule: when a migration relaxes
+NOT NULL to express absence, the column's default must be inspected in the same change.
+
+ELIGIBILITY.md section 8 is amended in the same commit; migration 10 lands with the endpoint.
