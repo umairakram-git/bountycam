@@ -1837,3 +1837,62 @@ test("76 authUser() on a request that did not pass requireAuth throws", () => {
   const request = {} as FastifyRequest;
   assert.throws(() => authUser(request), /without requireAuth/);
 });
+
+// POLICY.md section 7.3, tests 77 and 78: an ACTIVE reservation hides a
+// bounty from discovery and the status flip, not a timestamp, restores it.
+// The row is a post-migration-8 reservation: no nonce, no deadline, no
+// accepted_at (D111, D113); expires_at is far in the future so the
+// exclusion is provably the status alone.
+
+async function seedReservedAvailable(
+  scoutId: string,
+): Promise<{ bountyId: string; assignmentId: string }> {
+  const requester = await seedRequester();
+  const body = validBody();
+  body.policy["lat"] = "61.0000000";
+  body.policy["lon"] = "31.0000000";
+  const res = await createBounty(requester.token, body);
+  assert.equal(res.statusCode, 201);
+  const bountyId: string = res.json().id;
+  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+    bountyId,
+  ]);
+  const inserted = await pool.query<{ id: string }>(
+    `INSERT INTO assignments (bounty_id, scout_id, status, expires_at)
+     VALUES ($1, $2, 'ACTIVE', $3) RETURNING id`,
+    [bountyId, scoutId, new Date(BASE.getTime() + 3_600_000)],
+  );
+  return { bountyId, assignmentId: firstRow(inserted.rows).id };
+}
+
+async function discoveredIds(token: string): Promise<string[]> {
+  const res = await app.inject({
+    method: "GET",
+    url: "/bounties?lat=61.0000000&lon=31.0000000&radius_m=1000",
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.statusCode, 200);
+  const items: Array<Record<string, unknown>> = res.json().bounties;
+  return items.map((entry) => entry["id"] as string);
+}
+
+test("77 an AVAILABLE bounty with an ACTIVE reservation is absent from discovery", async () => {
+  const scout = await seedRequester();
+  const viewer = await seedRequester();
+  const { bountyId } = await seedReservedAvailable(scout.id);
+  assert.ok(!(await discoveredIds(viewer.token)).includes(bountyId));
+});
+
+test(
+  "78 flipping the reservation to EXPIRED restores the bounty, timestamp unchanged",
+  async () => {
+    const scout = await seedRequester();
+    const viewer = await seedRequester();
+    const { bountyId, assignmentId } = await seedReservedAvailable(scout.id);
+    assert.ok(!(await discoveredIds(viewer.token)).includes(bountyId));
+    await pool.query("UPDATE assignments SET status = 'EXPIRED' WHERE id = $1", [
+      assignmentId,
+    ]);
+    assert.ok((await discoveredIds(viewer.token)).includes(bountyId));
+  },
+);

@@ -463,8 +463,11 @@ export function registerBountyRoutes(
       return fail(reply, 400, "INVALID_QUERY_RADIUS");
     }
 
-    // Step 5: the discoverable set is exactly AVAILABLE, measured against
-    // location_public only (9.1). Both ST_DWithin operands are geography —
+    // Step 5: the discoverable set is exactly AVAILABLE with no ACTIVE
+    // reservation (7.3, D79) — the status flip, never a timestamp, decides
+    // expiry, so this predicate and the unique partial index agree —
+    // measured against location_public only (9.1). Both ST_DWithin
+    // operands are geography —
     // no ::geometry anywhere — so the radius is metres on the spheroid; on
     // geometry the same literal would mean degrees and match the planet.
     // ST_MakePoint is (x, y) = (lon, lat), as in the insert above. Distance
@@ -479,6 +482,9 @@ export function registerBountyRoutes(
        FROM bounties b
        JOIN policies p ON p.id = b.policy_id
        WHERE b.state = 'AVAILABLE'
+         AND NOT EXISTS (
+           SELECT 1 FROM assignments a
+           WHERE a.bounty_id = b.id AND a.status = 'ACTIVE')
          AND ST_DWithin(
                b.location_public,
                ST_SetSRID(ST_MakePoint($1::float8, $2::float8), 4326)
