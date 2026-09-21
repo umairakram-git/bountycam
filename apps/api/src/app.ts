@@ -5,12 +5,17 @@ import type { Config } from "./config.ts";
 import type { Randomness } from "./randomness.ts";
 import { registerAuthRoutes } from "./auth/routes.ts";
 import { registerBountyRoutes } from "./bounties/routes.ts";
+import type { EligibilityDeps } from "./eligibility/deps.ts";
+import { registerVoucherRoutes } from "./eligibility/routes.ts";
 
 export interface AppDeps {
   config: Config;
   pool: Pool;
   clock: Clock;
   randomness: Randomness;
+  // ELIGIBILITY.md: the voucher route registers only when its dependencies
+  // are supplied; suites that never sign build the app without them.
+  eligibility?: EligibilityDeps;
   // A stream lets a test capture log output and scan it (POLICY.md test 10);
   // Fastify passes the object to pino unchanged.
   logger?: boolean | { level: string; stream: { write: (msg: string) => void } };
@@ -36,5 +41,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   registerAuthRoutes(app, deps);
   registerBountyRoutes(app, deps);
+  if (deps.eligibility !== undefined) {
+    registerVoucherRoutes(app, { ...deps, eligibility: deps.eligibility });
+  }
   return app;
 }
