@@ -87,10 +87,10 @@ authority the upgrade authority, no freeze authority.
 ```
 hackathon202609/
 ├── apps/
-│   ├── api/          Fastify + TS, SIWS auth, five bounty endpoints, 7 migrations
+│   ├── api/          Fastify + TS, SIWS auth, six bounty endpoints, 10 migrations
 │   └── mobile/       Expo + TS skeleton, android/ kept, ios/ deleted
 ├── packages/
-│   └── shared/       SPEC.md (normative) + implementation, 72 passing tests
+│   └── shared/       SPEC.md (normative) + implementation, 80 passing tests
 └── programs/
     └── escrow/       Anchor 1.1.2, SPEC.md, eleven instructions, 140 tests, on devnet
 ```
@@ -1263,6 +1263,83 @@ dependency trips pnpm's build-script block.
 migration 8 per ELIGIBILITY.md section 8 as amended by D111; the voucher endpoint with
 reservation and sweeper, non-Seeker half, 17 tests; then the Seeker check, 24 tests, with
 `dev.sh` and `config.ts` gaining the Helius endpoint as a full mainnet URL, never a bare key.
+
+---
+
+## Session 15 — freeze recorded, migrations 7 to 10, voucher endpoint (20–21 September)
+
+Eleven commits, `a8491a5` to `c8ad117`. Pushed. `c8ad117` is HEAD and `origin/main`.
+`bountycam_dev` is at migration 10.
+
+**What landed, in order.** `a8491a5` D112: the V1 freeze SHA is
+`dbc0ec77ed55059db6d8019ea5e7631742178dc2`, and D84's format and derivation text was
+superseded by D107 and SPEC.md section 7 without saying so. `0379528` D113: `accepted_at`
+nullable, a third acceptance-time column D111 missed. `3f9261e` migration 8. `261215f`
+`eligibilityMessage` in `packages/shared` with SPEC.md section 6.4, reproducing the four
+published 212-byte vectors and their signatures; shared 80 tests, 16 suites. `ea99e37` the
+chain reader (plain JSON-RPC over injected `fetch`) and bounty-account decoder (fixed prefix
+through offset 170, Option tail never parsed). `74f0b56` eligibility config, ed25519 signer,
+deployment resolution at startup; first live start against devnet. `33cd860` D114 and
+`fa8cba0` migration 9: `SUSPENDED` in `user_status`, so `ACCOUNT_NOT_ACTIVE` is reachable.
+`d616144` the discovery reservation predicate with POLICY.md tests 77 and 78. `7dc7e87` D115
+and `c8ad117` the voucher endpoint, reservation transaction, sweeper and migration 10.
+API suite 1 / 38 / 78 / 8 / 7 / 22.
+
+**Three defects found by reading or by tests, each fixed by ruling before code.** D113: a
+reservation insert would have failed on `accepted_at NOT NULL`. D114: the `user_status` enum
+held `ACTIVE` alone, so the code and its test were unwritable. D115: migration 1's
+`DEFAULT now()` on `accepted_at` survived migration 8, every reservation read as an
+acceptance and the sweep matched nothing — test 24 caught it, tests 1 to 23 could not.
+Lesson recorded in BACKLOG.md: when a migration relaxes NOT NULL to express absence,
+inspect the column's default in the same change.
+
+**Live facts, each checked by more than one route.** Configuration account
+`DqHBCi3KYaZSSgMGcPY8QftYnns8k2vcg9GCJejKBaAb`: discriminator `9b0caae01efacc82` equals
+`sha256("account:Config")[0..8]`, `deployment_id` 2, `eligibility_authority`
+`Bg6SsTTH6EX5AaeQQ9i4yhDTwsSjxnHx9AV8cqa97xmp` (hex `9e98adbd…`), which is the public half
+of `~/bountycam-keys/eligibility.json`; `usdc_mint` equals `SETTLEMENT_MINT`
+`ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR`. Bounty discriminator `ed1069c61345f2ea` by
+the same rule, pinned by chain test 06. Startup exits on any of these disagreeing.
+`api.env` now holds fourteen values; new: `SOLANA_RPC_URL` (public devnet endpoint),
+`ESCROW_PROGRAM_ID`, `ESCROW_CONFIG_ACCOUNT`, `ELIGIBILITY_KEY_PATH`. `dev.sh` requires all
+four, checks the key file's mode and prints the RPC host only.
+
+**Implementation choices the specification left open, stated in the code and here.** A
+visible bounty with no `program_account`, or whose account no longer exists, answers
+`BOUNTY_NOT_ACCEPTABLE`; an account that fails the decoder answers `BINDING_MISMATCH`. The
+binding check's profile row maps the chain hash back to a registry id: a known id that
+differs from the projection is `BINDING_MISMATCH`, a hash matching nothing defers to
+`PROFILE_UNKNOWN`. The Seeker check is an injected `SeekerCheck` interface; `index.ts` wires
+a placeholder that throws, so an `A4_SEEKER_V1` request answers `SEEKER_CHECK_UNAVAILABLE`
+until the real check lands. `AppDeps.eligibility` is optional so the other suites are
+untouched. The sweeper flips only rows with `accepted_at IS NULL`.
+
+**Working rules changed this session.** (1) Script-first: new files and edits are delivered
+as Python scripts embedding their content, run in Umair's terminal; each prints every
+written file's sha256 and runs the gate. Claude Code writes nothing to the repo; it is for
+reads and exploration. Every file it did write this session hashed to exactly the authored
+text, and its round trip cost three exchanges per file. (2) Claude Code switched itself to
+auto mode mid-session once and an append ran unapproved — correct, but by luck. Check the
+footer before every prompt. (3) Multi-line terminal pastes drop the first character of one
+line; commands are issued one per block. (4) A commit script's checks run before its prompt
+and the tree can change in between; the script re-hashes at `COMMIT`, which is what kept
+`d616144` exact when 4d-4a had landed around it. (5) `api.env` did not end with a newline
+and an append glued onto its last line; check `tail -c1` before appending to any env file.
+
+**Open, in order.** The Seeker check: `findSeekerMint` over Helius `getTokenAccountsByOwnerV2`
+against mainnet — payload nested under `result.value.accounts` / `paginationKey` / `count`,
+`jsonParsed` expands Token-2022 extensions, group read from `tokenGroupMember.state.group`
+not `groupMemberPointer`, mint carries a `permanentDelegate` set to the Seeker authority.
+`HELIUS_API_KEY` enters `chain/config.ts` as a second, mainnet RPC URL (the devnet one reads
+the escrow; the SGT lives on mainnet), never a bare key. 24-hour process-local cache
+(ELIGIBILITY.md 5.3). Tests 20 and 21 against fixture responses bring the suite to 24. The
+one live check is the real user's wallet `9BZ17sUdF2matCurxmdmUpD3BNabBTFmsmAVu5oY9qP3`,
+holding mint `9cDPQW5FuAj2tb2UREgTvzsAeTteXJ4FFgHcfq2ZHbMo`. After that: no bounty has ever
+been funded, so the endpoint has never run end to end; that needs `create_and_fund` from a
+device.
+
+**Next: Session 16** opens with the Seeker check, then whatever scope Umair sets. Its first
+commit should also rewrite this file's Working rules section to the script-first workflow.
 
 ---
 

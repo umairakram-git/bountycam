@@ -1,6 +1,6 @@
 # BountyCam — Backlog
 
-**As at:** 20 September 2026 · 18 days to deadline · Session 14 closed, eligibility build under way
+**As at:** 21 September 2026 · 17 days to deadline · voucher endpoint built, Seeker check next
 
 ---
 
@@ -550,6 +550,47 @@ open.
   D111 an `ACTIVE` row with both null is a reservation and with both set is an acceptance;
   one null and one set is meaningless and nothing forbids it. The projection that writes the
   acceptance is Session 15's; the constraint is owed once that projection exists.
+
+---
+
+## Session 15 (20–21 September)
+
+**Closed.**
+
+- **`packages/shared/SPEC.md` section 6 code table** — closed at `261215f`: section 6.4 lists
+  the codes of `eligibilityProfileHash` and `eligibilityMessage`.
+- **Migration 7 unapplied to `bountycam_dev`** — applied; the database is at migration 10.
+- **Migration 8 unwritten** — `3f9261e`, amended by D113 (`accepted_at` nullable).
+- **The Seeker check scheduled last within the build** — still last; everything before it is
+  built. The endpoint answers `SEEKER_CHECK_UNAVAILABLE` for `A4_SEEKER_V1` until it lands.
+- **Helius key unread** — still unread by code; the Seeker commit reads it. Nothing else
+  changed.
+
+**Still open.**
+
+- **The API type check never sees its tests** — unchanged. Six test files now sit outside
+  `tsc`'s view; a type error in any of them surfaces only at runtime.
+- **`assignments` rows have no constraint pairing the acceptance-time columns** — now three
+  columns (`accepted_at`, `deadline`, `challenge_nonce`, D113) and one lesson (D115). Owed
+  once the projection that writes the acceptance exists.
+
+**New.**
+
+- **Tests 20 and 21 of the eligibility suite** — owed with the Seeker check; the suite is 22.
+- **`index.ts` Seeker placeholder** — replaced by the real `SeekerCheck` in the Seeker commit.
+- **A second, mainnet RPC URL** — `HELIUS_API_KEY` must enter `chain/config.ts` as a full
+  URL alongside the devnet one; `dev.sh`'s required list and host-only echo follow.
+- **HANDOFF.md Working rules are stale** — they describe the Claude Code round trip; the
+  script-first workflow, the auto-mode warning and the paste rule live only in the Session 15
+  section until the next opening commit rewrites the section.
+- **`dev.sh` still requires `ATTESTER_PUBKEYS`** — dead since D108; remove from the required
+  list and the echo, and from `api.env`.
+- **`.DS_Store` is untracked in every status** — every commit script lists it as allowed
+  untracked; a `.gitignore` line ends that.
+- **When a migration relaxes NOT NULL to express absence, inspect the default** — the D115
+  class of fault. Migrations 1 to 10 have not been read for other such defaults; owed.
+- **The endpoint has never run against a real funded bounty** — none exists on devnet. First
+  end-to-end voucher needs `create_and_fund` from a device (mobile, Session 16 or later).
 
 ---
 
