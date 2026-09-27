@@ -5,6 +5,8 @@
 and its endpoints, and the migrations these require (prose here; code in Session 7b).
 **Style:** per D31 — no line exceeds 100 characters; escape sequences are described in
 words, never written literally.
+**Amended:** Session 17 (P1) — sections 1, 2.6, 5, 7.2, 8.7, 8.8 and 14, and the new
+section 15: funding from the device and the funding projection (D117 to D121).
 
 Policies and bounties share this document deliberately: the hashed policy object and the
 bounty row that references it must not drift, and a split document is how they would.
@@ -27,6 +29,8 @@ Normative in this document:
 - the endpoints, check orders and error codes (section 8)
 - location approximation (section 9) and idempotency (section 10)
 - the Session 7b migrations in prose (section 11) and the test list (section 12)
+- funding from the device, and the projection that makes a funded bounty `AVAILABLE`
+  (section 15)
 
 Normative elsewhere, and winning on conflict in their own scope:
 
@@ -327,8 +331,30 @@ so it is never discoverable and never acceptable. The reconciler reports it; not
 repairs it, because a bounty funded against a policy it does not match is not a
 recoverable state.
 
-The three windows are deliberately absent. They are stored on chain and verified by
-the attester against the policy (MESSAGES.md section 3), not by this projection.
+**Amended in Session 17 (D119).** The three rows above are the register the voucher
+re-checks (ELIGIBILITY.md section 4, check 7). The funding projection (section 15.3)
+checks a wider set: every field of the funded account that a Scout relies on must equal
+its source. The additions:
+
+| Value | Source | On chain |
+|---|---|---|
+| bounty id | the 16 bytes of `bounties.id` (D117) | `bounty.bounty_id` |
+| requester | the requester's `users.wallet_address` | `bounty.requester` |
+| `reward_amount` | the policy string, as an unsigned integer | `bounty.reward_amount` |
+| `fee_amount` | the policy's `0` | `bounty.platform_fee` |
+| `acceptance_window_seconds` | a hashed field | `bounty.acceptance_window_secs` |
+| `completion_window_seconds` | a hashed field | `bounty.completion_window_secs` |
+| `challenge_window_seconds` | a hashed field (D72) | `bounty.review_window_secs` |
+
+Why. Discovery shows the policy's reward (the section 8.2 list item reads the read-model
+column), but the program pays the account's. Without the reward row a direct caller
+could fund one base unit against a policy promising more; the bounty would become
+discoverable, and the Scout would learn the difference at payout. Without the window
+rows a mismatch surfaces only when the attester refuses it (MESSAGES.md section 3),
+after the Scout's work. Checked at projection, either mismatch keeps the bounty
+undiscoverable, so no Scout starts it. The windows are still verified by the attester
+as well. The voucher does not repeat the additions: each is immutable on chain once
+funded, and the voucher only ever reads bounties the projection admitted.
 
 ---
 
@@ -468,13 +494,13 @@ leaves `canonicalise` profile-agnostic — domain validation stays out of the ha
 primitive. The check therefore lives at the producer boundary. Session 7's only
 producer of policy objects is `apps/api`, so the check is request validation in
 `apps/api`, specified here, run before canonicalisation (section 2.3), failing with
-`INVALID_GPS`. The stated trigger: when a second producer of policy objects exists —
-a client that formats coordinates for a create request — the seven form rules below
-lift into `packages/shared` so every producer runs one implementation. No session in
-the current plan builds a mobile bounty-create flow, so **no session owns the lift
-yet**; the gap is named rather than assigned to a session that would not do the work
-(section 14). Whichever session first gives a client a create flow inherits the lift
-as part of its scope. `canonicalise` itself is never changed for this.
+`INVALID_GPS`. The stated trigger was a second
+producer of policy objects: a client that formats coordinates for a create request.
+Session 17's mobile create flow is that producer, so the lift is done (D121). The rules
+below are implemented once, as `isValidLat` and `isValidLon` in `packages/shared`
+(SPEC.md section 8.1), which `apps/api` calls at request validation; the phone formats
+every coordinate it sends with `formatCoordinate` from the same section. This section
+remains the statement of the rules. `canonicalise` itself is never changed for this.
 
 `lat` and `lon` each pass exactly when every rule below holds. Characters are named in
 words with their code points; all allowed characters are printable ASCII, so forms are
@@ -651,7 +677,7 @@ value is checked against a written plan rather than memory:
 
 | State | Code path expected in (informative) |
 |---|---|
-| `AVAILABLE` | the funding confirmation path |
+| `AVAILABLE` | Session 17, P1: the funding projection (section 15) |
 | `ACCEPTED` | Session 11 |
 | `SUBMITTED` | Session 13 — evidence upload and submission |
 | `DISPUTED` | Session 16 — requester review, dispute |
@@ -933,6 +959,8 @@ operation is idempotent by state (section 10.4). No request body (step 2).
    Session 9's (section 7.2). (Unreachable through Session 7 APIs; seeded by SQL in
    the test.)
 
+Section 15.6 inserts a chain read between steps 6 and 7 for a `DRAFT` bounty (D120).
+
 The policy row and the requirement rows are untouched: cancellation is a bounty
 state change, never a deletion (section 4).
 
@@ -950,6 +978,8 @@ the thirteen section 2.3 policy codes, and these seven:
 | `FORBIDDEN` | 403 | bounty visible but the caller lacks the right |
 | `BOUNTY_NOT_CANCELLABLE` | 409 | state admits no cancellation (section 8.7) |
 | `IDEMPOTENCY_KEY_REUSED` | 409 | same key, different `request_digest` (section 10) |
+
+Section 15.7 adds two codes for funding.
 
 ---
 
@@ -1542,12 +1572,9 @@ incident). Each carries its revisit condition.
    SECURITY-PRODUCTION.md section 5 (evidence lifecycle): when a key row may be
    pruned, and what a replay after pruning returns. Owed before any mainnet
    deployment (SECURITY-PRODUCTION.md section 11), not before the hackathon.
-5. **The GPS profile lift has no owner.** The section 5 form rules lift into
-   `packages/shared` when a second producer of policy objects exists. No session in
-   the current plan builds a mobile bounty-create flow — Session 11 is discovery,
-   detail and accept, all consumers — so no session owns the lift. The session that
-   first gives a client a create flow inherits it; if the plan gains such a session,
-   name it here and in section 5 at that time.
+5. **The GPS profile lift — closed in Session 17 (D121).** The mobile create flow is
+   the second producer. The section 5 rules are implemented once, in `packages/shared`
+   SPEC.md section 8.1.
 6. **Reservation expiry mechanics.** Section 7.3 defines a reservation as expired
    when its `assignments` row no longer holds `status = 'ACTIVE'`: the write-time
    flip is the definition, and the discovery query never compares timestamps.
@@ -1557,3 +1584,245 @@ incident). Each carries its revisit condition.
    `ACTIVE` off; and the bound on the lag between true expiry and the flip. The
    interval is operational; POLICY names no interval. All three are owed by the
    session that ships voucher issuance.
+7. **Discovery lists bounties past their acceptance cutoff.** A projected bounty stays
+   `AVAILABLE` until a confirmed `expire_unaccepted` (section 7.2), but no code calls
+   that instruction yet, and the cutoff is on chain only. After the cutoff such a bounty
+   is still listed, and its voucher answers `ACCEPTANCE_WINDOW_CLOSED`. Owed by P2, which
+   builds discovery on the device: store the cutoff at projection and filter on it, or
+   expire the bounty.
+8. **Recovering an escrow the database will never project.** A mismatched funding
+   (section 15.3) and a funding confirmed after cancellation (section 15.6) both leave
+   money in escrow under a row that is not `AVAILABLE`. The program returns it through
+   `cancel` or `expire_unaccepted`, which nothing but the CLI calls today. Owed by O1.
+9. **Commitment.** Projection reads at `confirmed` (section 15.3). `finalized` is owed a
+   decision before any mainnet deployment, alongside item 4.
+
+---
+
+## 15. Funding and the funding projection
+
+Session 17 (P1). Normative; written before implementation. The client is
+`apps/mobile/FUNDING.md`. The helpers both sides share are `packages/shared/SPEC.md`
+section 8.
+
+### 15.1 The bounty id on chain (D117)
+
+`create_and_fund` takes `bounty_id: [u8; 16]` and seeds the bounty account with it. That
+value is `uuidBytes(bounties.id)` (SPEC.md section 8.3): the row's own primary key, which
+the create response already returns as `id`. The database generates it, by the column
+default. No client chooses it.
+
+Consequences:
+
+- The account's address is a function of two values the server already holds: the
+  requester's wallet and `bounties.id`. Section 15.3 derives it, so nothing about the
+  funding has to be reported for the server to find it.
+- A row has exactly one possible account. Creation is idempotent (section 10), so a
+  retried create returns the same `id`, a repeated funding targets the same address, and
+  the program refuses the second as already in use. A bounty cannot be funded twice.
+- On chain, `bounty_id` need only be unique per requester (MESSAGES.md section 4). Here
+  it is also globally unique, at no cost.
+
+### 15.2 What the client funds with
+
+The client learns everything from the create response, the section 8.2 owner view: `id`,
+`policy_hash` and `policy`. No other endpoint is involved. It runs section 3.5 through
+`verifyCreatedBounty` (SPEC.md section 8.5) and builds the instruction data with
+`createAndFundData` (SPEC.md section 8.4) from that function's return value only:
+
+| Argument | From the verified object |
+|---|---|
+| `bounty_id` | `uuidBytes(id)` |
+| `reward_amount` | `reward_amount` as an unsigned 64-bit integer |
+| `policy_hash` | the 32 bytes of `policy_hash` |
+| `eligibility_profile_hash` | the registry object's hash, for `eligibility_profile_id` |
+| `required_assurance` | `required_assurance` |
+| `acceptance_window_secs` | `acceptance_window_seconds` |
+| `completion_window_secs` | `completion_window_seconds` |
+| `review_window_secs` | `challenge_window_seconds` (D72) |
+
+The requester signs with the wallet their session signed in with. Any other wallet funds
+an address section 15.3 never reads, so the phone refuses it (FUNDING.md section 2.3).
+
+### 15.3 The projection (D118)
+
+One function, `projectFunding`, is the only writer of `AVAILABLE`. It has two callers:
+the report endpoint (section 15.4) and the funding sweep (section 15.5).
+
+Its evidence is the bounty account, not a transaction. `create_and_fund` emits no event,
+and `programs/escrow/SPEC.md` section 8 names surviving accounts as the reconciliation
+source for every instruction except the two that close them. A signature proves that a
+transaction ran; the account proves what it left behind, which is what section 2.6
+compares. No signature is required or read.
+
+Steps, in order. The first failing step ends the call. Only step 7 writes.
+
+1. **Load** the row with its policy and its requester's `users.wallet_address`. Only a
+   `DRAFT` row proceeds; the callers handle every other state.
+2. **Derive** the address: the program-derived address of the escrow program over the
+   seeds `bounty`, the 32 bytes of the requester's wallet, and `uuidBytes(bounties.id)`,
+   with the canonical bump. Bumps are tried from 255 down; the first whose hash is not a
+   valid ed25519 point wins, as in the Solana runtime. The on-curve test accepts the same
+   encodings as the runtime's decompression, non-canonical y values included. It lives
+   in `apps/api/src/chain/pda.ts`, over `@noble/curves` and `@noble/hashes`, which the API
+   already uses. Its first vector is the live configuration account: the seed `config`
+   alone gives `DqHBCi3KYaZSSgMGcPY8QftYnns8k2vcg9GCJejKBaAb`, bump 255.
+3. **Read** the account at `confirmed` with the existing reader (ELIGIBILITY.md section
+   3). A reader failure is `CHAIN_UNAVAILABLE`. No account is `NOT_FUNDED`.
+4. **Decode** with the existing decoder, `chain/bounty.ts`. A failure is
+   `BINDING_MISMATCH`.
+5. **State.** The account is `Funded`, else `BINDING_MISMATCH`. No later state is
+   reachable before projection: every later instruction needs a voucher, and the voucher
+   needs `program_account` (ELIGIBILITY.md section 4, check 4).
+6. **Equality.** Every row of both section 2.6 tables compares equal, else
+   `BINDING_MISMATCH`. Policy values come from the stored canonical text (section 3.4),
+   parsed, never from read-model columns.
+7. **Write**, one conditional update: `state` to `AVAILABLE` and `program_account` to the
+   derived address in base58, where the id matches and `state = 'DRAFT'`, returning the
+   row. One row is `PROJECTED`. Zero rows means a concurrent writer won; reload once. A
+   row now `AVAILABLE` with the same `program_account` is `PROJECTED`. A row now
+   `CANCELLED` is `FUNDED_AFTER_CANCEL`. Anything else is an error, never a retry (D66's
+   reasoning).
+
+The outcomes are `PROJECTED`, `NOT_FUNDED`, `CHAIN_UNAVAILABLE`, `BINDING_MISMATCH` and
+`FUNDED_AFTER_CANCEL`. The last two are alarms: each writes one error-level log line
+naming the outcome and the bounty id, and nothing else — no account bytes, wallet or
+policy text. A mismatched bounty stays `DRAFT` for good (section 2.6); its escrow returns
+to the requester only through the program (section 14, item 8).
+
+Commitment is `confirmed`, matching the voucher. A confirmed block later rolled back
+would leave an `AVAILABLE` row with no account behind it; the voucher already maps a
+missing account to `BOUNTY_NOT_ACCEPTABLE`, so the failure is safe. Section 14, item 9.
+
+### 15.4 `POST /bounties/:id/funding`
+
+The requester's device asks the server to look. The request carries no evidence and no
+body: the server reads what it needs from the chain, so the request cannot assert a
+false fact. The phone calls it after every funding attempt, whether the wallet reported
+success or failure, and whenever it shows a `DRAFT` bounty (FUNDING.md).
+
+Check order:
+
+1. **Auth.** 401 codes per section 8.1.
+2. **Body.** Any present body is `INVALID_REQUEST` (400), section 8.7's rule.
+3. **Id form**, as section 8.5 step 2: `NOT_FOUND` (404).
+4. **Load.** No row: `NOT_FOUND` (404).
+5. **Caller.** Not the requester: `NOT_FOUND` (404) when the state is `DRAFT` or
+   `CANCELLED`, `FORBIDDEN` (403) otherwise — section 8.7's split.
+6. **Already projected.** Any state but `DRAFT` and `CANCELLED`: 200, owner view. A
+   repeated report is a success.
+7. **Cancelled.** Run section 15.3 steps 2 to 4 without writing; a decodable account
+   logs `FUNDED_AFTER_CANCEL`. Respond `BOUNTY_NOT_FUNDABLE` (409) whatever the read
+   found, including a failed read: the alarm is best effort, the answer is not.
+8. **Project** (section 15.3). `PROJECTED`: 200, owner view, now `AVAILABLE` with its
+   `program_account`. `NOT_FUNDED`: 409. `CHAIN_UNAVAILABLE`: 503. `BINDING_MISMATCH`:
+   409. `FUNDED_AFTER_CANCEL`: `BOUNTY_NOT_FUNDABLE` (409).
+
+`NOT_FUNDED` is the expected answer while a transaction is in flight. The phone repeats
+the call on FUNDING.md's schedule; the requester is not shown an error for it.
+
+The route is registered only when the chain dependencies exist, as the voucher route is.
+Every production start provides them.
+
+### 15.5 The funding sweep
+
+The backstop for a report that never arrives: the app killed after the wallet sent, the
+network lost, or the wallet reporting failure for a transaction that landed (the MWA case
+D79 cites).
+
+Every 30 seconds — the reservation sweeper's interval, and like it carrying no
+correctness weight — select `DRAFT` rows created within 24 hours of the injectable
+clock's now, newest first, at most 50, and run section 15.3 on each in turn. `NOT_FUNDED`
+and `CHAIN_UNAVAILABLE` are silent; the alarms log as section 15.3 says. A tick that
+throws reports through the same error callback as the reservation sweeper, and the next
+tick runs normally. The timer is unreferenced, like the reservation sweeper's.
+
+Why 24 hours and 50: in the only client, funding follows creation within minutes, so an
+older `DRAFT` is an abandoned one, and each row costs one account read per tick. A
+`DRAFT` older than 24 hours is still projected when its requester opens it, because the
+phone calls section 15.4 then. Both numbers are operational. A production reconciler
+reads confirmations rather than polling (O1).
+
+Lag: a landed funding with no report is projected within 30 seconds, plus one read per
+newer row, provided it is among the 50 newest `DRAFT` rows under 24 hours old.
+
+### 15.6 Cancel reads the chain first (D120)
+
+Section 8.7, amended. Between its steps 6 and 7, for a `DRAFT` bounty:
+
+6a. Run section 15.3 steps 2 and 3. A reader failure is `CHAIN_UNAVAILABLE` (503) and
+    nothing is written: a cancel is refused rather than risk cancelling a funded bounty.
+    No account: continue to step 7. An account: run section 15.3 in full, which projects
+    it or raises its alarm, and respond `BOUNTY_NOT_CANCELLABLE` (409) whatever the
+    outcome.
+
+The race that remains: a funding that confirms after step 7 commits leaves a `CANCELLED`
+row with money in escrow. The phone reports after every funding attempt, so section
+15.4 step 7 logs it; the money returns as section 14, item 8 describes. The phone never
+offers Cancel while a funding attempt is running, which narrows the window to a second
+device or a direct caller.
+
+As in section 15.4, step 6a runs only when the chain dependencies exist. A test build
+without them keeps section 8.7 as written, which is what the section 12 cancel tests
+exercise, so their count is unchanged.
+
+### 15.7 Error codes
+
+| Code | Status | Failure |
+|---|---|---|
+| `NOT_FUNDED` | 409 | no bounty account at the derived address yet (section 15.4) |
+| `BOUNTY_NOT_FUNDABLE` | 409 | the bounty is `CANCELLED` (section 15.4) |
+
+`BINDING_MISMATCH` (409) and `CHAIN_UNAVAILABLE` (503) are ELIGIBILITY.md's codes,
+reused; `BINDING_MISMATCH` here covers the wider section 2.6 set.
+
+### 15.8 Tests
+
+A new file, `apps/api/test/funding.test.ts`, named in the test script after
+`eligibility.test.ts`. D36 gate: `tests 24, pass 24, fail 0`. Every other suite keeps its
+count, bounties' 78 included (section 15.6).
+
+Fixtures are recorded raw from the first real funding on devnet (Session 17), under
+`apps/api/test/fixtures/devnet/`: the create response for that bounty as returned, and
+the `getAccountInfo` response for its account at `confirmed`. A test seeds the user,
+policy and bounty rows by SQL from the recorded create response — id, canonical text and
+hash exactly as recorded — so the account's bindings agree with the row by construction,
+not by editing. A mismatch test edits one field of the account bytes in memory, behind
+the unedited control of test 3: Session 16's pattern. Each negative test is shown red
+before the gate by a scripted mutation of the check it names.
+
+Derivation:
+
+1. `pda.ts` over the seed `config` gives `DqHBCi3KYaZSSgMGcPY8QftYnns8k2vcg9GCJejKBaAb`,
+   bump 255.
+2. Over the section 15.3 seeds for the recorded bounty, it gives the recorded address.
+
+Report:
+
+3. A `DRAFT` row and the recorded account: 200, owner view, `state` `AVAILABLE`,
+   `program_account` the recorded address. The control for tests 7 to 17.
+4. The same report again: 200, the same view; the row is written once.
+5. No account: 409 `NOT_FUNDED`; the row is `DRAFT` with `program_account` null.
+6. The reader throws `ChainError`: 503 `CHAIN_UNAVAILABLE`; the row is unchanged.
+7. to 17. One account field edited each: 409 `BINDING_MISMATCH`, row unchanged, one
+   alarm line. The fields: `bounty_id`, `requester`, `reward_amount`, `platform_fee`,
+   `policy_hash`, `eligibility_profile_hash`, `required_assurance`,
+   `acceptance_window_secs`, `completion_window_secs`, `review_window_secs`, and the
+   state byte set to `Accepted`.
+18. A request body: 400 `INVALID_REQUEST`.
+19. Another user, `DRAFT` row: 404 `NOT_FOUND`.
+20. A `CANCELLED` row and the recorded account: 409 `BOUNTY_NOT_FUNDABLE`, one
+    `FUNDED_AFTER_CANCEL` alarm line.
+
+Sweep:
+
+21. Three `DRAFT` rows — the recorded one, one with no account, and one created 25 hours
+    before the injected clock. After one sweep call only the first is `AVAILABLE`, and
+    the reader was never asked for the third row's address.
+
+Cancel (section 15.6):
+
+22. A `DRAFT` row and the recorded account: 409 `BOUNTY_NOT_CANCELLABLE`; the row is
+    `AVAILABLE`.
+23. The reader throws: 503 `CHAIN_UNAVAILABLE`; the row is `DRAFT`.
+24. No account: 200, `CANCELLED`.

@@ -2457,3 +2457,88 @@ What follows from it, each a technical call:
    October); Umair did not set one. Scope reopens only on his ruling.
 
 The reordered plan is BACKLOG.md's Remaining plan section, replaced in the same commit.
+
+**D117 — The on-chain `bounty_id` is the 16 bytes of `bounties.id`.**
+
+Context, P1. `create_and_fund` takes a 16-byte `bounty_id` and seeds the bounty account
+with it (escrow SPEC section 4). Nothing said where the value comes from.
+
+Ruling, technical: it is `uuidBytes(bounties.id)` (`packages/shared/SPEC.md` section 8.3),
+the conversion D93 already uses for `failed_requirement_id`. The database generates the
+id; no client chooses it. The account address is then a function of the requester's
+wallet and the row id, both held by the server, so the projection can find a funding
+without being told about it (D118). A retried create returns the same id (POLICY.md
+section 10), so a retried funding targets the same address and the program refuses the
+second: a bounty cannot be funded twice.
+
+**D118 — The funding projection reads the account, from two callers.**
+
+Context. D79 and D97 require `AVAILABLE` to come from a confirmed `create_and_fund` with
+every binding agreeing, but named no writer, and no evidence for a transaction whose
+report is lost.
+
+Ruling, technical. One function, `projectFunding` (POLICY.md section 15.3), is the only
+writer. Its evidence is the bounty account read at `confirmed` at the derived address,
+not a transaction signature: `create_and_fund` emits no event, and escrow SPEC section 8
+already names surviving accounts as the reconciliation source. Parsing transactions would
+add a second decoder for the same fact. Two callers: `POST /bounties/:id/funding`, which
+the phone calls after every attempt and which carries no body (section 15.4), and a sweep
+every 30 seconds over `DRAFT` rows under 24 hours old (section 15.5). A landed funding
+whose report never arrives is projected by the sweep, or when its requester next opens
+it.
+
+**D119 — Projection checks every field of the account, not three.**
+
+Context. POLICY.md section 2.6 compared only the policy hash, the profile and the
+assurance level, and left the windows to the attester. A direct caller could fund one
+base unit against a policy promising more; discovery would show the policy's reward and
+the program would pay the account's. A window mismatch would surface only when the
+attester refused it, after the Scout had worked.
+
+Ruling, technical. The projection also compares bounty id, requester, reward, fee and
+the three windows (section 2.6, amended). A mismatch keeps the bounty `DRAFT` and
+undiscoverable, and raises an alarm. The voucher is unchanged: the added fields are
+immutable on chain after funding. No hashed byte, program or message changes.
+
+**D120 — Cancelling a `DRAFT` reads the chain first.**
+
+Context. A `DRAFT` cancel racing a funding in flight could cancel a bounty whose escrow
+is funded.
+
+Ruling, technical, open to Umair's overrule because it concerns when money returns.
+Section 8.7 gains step 6a (section 15.6): read the derived address; refuse on a failed
+read; if an account exists, project it and refuse the cancel. What remains — a funding
+confirming after the cancel commits — is logged as `FUNDED_AFTER_CANCEL`. Its escrow
+returns through the program's `cancel` or `expire_unaccepted`, by CLI until O1. The
+phone never offers Cancel during a funding attempt.
+
+**D121 — The funding-path helpers live in `packages/shared`; the GPS lift is done.**
+
+Context. D61 left the GPS lift unowned until a second producer existed. P1's create flow
+is that producer, and it also needs the profile registry, the uuid conversion, the
+instruction encoder, the POLICY.md section 3.5 check and the SECURITY.md section 3
+allowlist.
+
+Ruling, technical. All of them go into `packages/shared` (SPEC.md section 8): each is
+pure and on the money path, and the phone has no test runner, while shared has one that
+shows each negative red. `apps/api` imports the GPS rules and the registry and keeps no
+copy; `gps.ts` and the API's registry map are removed in the build. The shared gate
+becomes 110. PDA derivation stays in the API (`chain/pda.ts`), because the phone derives
+with web3.js, which it already carries; a live vector ties the two (POLICY.md section
+15.3).
+
+**D122 — Session 17 product rulings (Umair).**
+
+1. **Test funds.** Requester wallets get devnet test USDC from a script Umair runs on
+   request, minting from the upgrade authority, which is the mint authority (D102), and
+   creating the token account if needed. Devnet SOL for rent comes from an airdrop.
+   Rejected: an API faucet, which would need the mint authority online.
+2. **Location.** The requester pastes `lat, lon` from a map app. No current-location
+   lookup and no map picker in P1.
+3. **Create form.** Editable: title, category (Property, Retail, Infrastructure),
+   location, reward in USDC, photo prompts. Fixed and shown: assurance A1 on `BASE_V1`,
+   capture radius 150 m, windows of 24 hours, 2 hours and 1 hour. A minimal My bounties
+   list with Fund, so an interrupted funding can be resumed.
+
+`apps/mobile/FUNDING.md` records these; POLICY.md section 15 and SPEC.md section 8 carry
+the technical rulings D117 to D121.

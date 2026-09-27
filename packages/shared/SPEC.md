@@ -3,6 +3,7 @@
 **Status:** normative. Written before implementation (Session 5).
 **Amended:** Session 5 part 2 — error model (§6), object and array shape rules
 (§1.1, §1.7), byte-input rules (§2, §3.2). Amended before implementation.
+**Amended:** Session 17 — section 8, the funding-path helpers, and section 6.5 (D121).
 **Scope:** `canonicalise`, `sha256`, `merkleRoot` as exported from
 `packages/shared/src/index.ts`.
 
@@ -124,7 +125,8 @@ string only hashes consistently if its exact form is pinned:
   reintroduce float formatting through the back door.
 
 The canonicaliser does **not** validate these profiles — they are strings to
-it. Producers are responsible for emitting them in profile form.
+it. Producers are responsible for emitting them in profile form. The GPS profile's
+validators and its producer are section 8.1, outside `canonicalise`.
 *Why:* keeping domain validation out of the hash primitive keeps the primitive
 pure and testable in isolation.
 
@@ -552,6 +554,36 @@ normative.
 next; the first failure wins. It builds `BOUNTYCAM_ELIGIBILITY_V1` only; the attestation
 message has no producer in this package until the attester exists.
 
+### 6.5 Funding-path helper codes
+
+Section 8, Session 17. Each code is listed under the helper that owns it.
+
+| Code | Function | Rejected input |
+|---|---|---|
+| `GPS_FORM_INVALID` | `gpsToScaled` | a value failing POLICY.md section 5 rules 1 to 6 |
+| `GPS_NOT_FINITE` | `formatCoordinate` | NaN or an infinity |
+| `GPS_OUT_OF_RANGE` | `formatCoordinate` | a formatted value failing its axis |
+| `GPS_PAIR_INVALID` | `parseCoordinatePair` | text not of the section 8.1 pair form |
+| `ASSURANCE_OUT_OF_RANGE` | `admissibleProfileId` | anything but an integer 0 to 4 |
+| `UUID_FORM_INVALID` | `uuidBytes` | anything but the section 8.3 form |
+| `FUND_FIELD_NOT_BYTES` | `createAndFundData` | a byte field that is not a `Uint8Array` |
+| `FUND_FIELD_LENGTH` | `createAndFundData` | a byte field not at its section 8.4 width |
+| `FUND_FIELD_RANGE` | `createAndFundData` | a numeric field outside section 8.4 |
+| `CREATED_SHAPE_INVALID` | `verifyCreatedBounty` | step 1 |
+| `CREATED_HASH_MISMATCH` | `verifyCreatedBounty` | step 2 |
+| `CREATED_CONSTANT_MISMATCH` | `verifyCreatedBounty` | step 3 |
+| `CREATED_ENVIRONMENT_MISMATCH` | `verifyCreatedBounty` | step 4 |
+| `CREATED_FIELD_MISMATCH` | `verifyCreatedBounty` | step 5 |
+| `AMOUNT_FORM_INVALID` | `decimalToBaseUnits` | text or `decimals` outside section 8.6 |
+| `AMOUNT_OUT_OF_RANGE` | `decimalToBaseUnits` | zero, or above the u64 maximum |
+| `TX_INSTRUCTION_COUNT` | `checkFundingInstructions` | step 1 |
+| `TX_PROGRAM` | `checkFundingInstructions` | step 2 |
+| `TX_ACCOUNTS` | `checkFundingInstructions` | step 3 |
+| `TX_DATA` | `checkFundingInstructions` | step 4 |
+
+`parseCoordinatePair` also throws `GPS_OUT_OF_RANGE`, from the `formatCoordinate` call it
+makes for each part.
+
 ---
 
 ## 7. Eligibility profiles
@@ -664,3 +696,280 @@ id yields a different hash, which no longer matches the hash stored on any bount
 funded under the old definition, so every voucher reconstruction for those
 bounties fails loudly at `VerificationMessageMismatch` rather than silently
 succeeding under new rules.
+
+---
+
+## 8. Funding-path helpers
+
+**Status:** normative, Session 17 (P1, D121). Written before implementation.
+
+Each helper below is pure, has no platform dependency, and sits on the path that turns
+a requester's input into a funded escrow. The phone and the API both need some of them;
+the rest are needed by the phone alone, and the phone has no test runner. Placing them
+here gives one implementation, and a suite that shows each negative red before the gate.
+None of them changes `canonicalise`, `sha256`, `merkleRoot`, or any vector in sections 4
+and 7.
+
+Every rejection throws `SpecError` with a section 6.5 code. Money and time values bound
+for the chain are `bigint`. Byte fields are `Uint8Array`, exactly as wide as stated.
+Returned byte arrays are fresh copies, never views over an input.
+
+### 8.1 The GPS profile
+
+The rules are `apps/api/POLICY.md` section 5, rules 1 to 7, unchanged. This section is
+their only implementation (D61, closed by D121); POLICY.md section 5 remains their
+statement.
+
+- `isValidLat(value: string): boolean` is true exactly when `value` passes rules 1 to 7
+  with the latitude range, -90 to 90.
+- `isValidLon(value: string): boolean` is the same with the longitude range, -180 to 180.
+  Both return false for a non-string. Neither throws.
+- `gpsToScaled(value: string): bigint` returns the value times ten million, exactly: the
+  full stop removed and the signed digits parsed. It requires rules 1 to 6 only, because
+  the snap of POLICY.md section 9 uses it; otherwise `GPS_FORM_INVALID`.
+- `formatCoordinate(degrees: number, axis: "lat" | "lon"): string` is the producer. In
+  order: a non-finite `degrees` is `GPS_NOT_FINITE`; the value is formatted with
+  ECMAScript `Number.prototype.toFixed` and seven fraction digits; a result that is a
+  hyphen-minus followed by `0.0000000` becomes `0.0000000` (rule 6); the result must then
+  pass the axis's rules 1 to 7, else `GPS_OUT_OF_RANGE`. A magnitude of 1e21 or more
+  formats in exponent form and so fails as `GPS_OUT_OF_RANGE`, which it is.
+- `parseCoordinatePair(text: string): { lat: string; lon: string }` reads a pair pasted
+  from a map app, `lat, lon` (D122). In order: remove leading and trailing space, tab,
+  line feed and carriage return; split on the comma, U+002C, which must occur exactly
+  once; remove the same characters around each part; each part must be an optional
+  hyphen-minus, one or more ASCII digits, and optionally a full stop followed by one or
+  more ASCII digits. Any failure so far is `GPS_PAIR_INVALID`. Each part is then
+  converted with `Number` and passed to `formatCoordinate` with its axis, which may throw
+  `GPS_OUT_OF_RANGE`.
+
+Rounding is `toFixed`'s: the decimal nearest the double's exact value, and the larger
+of two at a tie. A producer in another language must reproduce that. The policy hash
+commits to the string, so no consumer ever re-derives it from a double.
+
+### 8.2 The eligibility profile registry
+
+- `ELIGIBILITY_PROFILES: ReadonlyMap<string, EligibilityProfile>` holds exactly the two
+  rows of POLICY.md section 2.5, as the section 7.4 objects. `eligibilityProfileHash`
+  over each reproduces P1 and P2.
+- `admissibleProfileId(requiredAssurance: number): string` returns `BASE_V1` for 0 to 3
+  and `A4_SEEKER_V1` for 4. Any other value, including a non-integer or a non-number, is
+  `ASSURANCE_OUT_OF_RANGE`.
+
+POLICY.md section 2.5 stays the registry of record. This map is its only implementation:
+`apps/api` imports it and keeps no copy. The phone needs it because the funding
+instruction carries the profile hash, and SECURITY.md section 3 forbids taking that value
+from a server response.
+
+### 8.3 `uuidBytes(uuid: string): Uint8Array`
+
+The input is the lowercase hyphenated form: groups of 8, 4, 4, 4 and 12 lowercase hex
+digits separated by hyphen-minus, 36 characters, any version and variant. Anything else,
+including a non-string, is `UUID_FORM_INVALID`. The output is 16 bytes, each the value of
+one pair of hex digits, pairs taken in written order with the hyphens skipped.
+
+This is the conversion D93 uses for `failed_requirement_id` and D117 uses for
+`bounty_id`.
+
+**Vector U1.** `0f8fad5b-d9cb-469f-a165-70867728950e` gives
+`0f8fad5bd9cb469fa16570867728950e`.
+
+### 8.4 `createAndFundData(args: FundingArgs): Uint8Array`
+
+The instruction data of the escrow's `create_and_fund` (`programs/escrow/SPEC.md` section
+7.2), 121 bytes. Integers are little-endian.
+
+| Offset | Width | Field | Encoding |
+|---|---|---|---|
+| 0 | 8 | discriminator | `51f153b313cba740` |
+| 8 | 16 | `bountyId` | raw |
+| 24 | 8 | `rewardAmount` | u64 |
+| 32 | 32 | `policyHash` | raw |
+| 64 | 32 | `eligibilityProfileHash` | raw |
+| 96 | 1 | `requiredAssurance` | u8 |
+| 97 | 8 | `acceptanceWindowSecs` | i64 |
+| 105 | 8 | `completionWindowSecs` | i64 |
+| 113 | 8 | `reviewWindowSecs` | i64 |
+
+The discriminator is the first 8 bytes of `sha256` over the UTF-8 text
+`global:create_and_fund`, Anchor's rule; the committed IDL carries the same 8 bytes.
+
+Fields are checked in offset order, each fully before the next; the first failure wins.
+A byte field that is not a `Uint8Array` is `FUND_FIELD_NOT_BYTES`; one of the wrong width
+is `FUND_FIELD_LENGTH`. `rewardAmount` must be a `bigint` from 1 to 2 to the power 64
+minus 1; `requiredAssurance` an integer from 0 to 4; the three windows `bigint` values
+from 1 to 2592000, 2592000 and 86400 respectively. Anything else is `FUND_FIELD_RANGE`.
+These ranges repeat the program's checks 1 to 5, so a value the program would refuse
+never reaches a wallet. They are not the 60-second product minimums of POLICY.md
+section 2.1, which the server enforces at creation.
+
+**Vector C1.** `bountyId` U1; `rewardAmount` 5000000; `policyHash` the POLICY.md
+section 13.1 V1 hash; `eligibilityProfileHash` P1; `requiredAssurance` 3; windows 86400,
+7200 and 3600 — the arguments V1 yields under section 8.5. Output, 121 bytes, shown as
+hex wrapped at 64 characters (display only):
+
+```
+51f153b313cba7400f8fad5bd9cb469fa16570867728950e404b4c0000000000
+711175ab7b0ed6107e2a0f5510c07813d5c1771e4e934574f145615a894a253b
+0d2a8920d85f17637cff555ef00869418767b4de9cb72cc553c8944ccfd0deb9
+038051010000000000201c000000000000100e000000000000
+```
+
+`sha256` of the output:
+`43f757e67d6c06b5808bd316a752f182ec7f2b0623af72c303d25b7a54b0b714`.
+
+Provenance, as for section 7.4: computed by a standalone script while this section was
+written, and re-computed by the apply script that committed it. The implementing session
+reproduces it with the package. The first real funding (Session 17) is the independent
+check: a wrong encoding fails on chain.
+
+### 8.5 `verifyCreatedBounty(response: unknown, expected): FundingArgs`
+
+POLICY.md section 3.5 as one function. `response` is the parsed body of the owner view
+(POLICY.md section 8.2) from `POST /bounties` or `GET /bounties/:id`. `expected` holds
+`cluster`, `settlementMint`, `title`, `category`, and `policy`: the ten request-source
+fields of POLICY.md section 2.1 as the client sent them, requirement items carrying only
+`prompt`, `required` and `type`.
+
+Steps, in order; the first failure wins.
+
+1. **Shape**, else `CREATED_SHAPE_INVALID`. `response` is a plain object. `id` is in the
+   section 8.3 form. `title` and `category` are strings. `state` is exactly `DRAFT`.
+   `policy_hash` is 64 lowercase hex characters. `policy` is a plain object with exactly
+   the sixteen POLICY.md section 2.1 keys, each of its section 2.1 type: the four integer
+   fields safe integers, `reward_amount` in the POLICY.md section 6.1 form, `salt` 64
+   lowercase hex characters. `evidence_requirements` is an array whose items each have
+   exactly `id`, `prompt`, `required` and `type`, with `id` in the section 8.3 form and no
+   two alike. Other keys of `response` are ignored; nothing reads them.
+2. **Hash**, else `CREATED_HASH_MISMATCH`. `sha256` over the UTF-8 bytes of
+   `canonicalise(policy)` equals the bytes of `policy_hash`. A `SpecError` from
+   `canonicalise` is `CREATED_SHAPE_INVALID`.
+3. **Constants**, else `CREATED_CONSTANT_MISMATCH`: `chain` is `solana`, `domain_tag` is
+   `BOUNTYCAM_POLICY_V1`, `fee_amount` is `0`.
+4. **Environment**, else `CREATED_ENVIRONMENT_MISMATCH`: `cluster` and `settlement_mint`
+   equal `expected`'s.
+5. **Request fields**, else `CREATED_FIELD_MISMATCH`: `title`, `category` and each of the
+   ten request fields strictly equal `expected`'s; `evidence_requirements` has the same
+   length, and each item's `prompt`, `required` and `type` equal the item at the same
+   index. The registry must hold `eligibility_profile_id`.
+6. **Return** `FundingArgs`: `bountyId` is `uuidBytes(id)`; `rewardAmount` is
+   `reward_amount` as a `bigint`; `policyHash` the bytes of `policy_hash`;
+   `eligibilityProfileHash` is `eligibilityProfileHash` of the registry object for
+   `eligibility_profile_id`; `requiredAssurance` as given; `acceptanceWindowSecs`,
+   `completionWindowSecs` and `reviewWindowSecs` are `acceptance_window_seconds`,
+   `completion_window_seconds` and `challenge_window_seconds` as `bigint` (D72).
+
+`createAndFundData` takes the return value unchanged. So the funding transaction's values
+come only from an object that passed steps 1 to 5 (POLICY.md sections 3.5 and 6.3).
+Step 5 is the one that catches a tampered object carrying a self-consistent hash.
+
+### 8.6 `decimalToBaseUnits(text: string, decimals: number): string`
+
+The requester types a USDC amount; the policy needs a base-unit string (section 1.3, and
+POLICY.md section 6.1). `decimals` must be an integer from 0 to 18. `text` must be one or
+more ASCII digits with no leading zero unless the integer part is exactly `0`, optionally
+followed by a full stop and one to `decimals` ASCII digits. No sign, whitespace, exponent
+or grouping. Either failure is `AMOUNT_FORM_INVALID`.
+
+The result is the integer part times 10 to the power `decimals`, plus the fraction padded
+on the right with zeros, written without leading zeros. It is computed with `bigint` or
+digit strings, never a double. A result of zero, or above 2 to the power 64 minus 1, is
+`AMOUNT_OUT_OF_RANGE`.
+
+### 8.7 `checkFundingInstructions(instructions, expected): void`
+
+SECURITY.md section 3, applied to the funding transaction. `instructions` is the
+transaction's instruction list as plain values, each
+`{ programId, keys: { pubkey, isSigner, isWritable }[], data }` with 32-byte keys.
+`expected` holds `programId`, `requester`, `config`, `bounty`, `usdcMint`, `bountyVault`,
+`requesterAta`, all 32 bytes, and `data`, the `createAndFundData` output.
+
+1. Exactly one instruction, else `TX_INSTRUCTION_COUNT`. A second instruction of any
+   kind fails, Compute Budget included: this transaction needs none, and the allowlist is
+   the list of what it needs.
+2. `programId` equals `expected.programId`, else `TX_PROGRAM`.
+3. Exactly these nine keys, in this order, with these flags, else `TX_ACCOUNTS`:
+
+| # | Account | Signer | Writable |
+|---|---|---|---|
+| 0 | `requester` | yes | yes |
+| 1 | `config` | no | no |
+| 2 | `bounty` | no | yes |
+| 3 | `usdcMint` | no | no |
+| 4 | `bountyVault` | no | yes |
+| 5 | `requesterAta` | no | yes |
+| 6 | `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA` | no | no |
+| 7 | `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL` | no | no |
+| 8 | `11111111111111111111111111111111` | no | no |
+
+   Rows 6 to 8 are the Token, Associated Token and System programs, compiled as
+   constants. The order and flags are the program's account struct and its IDL.
+4. `data` equals `expected.data` byte for byte, else `TX_DATA`.
+
+Outside this check, stated: the fee payer and blockhash sit in the message, not in an
+instruction; the phone sets the fee payer to the requester (`apps/mobile/FUNDING.md`). A
+wallet may add instructions of its own after the phone hands the transaction over. That
+is the wallet's act, and the program still enforces every amount.
+
+### 8.8 Tests
+
+The package's existing test file. The D36 gate becomes `tests 110, pass 110, fail 0`.
+Each negative test is shown red before the gate by a scripted mutation of the check it
+names, which must fail exactly that test (HANDOFF.md Working rules).
+
+81. `isValidLat` and `isValidLon` accept: lat `0.0000000`, `90.0000000`, `-90.0000000`,
+    `-33.8688197`; lon `180.0000000`, `-180.0000000`, `151.2092955`.
+82. Both reject form failures: six and eight fraction digits, a leading zero, a plus
+    sign, `-0.0000000`, an exponent, a leading space, the Arabic-Indic digit one (U+0661)
+    in place of `1`, the empty string, and the number 1.
+83. Range failures: lat `90.0000001` and `-90.0000001`; lon `180.0000001` and
+    `-180.0000001`.
+84. `gpsToScaled`: `-33.8688197` gives -338688197; `0.0000000` gives 0; `180.0000000`
+    gives 1800000000; six fraction digits is `GPS_FORM_INVALID`.
+85. `formatCoordinate`: -33.8688197 lat gives `-33.8688197`; 151.2092955 lon gives
+    `151.2092955`; 0 and negative zero give `0.0000000`; -0.00000004 lat gives
+    `0.0000000`; 90 lat gives `90.0000000`; -179.99999996 lon gives `-180.0000000`.
+86. `formatCoordinate` rejects: NaN and Infinity, `GPS_NOT_FINITE`; 90.00000006 lat,
+    180.1 lon and 1e21 lat, `GPS_OUT_OF_RANGE`.
+87. `parseCoordinatePair` accepts `-33.8688197, 151.2092955`, the same without the
+    space, the same padded with spaces and with a lat of `-33.86881970000001`, and
+    `-33, 151`, giving `-33.0000000` and `151.0000000`.
+88. It rejects, as `GPS_PAIR_INVALID`: the empty string, a single number, three numbers,
+    letters, an exponent, a plus sign, `.5, 2` and `1., 2`; and as `GPS_OUT_OF_RANGE`:
+    `91, 0` and `0, 181`.
+89. The registry holds exactly two ids, whose hashes are P1 and P2.
+90. `admissibleProfileId`: 0 to 3 give `BASE_V1`, 4 gives `A4_SEEKER_V1`; 5, -1, 1.5
+    and the string `1` are `ASSURANCE_OUT_OF_RANGE`.
+91. `uuidBytes` reproduces U1 and returns a fresh 16-byte array.
+92. `uuidBytes` rejects: upper case, no hyphens, braces, 35 characters, a non-string.
+93. `createAndFundData` reproduces C1.
+94. The discriminator equals the first 8 bytes of the package's `sha256` over
+    `global:create_and_fund`.
+95. `FUND_FIELD_RANGE`: reward 0 and 2 to the power 64; reward as a number; assurance 5
+    and -1; each window at 0 and one above its ceiling.
+96. `FUND_FIELD_LENGTH` for a 15-byte `bountyId`, a 31-byte `policyHash` and a 33-byte
+    `eligibilityProfileHash`; `FUND_FIELD_NOT_BYTES` for a `policyHash` given as an array
+    of numbers.
+97. `verifyCreatedBounty` accepts a response carrying `id` U1, title `Storefront check`,
+    category `Retail`, state `DRAFT`, `policy_hash` V1 and `policy` V1, against V1's own
+    request fields, cluster `devnet` and mint `11111111111111111111111111111111`; its
+    return value, given to `createAndFundData`, reproduces C1.
+98. `CREATED_SHAPE_INVALID`: `salt` removed; state `AVAILABLE`; two requirements with
+    one id.
+99. `CREATED_HASH_MISMATCH`: the last digit of `policy_hash` changed.
+100. `CREATED_CONSTANT_MISMATCH`: `fee_amount` `1`, `policy_hash` recomputed to match.
+101. `CREATED_ENVIRONMENT_MISMATCH`: expected cluster `mainnet-beta`.
+102. `CREATED_FIELD_MISMATCH`: `reward_amount` `50000000` with a recomputed,
+     self-consistent hash — the case POLICY.md section 3.5 step 3 exists for.
+103. `decimalToBaseUnits` with 6 decimals: `10`, `10.5`, `0.000001` and
+     `18446744073709.551615` give `10000000`, `10500000`, `1` and
+     `18446744073709551615`.
+104. `AMOUNT_FORM_INVALID`: `0.0000001`, `01`, `-1`, `1e3`, a leading space, `1.` and
+     `.5`.
+105. `AMOUNT_OUT_OF_RANGE`: `0`, `0.000000` and `18446744073709.551616`.
+106. `checkFundingInstructions` accepts the expected instruction for C1 over fixed test
+     keys.
+107. `TX_INSTRUCTION_COUNT`: zero instructions, and two.
+108. `TX_PROGRAM`: another program id.
+109. `TX_ACCOUNTS`: keys 1 and 2 swapped; the requester not a signer; the bounty not
+     writable; eight keys.
+110. `TX_DATA`: one byte of `data` changed.
