@@ -4,11 +4,15 @@ import { systemClock } from "./clock.ts";
 import { loadConfig, type Config } from "./config.ts";
 import { systemRandomness } from "./randomness.ts";
 import { base58 } from "@scure/base";
-import { loadEligibilityConfig, type EligibilityConfig } from "./chain/config.ts";
+import {
+  loadEligibilityConfig,
+  loadSeekerRpcUrl,
+  type EligibilityConfig,
+} from "./chain/config.ts";
 import { resolveDeployment, type Deployment } from "./chain/deployment.ts";
 import { jsonRpcChainReader } from "./chain/rpc.ts";
 import { eligibilitySigner } from "./chain/signer.ts";
-import type { SeekerCheck } from "./eligibility/deps.ts";
+import { assertMainnet, heliusSeekerCheck } from "./eligibility/seeker.ts";
 import { startReservationSweeper } from "./eligibility/sweeper.ts";
 
 let config: Config;
@@ -22,6 +26,13 @@ try {
 let eligibility: EligibilityConfig;
 try {
   eligibility = loadEligibilityConfig(process.env);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+let seekerRpcUrl: string;
+try {
+  seekerRpcUrl = loadSeekerRpcUrl(process.env);
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
@@ -43,15 +54,17 @@ try {
   process.exit(1);
 }
 
-// ELIGIBILITY.md section 5.1: the Seeker check ships in the next commit.
-// Until then every A4_SEEKER_V1 voucher request answers
-// SEEKER_CHECK_UNAVAILABLE, the code the specification gives a check that
-// could not be performed. BASE_V1 bounties are unaffected.
-const seeker: SeekerCheck = {
-  findSeekerMint: async () => {
-    throw new Error("Seeker check not yet implemented");
-  },
-};
+// ELIGIBILITY.md section 5.3: the Seeker endpoint must be mainnet-beta, or
+// every check would find an empty wallet and refuse genuine owners. Checked
+// once, before listening. The logged line carries no part of the URL.
+try {
+  await assertMainnet(seekerRpcUrl, fetch);
+  console.log("seeker rpc: mainnet-beta genesis confirmed");
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+const seeker = heliusSeekerCheck(seekerRpcUrl, fetch, systemClock);
 
 const pool = new pg.Pool({ connectionString: process.env["DATABASE_URL"] });
 const app = buildApp({

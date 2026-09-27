@@ -16,18 +16,19 @@ import { BOUNTY_DISCRIMINATOR, BOUNTY_MAX_LENGTH } from "../src/chain/bounty.ts"
 import type { EligibilityConfig } from "../src/chain/config.ts";
 import type { Deployment } from "../src/chain/deployment.ts";
 import { ChainError } from "../src/chain/rpc.ts";
-import type { AccountInfo, ChainReader } from "../src/chain/rpc.ts";
+import type { AccountInfo, ChainReader, FetchLike } from "../src/chain/rpc.ts";
 import { eligibilitySigner } from "../src/chain/signer.ts";
 import type { Clock } from "../src/clock.ts";
 import { loadConfig } from "../src/config.ts";
 import type { SeekerCheck } from "../src/eligibility/deps.ts";
+import { heliusSeekerCheck, SEEKER_CACHE_MS } from "../src/eligibility/seeker.ts";
 import type { Randomness } from "../src/randomness.ts";
 
-// ELIGIBILITY.md section 9. Expected count for this commit: 22 — every test
-// except 20 and 21, which exercise the real Seeker check and land with it.
-// The controlled clock reaches every window boundary; nothing sleeps. The
-// chain, the Seeker check and the deployment are doubles; the signer is the
-// real one over the published test seed (MESSAGES.md section 8).
+// ELIGIBILITY.md section 9. Expected count: 24. The controlled clock reaches
+// every window boundary; nothing sleeps. The chain and the deployment are
+// doubles. The Seeker check is a double in tests 5 and 16 to 19, and the real
+// check over recorded mainnet responses in 20 and 21. The signer is the real
+// one over the published test seed (MESSAGES.md section 8).
 
 // --- scratch database, the bounties.test.ts pattern ---
 
@@ -526,6 +527,129 @@ test("19 a mint already claimed by this same user: success", async () => {
   seekerBehaviour = async () => mint;
   const res = await voucher(scout.token, seeded.id);
   assert.equal(res.statusCode, 200, res.body);
+});
+
+// --- Seeker, through the real check over recorded mainnet responses ---
+//
+// test/fixtures/helius holds two raw responses captured from mainnet on 28
+// September 2026 for the one real user's wallet: getTokenAccountsByOwnerV2 and
+// getMultipleAccounts for its Seeker Genesis Token. Each test first runs the
+// unedited bytes as a control that must find the mint, so the NOT_HELD after
+// it cannot come from a check that finds nothing at all; then it edits exactly
+// one field and goes through the endpoint.
+
+const FIXTURES = join(process.cwd(), "test", "fixtures", "helius");
+const OWNER_FIXTURE = readFileSync(join(FIXTURES, "owner_accounts.json"), "utf8");
+const MINT_FIXTURE = readFileSync(join(FIXTURES, "sgt_mint.json"), "utf8");
+const FIXTURE_WALLET = "9BZ17sUdF2matCurxmdmUpD3BNabBTFmsmAVu5oY9qP3";
+const FIXTURE_MINT = "9cDPQW5FuAj2tb2UREgTvzsAeTteXJ4FFgHcfq2ZHbMo";
+const HELIUS_URL = "https://mainnet.example.test/";
+
+interface RpcCall {
+  method: string;
+  params: unknown[];
+}
+
+// Serves token-account pages in order, with the recorded wallet rewritten to
+// the one requested, and the mint response for every getMultipleAccounts.
+function heliusDouble(pages: string[], mintBody: string): { fetch: FetchLike; calls: RpcCall[] } {
+  const calls: RpcCall[] = [];
+  let next = 0;
+  const fetchImpl: FetchLike = async (_url, init) => {
+    const call = JSON.parse(init.body) as RpcCall;
+    calls.push(call);
+    let body: string;
+    if (call.method === "getTokenAccountsByOwnerV2") {
+      const page = pages[next++];
+      if (page === undefined) throw new Error("double: no page left");
+      body = page.split(FIXTURE_WALLET).join(String(call.params[0]));
+    } else if (call.method === "getMultipleAccounts") {
+      body = mintBody;
+    } else {
+      throw new Error("double: unexpected method " + call.method);
+    }
+    return { ok: true, status: 200, text: async () => body };
+  };
+  return { fetch: fetchImpl, calls };
+}
+
+function editOnce(text: string, from: string, to: string): string {
+  assert.equal(text.split(from).length, 2, "edit anchor must occur exactly once: " + from);
+  return text.replace(from, to);
+}
+
+test("20 a zero-balance qualifying account is ignored: SEEKER_NOT_HELD", async () => {
+  const seeded = await seedFunded({ profile: "A4_SEEKER_V1" });
+  const scout = await seedUser();
+
+  // Control, and the section 5.3 cache: found, then served without a request
+  // until 24 hours have passed, then walked again.
+  const control = heliusDouble([OWNER_FIXTURE, OWNER_FIXTURE], MINT_FIXTURE);
+  const check = heliusSeekerCheck(HELIUS_URL, control.fetch, clock);
+  assert.equal(await check.findSeekerMint(scout.wallet), FIXTURE_MINT);
+  assert.deepEqual(
+    control.calls.map((c) => c.method),
+    ["getTokenAccountsByOwnerV2", "getMultipleAccounts"],
+  );
+  nowMs = BASE.getTime() + SEEKER_CACHE_MS - 1;
+  assert.equal(await check.findSeekerMint(scout.wallet), FIXTURE_MINT);
+  assert.equal(control.calls.length, 2);
+  nowMs = BASE.getTime() + SEEKER_CACHE_MS;
+  assert.equal(await check.findSeekerMint(scout.wallet), FIXTURE_MINT);
+  assert.equal(control.calls.length, 4);
+  nowMs = BASE.getTime();
+
+  // The edit: balance 1 to 0. The account stays frozen, as recorded.
+  const zeroed = editOnce(OWNER_FIXTURE, '"amount":"1"', '"amount":"0"');
+  assert.ok(zeroed.includes('"state":"frozen"'));
+  const edited = heliusSeekerCheck(HELIUS_URL, heliusDouble([zeroed], MINT_FIXTURE).fetch, clock);
+  seekerBehaviour = () => edited.findSeekerMint(scout.wallet);
+  const res = await voucher(scout.token, seeded.id);
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.json(), { error: "SEEKER_NOT_HELD" });
+});
+
+test("21 a mint with the right authority but the wrong group: SEEKER_NOT_HELD", async () => {
+  const seeded = await seedFunded({ profile: "A4_SEEKER_V1" });
+  const scout = await seedUser();
+
+  // Control, which also walks two pages: an empty first page carrying a
+  // pagination key, then the recording. The second request must carry the key.
+  const accounts = OWNER_FIXTURE.slice(
+    OWNER_FIXTURE.indexOf('"accounts":['),
+    OWNER_FIXTURE.indexOf(',"paginationKey":null,"count":1'),
+  );
+  const emptyPage = editOnce(
+    editOnce(OWNER_FIXTURE, accounts, '"accounts":[]'),
+    '"paginationKey":null,"count":1',
+    '"paginationKey":"page-2","count":0',
+  );
+  const control = heliusDouble([emptyPage, OWNER_FIXTURE], MINT_FIXTURE);
+  const check = heliusSeekerCheck(HELIUS_URL, control.fetch, clock);
+  assert.equal(await check.findSeekerMint(scout.wallet), FIXTURE_MINT);
+  assert.deepEqual(
+    control.calls.map((c) => c.method),
+    ["getTokenAccountsByOwnerV2", "getTokenAccountsByOwnerV2", "getMultipleAccounts"],
+  );
+  const keyOf = (call: RpcCall | undefined): unknown =>
+    (call?.params[2] as { paginationKey?: unknown } | undefined)?.paginationKey;
+  assert.equal(keyOf(control.calls[0]), undefined);
+  assert.equal(keyOf(control.calls[1]), "page-2");
+
+  // The edit: the group address only. The mint authority and the metadata
+  // pointer stay exactly as recorded.
+  const wrongGroup = editOnce(
+    MINT_FIXTURE,
+    '"group":"GT22s89nU4iWFkNXj1Bw6uYhJJWDRPpShHt4Bk8f99Te"',
+    '"group":"11111111111111111111111111111111"',
+  );
+  assert.ok(wrongGroup.includes('"mintAuthority":"GT2zuHVaZQYZSyQMgJPLzvkmyztfyXg2NJunqFp4p3A4"'));
+  const double = heliusDouble([OWNER_FIXTURE], wrongGroup);
+  const edited = heliusSeekerCheck(HELIUS_URL, double.fetch, clock);
+  seekerBehaviour = () => edited.findSeekerMint(scout.wallet);
+  const res = await voucher(scout.token, seeded.id);
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.json(), { error: "SEEKER_NOT_HELD" });
 });
 
 // --- reservation ---

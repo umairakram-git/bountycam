@@ -75,3 +75,15 @@ export function loadEligibilityConfig(
     keyPubkey,
   };
 }
+
+// ELIGIBILITY.md section 5.3: the Seeker check's mainnet endpoint, as a full URL
+// whose query carries the provider key — never a bare key. A separate reader from
+// loadEligibilityConfig, so the suites that build that config never need it;
+// index.ts reads it before listening, and startup confirms the cluster.
+export function loadSeekerRpcUrl(env: Record<string, string | undefined>): string {
+  const url = required(env, "SEEKER_RPC_URL");
+  if (!url.startsWith("https://")) {
+    throw new Error("SEEKER_RPC_URL must begin with https://");
+  }
+  return url;
+}
