@@ -2427,3 +2427,33 @@ The general lesson is recorded in BACKLOG.md rather than as a rule: when a migra
 NOT NULL to express absence, the column's default must be inspected in the same change.
 
 ELIGIBILITY.md section 8 is amended in the same commit; migration 10 lands with the endpoint.
+
+**D116 — Nothing is cut; the payment path is built first.**
+
+Context, 28 September, ten days before 8 October. Everything a user does after sign-in was
+unbuilt. The remaining plan held sixteen rows, and three needed items sat in none of them:
+funding from a device, projecting confirmed transactions into the database, and a capture nonce
+specification. The architect recommended cutting to the PRD section 83 demo path at A1, and
+recorded a consequence of that cut: A4 is A3 plus the Seeker profile (D13, D69), A3 needs C2PA
+and device attestation, so without them an `A4_SEEKER_V1` bounty could be accepted but never
+paid — `submit_attestation` rejects an attested shortfall (D85).
+
+Ruling, Umair: nothing is cut. Every row of the remaining plan stays in scope.
+
+What follows from it, each a technical call:
+
+1. **Order.** The payment path is built end to end at A1 first — fund from the device, discover
+   and accept, capture nonce, live capture and submission, attestation, approval and payout.
+   C2PA (A2) and device attestation (A3) are then layered onto a path that already pays, and A4
+   is reached through `A4_SEEKER_V1` as registered. Items off the payment path follow. From the
+   moment the path lands, a bounty can be paid on devnet; each later item raises the assurance a
+   bounty can demand rather than blocking payment.
+2. **No lower-assurance Seeker profile.** That question existed only if A2 and A3 were cut. With
+   both in scope `A4_SEEKER_V1` can settle, and D107's pairing stands unchanged.
+3. **The dApp Store dry run moves forward**, to directly after the payment path. Its lead time —
+   publisher and app NFTs, the build procedure Session 12 found missing, store review — is
+   unknown, and an unknown lead time cannot be discovered in the last days.
+4. **No checkpoint date.** A date by which a devnet bounty must have been paid was offered (4
+   October); Umair did not set one. Scope reopens only on his ruling.
+
+The reordered plan is BACKLOG.md's Remaining plan section, replaced in the same commit.

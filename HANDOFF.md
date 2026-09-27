@@ -1,21 +1,18 @@
 # BountyCam — Handoff
 
-**Date:** 20 September 2026
+**Date:** 28 September 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
 spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification and build;
 Session 10; Session 11 escrow initialisation; Session 12 mobile sign-in; Session 13
-eligibility specification
-**Next session:** the eligibility build. `apps/api/ELIGIBILITY.md` specifies it and nothing
-in it is undecided: migrations 7 and 8, the profile registry in `packages/shared` against
-its section 7 vectors, the voucher endpoint, then the Seeker check last so an overrun costs
-the Seeker badge rather than the ability to accept a bounty. One external prerequisite: a
-Helius account and API key. After that build, on-chain `accept` works for the first time and
-mobile discovery, bounty detail and accept become buildable — they have no session number,
-because Session 11's mobile block took 12. The escrow is deployed at eleven instructions and
-initialised: the configuration account exists on devnet at
-`DqHBCi3KYaZSSgMGcPY8QftYnns8k2vcg9GCJejKBaAb`. Sign-in works on device against the live
-API.
-**Deadline:** 8 October 2026 (18 days remaining)
+eligibility specification; Sessions 14 and 15 eligibility build; Session 16 Seeker check
+**Next session:** P1 in BACKLOG.md's Remaining plan — creating and funding a bounty from the
+device, and the funding projection. Specification first: the client create flow, the GPS
+profile lift into `packages/shared` that D61 left without an owner, and how confirmed funding
+reaches the database (D79, D97). No bounty has ever been funded; P1 produces the first. Under
+D116 nothing is cut and the payment path is built first, at A1. The escrow is deployed and
+initialised on devnet; sign-in works on device; the voucher endpoint and the Seeker check are
+live against the API.
+**Deadline:** 8 October 2026 (10 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
 
@@ -1343,38 +1340,114 @@ commit should also rewrite this file's Working rules section to the script-first
 
 ---
 
+## Session 16 — the Seeker check and the scope ruling (28 September)
+
+Three commits: `115d5e5` and `7c331a6`, pushed; this records commit. There were no commits
+between 21 and 28 September.
+
+**Scope.** Ten days remained and the plan did not fit. The architect recommended cutting to the
+PRD section 83 demo path; Umair ruled that nothing is cut (D116). The payment path is built
+first at A1, then C2PA and device attestation, then everything off the path. BACKLOG.md's
+Remaining plan is replaced with IDs in that order. No checkpoint date was set.
+
+**What landed.** `115d5e5`: ELIGIBILITY.md sections 5.1 and 5.3 — frozen token accounts count,
+only found mints are cached, the key enters as `SEEKER_RPC_URL` and startup refuses a
+non-mainnet endpoint. `7c331a6`: `src/eligibility/seeker.ts`, `loadSeekerRpcUrl` in
+`chain/config.ts`, `index.ts` wiring the real check behind the mainnet guard, `dev.sh`
+requiring `SEEKER_RPC_URL` and dropping `ATTESTER_PUBKEYS`, and tests 20 and 21 over two
+recorded mainnet responses in `apps/api/test/fixtures/helius`. Before the gate each test was
+shown red by mutating the check — zero-balance skip removed, group check removed — and each
+mutation failed exactly its own test. API suite 1 / 38 / 78 / 8 / 7 / 24, lint exit 0.
+
+**Live, 28 September.** `api.env` holds thirteen values: `HELIUS_API_KEY` and
+`ATTESTER_PUBKEYS` removed, `SEEKER_RPC_URL` added, sha `26a165cb`. The committed module against
+mainnet: genesis hash mainnet-beta; the public devnet endpoint refused by the same guard; the
+real user's wallet resolves to `9cDPQW5FuAj2tb2UREgTvzsAeTteXJ4FFgHcfq2ZHbMo`; the eligibility
+authority's wallet, holding no Seeker token, resolves to null. `dev.sh` printed the Seeker host
+only, and `seeker rpc: mainnet-beta genesis confirmed` before `Server listening`.
+
+**Facts worth not rediscovering.**
+
+- The token account holding a Seeker Genesis Token is `frozen`; the mint's freeze authority is
+  the Seeker mint authority. A check that requires an `initialized` account refuses every
+  genuine holder.
+- The one real wallet holds a single Token-2022 account, so live data never exercises
+  pagination. Test 21's control does, with an edited empty first page carrying a key.
+- The fixtures are the raw response bytes, sha `567eb170` (owner accounts) and `b9bbfe3c`
+  (mint). Tests edit them in memory, one field each, behind a control on the unedited bytes.
+- A found mint is cached for 24 hours; a "no" is not cached. The cache is process-local and
+  reads the injectable clock.
+- The startup guard is exercised live only; no suite test covers `assertMainnet`.
+
+**Process.** The apply script's `--revert` was run once after a passing gate, undoing it; the
+re-run reproduced every hash. `--revert` is for failures only.
+
+**Still open.** The voucher endpoint has never run against a funded bounty; P1 produces the
+first. BACKLOG.md's Session 16 section lists the rest.
+
+---
+
 ## Working rules
 
+Rewritten 28 September for the script-first workflow adopted in Session 15.
+
+**Authority**
+
 - Read SECURITY.md before touching the escrow, auth, verifier, or any key (D50).
-- Per-edit approval. Never blanket "allow all". Claude Code stays in manual mode.
+- Claude, as architect, makes technical calls — placement, formats, check order, test design —
+  with a one-line reason. Umair decides user experience, when money moves, scope and deadline
+  trade-offs.
+- Write the specification before the implementation, and commit each amendment in its own
+  commit ahead of the code it governs.
+
+**How changes reach the repo**
+
+- New files and edits arrive as Python scripts that embed their content and run in Umair's
+  terminal. A script checks HEAD and every base file's hash, applies all edits in memory,
+  writes only if every anchor occurs exactly once, prints each written file's sha256 and runs
+  the gate. Its `--revert` restores HEAD and is for failures only.
+- Claude Code is for reads and exploration. It writes nothing to the repo. Its sessions start
+  in auto mode and have switched to it mid-session: check the footer before every prompt.
+- Test fixtures come from recorded real responses, not hand-written shapes.
+- Negative tests are shown red before the gate — by landing the code without its checks, or by
+  a scripted mutation that must fail exactly the intended test.
+
+**Commits**
+
+- Single-purpose commits, made by a script that checks HEAD, the exact modified and untracked
+  sets, every file hash and the gate, prompts once, re-hashes at `COMMIT`, and requires each
+  staged set to be exactly its own list.
+- Answer `COMMIT` only after the architect has seen the pasted output, and answer it once.
 - No autonomous commits or pushes. Umair pushes.
-- Single-purpose commits.
-- Verify from raw terminal output. Claude Code's self-reports are not evidence
-  — this caught the `anchor-lang` version drift, the silently-ignored
-  `skip_deploy` key, and the failing devnet deploy.
-- Write the spec before the implementation, in its own session, and commit it.
-  In Session 4 the spec was written afterwards and documented an invented fee
-  constant as though it were intended.
-- Start a fresh Claude Code session per numbered session. Compaction loses
-  spec detail.
-- Approve a write only after seeing it.
-- A counted escrow run (D90) is `anchor build`; `cargo build-sbf --manifest-path
-  programs/cpi_caller/Cargo.toml`; the `escrow.so`, IDL and `cpi_caller.so` timestamps; then
-  `cargo test --locked`, in one output. The summary shows five result lines (three test
-  binaries and two doc-test runs); count each by name.
-- A test pass counts only if the summary shows the expected test count. A
-  green run that executed nothing looks identical from the exit banner alone
-  (D36).
-- Never `git stash`. It moves uncommitted work out of the working tree and
-  the pop can fail. For a read-only comparison against HEAD, read the
-  committed file from the object store: `git show HEAD:<path>`.
-- Devnet deploys use `anchor deploy --program-name escrow` only. Never run
-  `anchor keys sync` or `anchor build --ignore-keys`: the first would replace a program id,
-  the second would silence the escrow's own id check (D90).
-- Claude Code sessions start in auto mode. Check the footer before the opening prompt; every
-  write phase is manual with per-edit approval.
-- Answer a commit script's prompt only after the architect has checked the pasted output, and
-  answer it once. A script re-run later against a changed tree commits the wrong thing; this
-  produced 9044791, a commit that could not compile.
-- A commit script re-hashes every file immediately before staging and requires the staged set to
-  be exactly its own file list. A list of names alone stages whatever those files now contain.
+
+**Evidence**
+
+- Verify from raw terminal output. Self-reports from any tool are not evidence.
+- A test pass counts only if the summary shows the expected count; a run that executed nothing
+  looks identical from the exit banner (D36).
+- A counted escrow run (D90, D101) deletes `target/sbpf-solana-solana`, runs `anchor build` and
+  `cargo build-sbf --manifest-path programs/cpi_caller/Cargo.toml`, shows the `escrow.so`, IDL
+  and `cpi_caller.so` timestamps and dependency compile lines, then `cargo test --locked`, in one
+  output; count each of the five result lines by name.
+
+**Terminal**
+
+- One command per block: multi-line pastes drop the first character of a line.
+- In zsh a bare wildcard that matches nothing aborts the command; use `find` or quoted names.
+- Check `tail -c1` before appending to any env file.
+- Never `git stash`. Read a committed file with `git show HEAD:<path>`.
+- Downloads land in `~/Downloads`; scripts remove their own files once they have succeeded.
+
+**Chain**
+
+- Devnet deploys use `anchor deploy --program-name escrow` only. Never `anchor keys sync` or
+  `anchor build --ignore-keys` (D90).
+- The solana CLI's default RPC is devnet and its default signer is `upgrade-authority.json`. A
+  command without `--url` runs against the live cluster with the live authority.
+
+**Sessions**
+
+- A fresh architect chat per numbered session, and a fresh Claude Code session when one is used:
+  compaction loses specification detail.
+- A small edit that will not land after a long reading pass is a signal to end the session, not
+  to rephrase it.

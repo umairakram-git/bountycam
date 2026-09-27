@@ -594,6 +594,37 @@ open.
 
 ---
 
+## Session 16 (28 September)
+
+**Closed.**
+
+- **Tests 20 and 21 of the eligibility suite** — `7c331a6`; the suite is 24.
+- **`index.ts` Seeker placeholder** — replaced by the real check behind a mainnet guard.
+- **A second, mainnet RPC URL** — `SEEKER_RPC_URL`, read by `loadSeekerRpcUrl`; `dev.sh`
+  requires it and prints its host only. `HELIUS_API_KEY` is gone from `api.env`.
+- **`dev.sh` still requires `ATTESTER_PUBKEYS`** — removed from `dev.sh` and `api.env`.
+- **`.DS_Store` is untracked in every status** — ignored by `.gitignore`.
+- **HANDOFF.md Working rules are stale** — rewritten for the script-first workflow.
+
+**Still open.**
+
+- **The API type check never sees its tests** — unchanged; `test/` is outside `tsc`'s view.
+- **`assignments` rows have no constraint pairing the acceptance-time columns** — now owned by
+  P2, which writes the acceptance.
+- **When a migration relaxes NOT NULL to express absence, inspect the default** — migrations 1
+  to 10 have not been read for other such defaults.
+- **The endpoint has never run against a real funded bounty** — owned by P1 and P2.
+
+**New.**
+
+- **`assertMainnet` has no suite test** — verified live on 28 September, positively against
+  Helius and negatively against the public devnet endpoint. A unit test would change the chain
+  suite's count and needs a ruled gate.
+- **The Seeker cache is unbounded** — one entry per wallet with a found mint, process-local,
+  lost on restart. Harmless at devnet scale; a production item.
+
+---
+
 ## Notes owed to `solana-dev-notes`
 
 - Unknown keys in `Anchor.toml` are silently ignored, not rejected.
@@ -694,54 +725,54 @@ open.
 
 ## Remaining plan
 
-Revised from the original four-week plan after the D10 positioning change.
-Sessions 1 to 6, 7a and 7b complete; Session 8's escrow build complete, its capture nonce
-issuance not built; Session 9 complete, specification and build. Session 10 discharged SPEC task
-25 and deployed the escrow to devnet. Session 11 rehearsed and ran `initialize`, then took the
-mobile sign-in scope Session 10 had planned; SGT verification left it for the eligibility-service
-session. Every row from 10 onward therefore shifts by one against the numbering below.
+Reordered 28 September under D116: nothing is cut, and the payment path is built first. Items
+carry IDs rather than session numbers, because sessions no longer map to rows. Done work is in
+HANDOFF.md; this section lists only what remains, in build order.
 
-### Week 1 remainder
+### Payment path, at A1
 
-| # | Scope |
-|---|---|
-| 5 | Part 1 (SPEC.md, five vectors) **done 10 Sep**. Part 2: implement to spec **done 11 Sep** |
-| 6 | API — SIWS challenge/verify, JWT, user records **done 12 Sep** |
-| 7 | API — policy creation, canonical JSON, policy hash, bounty CRUD |
+- **P1** — Create a bounty and `create_and_fund` from the device; the funding projection
+  (confirmed funding makes `AVAILABLE`, D79, D97). Owns the GPS profile lift into
+  `packages/shared` (D61). Specification first.
+- **P2** — Discovery, bounty detail, voucher request and `accept` from the device; the acceptance
+  projection writing `accepted_at`, `deadline` and `challenge_nonce` together (D113), and the
+  constraint pairing them.
+- **P3** — Capture nonce issuance (D73): API specification, then build.
+- **P4** — Guided live capture, per-slot hashes through `packages/shared`, evidence upload to
+  private storage, manifest and Merkle root, wallet-signed submission.
+- **P5** — Verifier service: policy evaluation, assurance grading from A0 and A1, signed
+  attestation per MESSAGES.md, `submit_attestation`.
+- **P6** — Requester review, `approve`, and `reject` with a named requirement; payout confirmed
+  on the explorer.
 
-### Week 2 — Mission engine
+### Store lead time
 
-| # | Scope |
-|---|---|
-| 8 | Escrow — `accept`, `submit_attestation` **done 17 Sep**; capture nonce issuance open |
-| 9 | Escrow — spec **done 17 Sep** (D92 to D98); build **done 18 Sep**, gate 140 at 68750b1 |
-| 10 | Mobile — MWA sign-in, SIWS on device, SGT verification |
-| 11 | Mobile — discovery, bounty detail, accept, assignment race test |
-| 12 | Mobile — guided capture via c2pa-android |
-| 13 | Mobile + API — Android key attestation, presigned upload, server-side hash verification |
+- **S0** — dApp Store dry run: recorded APK build procedure, signing key, publisher and app
+  NFTs, one test submission.
 
-### Week 3 — Settlement
+### Assurance
 
-| # | Scope |
-|---|---|
-| 14 | Verifier service — policy evaluation, assurance grading, signed attestation |
-| 15 | Relayer, transaction reconciliation from confirmations |
-| 16 | Requester review, review window, dispute with named requirement |
-| 17 | Standalone independent verification script |
-| 18 | Reputation counters, both-sided profiles |
-| 19 | SKR — balance display, Seeker gating |
+- **A2** — Guided capture through c2pa-android; the verifier grades A2.
+- **A3** — Android key attestation; the verifier grades A3; `A4_SEEKER_V1` bounties settle end
+  to end.
 
-### Week 4 — Harden and ship
+### Off the payment path
 
-| # | Scope |
-|---|---|
-| 20 | Two-device end-to-end runs, bug triage |
-| 21 | Error, empty and loading states, haptics, Reduce Motion |
-| 22 | Safety — prohibited tasks, trespass notice, retention policy |
-| 23 | Anti-fraud v0 — perceptual-hash duplicates, geo and time plausibility |
-| 24 | dApp Store packaging — signed APK, publisher/app/release NFTs |
-| 25 | Landing page, demo script, seeded demo bounties, pitch video |
-| 26 | Freeze, security review, submit |
+- **O1** — Relayer and fee sponsorship (D2); reconciliation from confirmations beyond P1 and P2.
+- **O2** — Dispute view and arbiter `resolve`.
+- **O3** — Standalone independent verification script.
+- **O4** — Reputation counters, both-sided profiles.
+- **O5** — SKR: balance display, bounty bonus, Scout bond.
+- **O6** — Safety: prohibited tasks, trespass notice, retention policy.
+- **O7** — Anti-fraud v0: perceptual-hash duplicates, geo and time plausibility.
+- **O8** — Error, empty and loading states, haptics, Reduce Motion.
+
+### Ship
+
+- **S1** — Two-device end-to-end runs, bug triage.
+- **S2** — dApp Store release: signed APK, release NFT.
+- **S3** — Landing page, demo script, seeded demo bounties, pitch video.
+- **S4** — Freeze, security review, submit.
 
 ---
 
@@ -757,9 +788,11 @@ Sydney time, Umair rules on this contingency before further build work. **Not tr
 mobile path.~~ Answered 12 September (MWA spike): all three MWA questions pass
 on device — see the spike results in the `solana-dev-notes` section above.
 
-**If c2pa-android proves unworkable in Session 12** — fall back to A0–A1 plus
+**If c2pa-android proves unworkable in A2** — fall back to A0–A1 plus
 device attestation only, and reframe C2PA as designed-not-demonstrated. Weaker,
-but the assurance ladder still holds.
+but the assurance ladder still holds. Under D13 A3 needs A2, so this fallback also
+makes A3 and A4 unreachable and `A4_SEEKER_V1` bounties unpayable (D85); if it is
+triggered, Umair rules again on the profile question D116 point 2 closed.
 
 ---
 
@@ -767,12 +800,12 @@ but the assurance ladder still holds.
 
 Four things where a false pass is not discovered until week four.
 
-| Gate | Session | How to check |
+| Gate | Item | How to check |
 |---|---|---|
-| Escrow cannot be drained | 9 | **Passed 18 Sep**, 68750b1: tests 98, 100, 117, 121, 134 |
-| Assignment cannot double-book | 12 | Two physical devices accept within a second; exactly one wins |
-| Hash is reproducible | 17 | A standalone script reproduces the Merkle root byte-for-byte |
-| Payout actually landed | 16 | Solana explorer, not the app UI |
+| Escrow cannot be drained | done | **Passed 18 Sep**, 68750b1: tests 98, 100, 117, 121, 134 |
+| Assignment cannot double-book | P2 | Two devices accept within a second; exactly one wins |
+| Hash is reproducible | O3 | A standalone script reproduces the Merkle root byte-for-byte |
+| Payout actually landed | P6 | Solana explorer, not the app UI |
 
 ---
 

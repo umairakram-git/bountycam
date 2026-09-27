@@ -21,3 +21,4 @@ target/
 apps/mobile/android/
 apps/mobile/ios/
 .expo/
+.DS_Store
