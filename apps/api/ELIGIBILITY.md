@@ -200,6 +200,11 @@ returning that account forever. Only a non-zero balance is current ownership. Th
 documentation calls this out, and a check that misses it admits every wallet that
 ever held a Seeker.
 
+**The account's state is not read.** The token account holding a Seeker Genesis Token
+is frozen — observed on mainnet on 28 September against the one real user's wallet —
+so a check requiring an `initialized` account would refuse every genuine holder. The
+balance decides.
+
 ### 5.2 One device, one account
 
 Because the token moves, holding one proves a Seeker exists — not that this Scout has
@@ -243,12 +248,21 @@ Token-2022 account the wallet holds, then a batched fetch of each mint — and i
 on a path where Scouts are racing each other. A cache hit skips the RPC entirely; the
 section 5.2 claim still runs on every request, from the database.
 
+Only a found mint is cached. A completed check that finds nothing is not: caching it
+would keep refusing a Scout for a day after they move their token in, and the refusal
+path is not the one Scouts race on. Entry age is read from the one injectable clock.
+
 **The dependency is Helius.** The documented method, `getTokenAccountsByOwnerV2`, is
 a Helius extension rather than a standard Solana RPC call, so this introduces a
 third-party account and an API key on the authentication path. The key lives in the
 environment file outside the repo, is never logged, and is read once at startup. A
 missing key is a startup failure, not a runtime 503: a service that cannot perform a
 check it advertises should not accept traffic.
+
+The key enters as `SEEKER_RPC_URL`, the full endpoint URL, never as a bare key. At
+startup the service asks that endpoint for its genesis hash and exits unless it is
+mainnet-beta's. A devnet or local URL would answer every check with an empty wallet:
+the false "no Seeker" this section exists to prevent, on every request at once.
 
 Tokens live on mainnet while the escrow is on devnet. Two RPC endpoints, two
 purposes, and the Seeker endpoint is never used for chain state.
