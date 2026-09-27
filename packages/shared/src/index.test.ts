@@ -15,8 +15,30 @@ import {
   ELIGIBILITY_SCHEMA_VERSION,
   ELIGIBILITY_MESSAGE_LENGTH,
   MAX_ASSURANCE_LEVEL,
+  isValidLat,
+  isValidLon,
+  gpsToScaled,
+  formatCoordinate,
+  parseCoordinatePair,
+  ELIGIBILITY_PROFILES,
+  admissibleProfileId,
+  uuidBytes,
+  createAndFundData,
+  CREATE_AND_FUND_DISCRIMINATOR,
+  verifyCreatedBounty,
+  decimalToBaseUnits,
+  checkFundingInstructions,
+  expectedFundingKeys,
 } from "./index.js";
-import type { EligibilityMessageFields, EligibilityProfile } from "./index.js";
+import type {
+  CreatedBountyExpectation,
+  EligibilityMessageFields,
+  EligibilityProfile,
+  ExpectedFunding,
+  FundingArgs,
+  PlainAccountMeta,
+  PlainInstruction,
+} from "./index.js";
 
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
 const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
@@ -925,5 +947,390 @@ describe("eligibility message (MESSAGES.md section 4)", () => {
         }),
       (e: unknown) => e instanceof SpecError && e.code === "MESSAGE_FIELD_RANGE",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SPEC.md section 8 — funding-path helpers (Session 17, tests 81 to 110)
+// ---------------------------------------------------------------------------
+
+const V1_POLICY_TEXT =
+  '{"acceptance_window_seconds":86400,"capture_radius_m":50,"chain":"solana",' +
+  '"challenge_window_seconds":3600,"cluster":"devnet","completion_window_seconds":7200,' +
+  '"domain_tag":"BOUNTYCAM_POLICY_V1","eligibility_profile_id":"BASE_V1",' +
+  '"evidence_requirements":[{"id":"11111111-1111-4111-8111-111111111111",' +
+  '"prompt":"Storefront with signage visible","required":true,"type":"PHOTO"}],' +
+  '"fee_amount":"0","lat":"40.4405556","lon":"-79.9961111","required_assurance":3,' +
+  '"reward_amount":"5000000",' +
+  '"salt":"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",' +
+  '"settlement_mint":"11111111111111111111111111111111"}';
+const V1_HASH = "711175ab7b0ed6107e2a0f5510c07813d5c1771e4e934574f145615a894a253b";
+const P1_HASH = "0d2a8920d85f17637cff555ef00869418767b4de9cb72cc553c8944ccfd0deb9";
+const P2_HASH = "a1bcc81f8046565564915d5e7eead4cc1108003100c29f453de9325bd2198cbe";
+const U1 = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const U1_HEX = "0f8fad5bd9cb469fa16570867728950e";
+const C1_HEX =
+  "51f153b313cba7400f8fad5bd9cb469fa16570867728950e404b4c0000000000" +
+  "711175ab7b0ed6107e2a0f5510c07813d5c1771e4e934574f145615a894a253b" +
+  "0d2a8920d85f17637cff555ef00869418767b4de9cb72cc553c8944ccfd0deb9" +
+  "038051010000000000201c000000000000100e000000000000";
+const C1_SHA = "43f757e67d6c06b5808bd316a752f182ec7f2b0623af72c303d25b7a54b0b714";
+const ARABIC_ONE = String.fromCodePoint(0x0661); // U+0661 ARABIC-INDIC DIGIT ONE
+const SPACE = String.fromCharCode(0x20);
+
+const fromHex = (h: string): Uint8Array => Uint8Array.from(Buffer.from(h, "hex"));
+
+const c1Args = (): FundingArgs => ({
+  bountyId: uuidBytes(U1),
+  rewardAmount: 5000000n,
+  policyHash: fromHex(V1_HASH),
+  eligibilityProfileHash: fromHex(P1_HASH),
+  requiredAssurance: 3,
+  acceptanceWindowSecs: 86400n,
+  completionWindowSecs: 7200n,
+  reviewWindowSecs: 3600n,
+});
+
+const v1Policy = (): Record<string, unknown> =>
+  JSON.parse(V1_POLICY_TEXT) as Record<string, unknown>;
+const v1Expected = (): CreatedBountyExpectation => ({
+  cluster: "devnet",
+  settlementMint: "11111111111111111111111111111111",
+  title: "Storefront check",
+  category: "Retail",
+  policy: {
+    acceptance_window_seconds: 86400,
+    capture_radius_m: 50,
+    challenge_window_seconds: 3600,
+    completion_window_seconds: 7200,
+    eligibility_profile_id: "BASE_V1",
+    evidence_requirements: [
+      { prompt: "Storefront with signage visible", required: true, type: "PHOTO" },
+    ],
+    lat: "40.4405556",
+    lon: "-79.9961111",
+    required_assurance: 3,
+    reward_amount: "5000000",
+  },
+});
+const v1Response = (policy: Record<string, unknown> = v1Policy(), policyHash?: string) => ({
+  id: U1,
+  title: "Storefront check",
+  category: "Retail",
+  state: "DRAFT",
+  program_account: null,
+  created_at: "2026-09-28T00:00:00.000Z",
+  policy_hash: policyHash ?? hex(sha256(utf8(canonicalise(policy)))),
+  policy,
+});
+
+describe("GPS profile (SPEC.md 8.1)", () => {
+  test("81 isValidLat and isValidLon accept the profile forms", () => {
+    for (const v of ["0.0000000", "90.0000000", "-90.0000000", "-33.8688197"]) {
+      assert.equal(isValidLat(v), true, v);
+    }
+    for (const v of ["180.0000000", "-180.0000000", "151.2092955"]) {
+      assert.equal(isValidLon(v), true, v);
+    }
+  });
+
+  test("82 both reject every form failure", () => {
+    const bad: unknown[] = [
+      "1.000000",
+      "1.00000000",
+      "01.0000000",
+      "+1.0000000",
+      "-0.0000000",
+      "1e1",
+      SPACE + "1.0000000",
+      ARABIC_ONE + ".0000000",
+      "",
+      1,
+    ];
+    for (const v of bad) {
+      assert.equal(isValidLat(v as string), false, String(v));
+      assert.equal(isValidLon(v as string), false, String(v));
+    }
+  });
+
+  test("83 both reject range failures", () => {
+    assert.equal(isValidLat("90.0000001"), false);
+    assert.equal(isValidLat("-90.0000001"), false);
+    assert.equal(isValidLon("180.0000001"), false);
+    assert.equal(isValidLon("-180.0000001"), false);
+  });
+
+  test("84 gpsToScaled: exact scaling; a form failure is GPS_FORM_INVALID", () => {
+    assert.equal(gpsToScaled("-33.8688197"), -338688197n);
+    assert.equal(gpsToScaled("0.0000000"), 0n);
+    assert.equal(gpsToScaled("180.0000000"), 1800000000n);
+    rejectsWith(() => gpsToScaled("1.000000"), "GPS_FORM_INVALID");
+  });
+
+  test("85 formatCoordinate produces the profile form", () => {
+    assert.equal(formatCoordinate(-33.8688197, "lat"), "-33.8688197");
+    assert.equal(formatCoordinate(151.2092955, "lon"), "151.2092955");
+    assert.equal(formatCoordinate(0, "lat"), "0.0000000");
+    assert.equal(formatCoordinate(-0, "lat"), "0.0000000");
+    assert.equal(formatCoordinate(-0.00000004, "lat"), "0.0000000");
+    assert.equal(formatCoordinate(90, "lat"), "90.0000000");
+    assert.equal(formatCoordinate(-179.99999996, "lon"), "-180.0000000");
+  });
+
+  test("86 formatCoordinate rejects non-finite and out-of-range values", () => {
+    rejectsWith(() => formatCoordinate(NaN, "lat"), "GPS_NOT_FINITE");
+    rejectsWith(() => formatCoordinate(Infinity, "lon"), "GPS_NOT_FINITE");
+    rejectsWith(() => formatCoordinate(90.00000006, "lat"), "GPS_OUT_OF_RANGE");
+    rejectsWith(() => formatCoordinate(180.1, "lon"), "GPS_OUT_OF_RANGE");
+    rejectsWith(() => formatCoordinate(1e21, "lat"), "GPS_OUT_OF_RANGE");
+  });
+
+  test("87 parseCoordinatePair accepts pasted pairs", () => {
+    const want = { lat: "-33.8688197", lon: "151.2092955" };
+    assert.deepEqual(parseCoordinatePair("-33.8688197, 151.2092955"), want);
+    assert.deepEqual(parseCoordinatePair("-33.8688197,151.2092955"), want);
+    assert.deepEqual(
+      parseCoordinatePair(
+        SPACE + "-33.86881970000001" + SPACE + "," + SPACE + "151.2092955" + SPACE,
+      ),
+      want,
+    );
+    assert.deepEqual(parseCoordinatePair("-33, 151"), { lat: "-33.0000000", lon: "151.0000000" });
+  });
+
+  test("88 parseCoordinatePair rejects malformed and out-of-range pairs", () => {
+    for (const t of ["", "-33.8688197", "1, 2, 3", "a, b", "1e2, 3", "+1, 2", ".5, 2", "1., 2"]) {
+      rejectsWith(() => parseCoordinatePair(t), "GPS_PAIR_INVALID");
+    }
+    rejectsWith(() => parseCoordinatePair("91, 0"), "GPS_OUT_OF_RANGE");
+    rejectsWith(() => parseCoordinatePair("0, 181"), "GPS_OUT_OF_RANGE");
+  });
+});
+
+describe("eligibility profile registry (SPEC.md 8.2)", () => {
+  test("89 exactly two ids, hashing to P1 and P2", () => {
+    assert.deepEqual([...ELIGIBILITY_PROFILES.keys()], ["BASE_V1", "A4_SEEKER_V1"]);
+    assert.equal(hex(eligibilityProfileHash(ELIGIBILITY_PROFILES.get("BASE_V1")!)), P1_HASH);
+    assert.equal(hex(eligibilityProfileHash(ELIGIBILITY_PROFILES.get("A4_SEEKER_V1")!)), P2_HASH);
+  });
+
+  test("90 admissibleProfileId is the section 2.5 bijection", () => {
+    for (const a of [0, 1, 2, 3]) assert.equal(admissibleProfileId(a), "BASE_V1");
+    assert.equal(admissibleProfileId(4), "A4_SEEKER_V1");
+    for (const a of [5, -1, 1.5, "1"]) {
+      rejectsWith(() => admissibleProfileId(a as number), "ASSURANCE_OUT_OF_RANGE");
+    }
+  });
+});
+
+describe("uuidBytes (SPEC.md 8.3)", () => {
+  test("91 reproduces U1 as a fresh 16-byte array", () => {
+    const a = uuidBytes(U1);
+    const b = uuidBytes(U1);
+    assert.equal(hex(a), U1_HEX);
+    assert.equal(a.length, 16);
+    assert.notEqual(a, b);
+  });
+
+  test("92 rejects every other form", () => {
+    for (const v of [U1.toUpperCase(), U1_HEX, "{" + U1 + "}", U1.slice(0, 35), 7]) {
+      rejectsWith(() => uuidBytes(v as string), "UUID_FORM_INVALID");
+    }
+  });
+});
+
+describe("createAndFundData (SPEC.md 8.4)", () => {
+  test("93 reproduces C1", () => {
+    const out = createAndFundData(c1Args());
+    assert.equal(out.length, 121);
+    assert.equal(hex(out), C1_HEX);
+    assert.equal(hex(sha256(out)), C1_SHA);
+  });
+
+  test("94 the discriminator is sha256(global:create_and_fund)[0..8]", () => {
+    assert.equal(
+      hex(CREATE_AND_FUND_DISCRIMINATOR),
+      hex(sha256(utf8("global:create_and_fund")).slice(0, 8)),
+    );
+  });
+
+  test("95 FUND_FIELD_RANGE for every numeric bound", () => {
+    const cases: Partial<Record<keyof FundingArgs, unknown>>[] = [
+      { rewardAmount: 0n },
+      { rewardAmount: 1n << 64n },
+      { rewardAmount: 5000000 },
+      { requiredAssurance: 5 },
+      { requiredAssurance: -1 },
+      { acceptanceWindowSecs: 0n },
+      { acceptanceWindowSecs: 2592001n },
+      { completionWindowSecs: 0n },
+      { completionWindowSecs: 2592001n },
+      { reviewWindowSecs: 0n },
+      { reviewWindowSecs: 86401n },
+    ];
+    for (const c of cases) {
+      rejectsWith(
+        () => createAndFundData({ ...c1Args(), ...c } as FundingArgs),
+        "FUND_FIELD_RANGE",
+      );
+    }
+  });
+
+  test("96 FUND_FIELD_LENGTH and FUND_FIELD_NOT_BYTES", () => {
+    rejectsWith(
+      () => createAndFundData({ ...c1Args(), bountyId: new Uint8Array(15) }),
+      "FUND_FIELD_LENGTH",
+    );
+    rejectsWith(
+      () => createAndFundData({ ...c1Args(), policyHash: new Uint8Array(31) }),
+      "FUND_FIELD_LENGTH",
+    );
+    rejectsWith(
+      () => createAndFundData({ ...c1Args(), eligibilityProfileHash: new Uint8Array(33) }),
+      "FUND_FIELD_LENGTH",
+    );
+    rejectsWith(
+      () =>
+        createAndFundData({
+          ...c1Args(),
+          policyHash: Array(32).fill(0) as unknown as Uint8Array,
+        }),
+      "FUND_FIELD_NOT_BYTES",
+    );
+  });
+});
+
+describe("verifyCreatedBounty (SPEC.md 8.5)", () => {
+  test("97 accepts V1 and yields the C1 arguments", () => {
+    const response = v1Response();
+    assert.equal(response.policy_hash, V1_HASH);
+    const args = verifyCreatedBounty(response, v1Expected());
+    assert.equal(hex(createAndFundData(args)), C1_HEX);
+  });
+
+  test("98 CREATED_SHAPE_INVALID: a missing field, a wrong state, duplicate ids", () => {
+    const noSalt = v1Policy();
+    delete noSalt["salt"];
+    rejectsWith(
+      () => verifyCreatedBounty(v1Response(noSalt), v1Expected()),
+      "CREATED_SHAPE_INVALID",
+    );
+    rejectsWith(
+      () => verifyCreatedBounty({ ...v1Response(), state: "AVAILABLE" }, v1Expected()),
+      "CREATED_SHAPE_INVALID",
+    );
+    const twice = v1Policy();
+    const item = (twice["evidence_requirements"] as unknown[])[0];
+    twice["evidence_requirements"] = [item, { ...(item as object) }];
+    rejectsWith(
+      () => verifyCreatedBounty(v1Response(twice), v1Expected()),
+      "CREATED_SHAPE_INVALID",
+    );
+  });
+
+  test("99 CREATED_HASH_MISMATCH", () => {
+    const tampered = V1_HASH.slice(0, 63) + (V1_HASH.endsWith("b") ? "c" : "b");
+    rejectsWith(
+      () => verifyCreatedBounty(v1Response(v1Policy(), tampered), v1Expected()),
+      "CREATED_HASH_MISMATCH",
+    );
+  });
+
+  test("100 CREATED_CONSTANT_MISMATCH with a self-consistent hash", () => {
+    const p = v1Policy();
+    p["fee_amount"] = "1";
+    rejectsWith(
+      () => verifyCreatedBounty(v1Response(p), v1Expected()),
+      "CREATED_CONSTANT_MISMATCH",
+    );
+  });
+
+  test("101 CREATED_ENVIRONMENT_MISMATCH", () => {
+    rejectsWith(
+      () => verifyCreatedBounty(v1Response(), { ...v1Expected(), cluster: "mainnet-beta" }),
+      "CREATED_ENVIRONMENT_MISMATCH",
+    );
+  });
+
+  test("102 CREATED_FIELD_MISMATCH: a tampered reward with a self-consistent hash", () => {
+    const p = v1Policy();
+    p["reward_amount"] = "50000000";
+    rejectsWith(() => verifyCreatedBounty(v1Response(p), v1Expected()), "CREATED_FIELD_MISMATCH");
+  });
+});
+
+describe("decimalToBaseUnits (SPEC.md 8.6)", () => {
+  test("103 accepts decimal amounts", () => {
+    assert.equal(decimalToBaseUnits("10", 6), "10000000");
+    assert.equal(decimalToBaseUnits("10.5", 6), "10500000");
+    assert.equal(decimalToBaseUnits("0.000001", 6), "1");
+    assert.equal(decimalToBaseUnits("18446744073709.551615", 6), "18446744073709551615");
+  });
+
+  test("104 AMOUNT_FORM_INVALID", () => {
+    for (const t of ["0.0000001", "01", "-1", "1e3", SPACE + "1", "1.", ".5"]) {
+      rejectsWith(() => decimalToBaseUnits(t, 6), "AMOUNT_FORM_INVALID");
+    }
+  });
+
+  test("105 AMOUNT_OUT_OF_RANGE", () => {
+    for (const t of ["0", "0.000000", "18446744073709.551616"]) {
+      rejectsWith(() => decimalToBaseUnits(t, 6), "AMOUNT_OUT_OF_RANGE");
+    }
+  });
+});
+
+describe("checkFundingInstructions (SPEC.md 8.7)", () => {
+  const key = (fill: number): Uint8Array => new Uint8Array(32).fill(fill);
+  const expected = (): ExpectedFunding => ({
+    programId: key(0x10),
+    requester: key(0x11),
+    config: key(0x12),
+    bounty: key(0x13),
+    usdcMint: key(0x14),
+    bountyVault: key(0x15),
+    requesterAta: key(0x16),
+    data: createAndFundData(c1Args()),
+  });
+  const good = (): PlainInstruction => ({
+    programId: key(0x10),
+    keys: expectedFundingKeys(expected()),
+    data: createAndFundData(c1Args()),
+  });
+
+  test("106 accepts the expected instruction", () => {
+    checkFundingInstructions([good()], expected());
+  });
+
+  test("107 TX_INSTRUCTION_COUNT", () => {
+    rejectsWith(() => checkFundingInstructions([], expected()), "TX_INSTRUCTION_COUNT");
+    rejectsWith(
+      () => checkFundingInstructions([good(), good()], expected()),
+      "TX_INSTRUCTION_COUNT",
+    );
+  });
+
+  test("108 TX_PROGRAM", () => {
+    rejectsWith(
+      () => checkFundingInstructions([{ ...good(), programId: key(0x20) }], expected()),
+      "TX_PROGRAM",
+    );
+  });
+
+  test("109 TX_ACCOUNTS: order, flags, count", () => {
+    const withKeys = (keys: PlainAccountMeta[]): void =>
+      rejectsWith(() => checkFundingInstructions([{ ...good(), keys }], expected()), "TX_ACCOUNTS");
+    const swapped = good().keys.slice();
+    [swapped[1], swapped[2]] = [swapped[2]!, swapped[1]!];
+    withKeys(swapped);
+    withKeys(good().keys.map((k, i) => (i === 0 ? { ...k, isSigner: false } : k)));
+    withKeys(good().keys.map((k, i) => (i === 2 ? { ...k, isWritable: false } : k)));
+    withKeys(good().keys.slice(0, 8));
+  });
+
+  test("110 TX_DATA", () => {
+    const data = createAndFundData(c1Args());
+    data[100] = data[100]! ^ 0x01;
+    rejectsWith(() => checkFundingInstructions([{ ...good(), data }], expected()), "TX_DATA");
   });
 });

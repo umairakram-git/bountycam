@@ -2,8 +2,8 @@
 // hash and mapped back to a registry id. The map is built once from the
 // POLICY.md section 2.5 registry through the packages/shared derivation, so
 // there is exactly one hash implementation on this path (SECURITY.md 5).
-import { eligibilityProfileHash } from "@hackathon/shared";
-import { bytesToHex, ELIGIBILITY_PROFILES } from "../bounties/policy.ts";
+import { ELIGIBILITY_PROFILES, eligibilityProfileHash } from "@hackathon/shared";
+import { bytesToHex } from "../bounties/policy.ts";
 
 const ID_BY_HASH_HEX: ReadonlyMap<string, string> = new Map(
   [...ELIGIBILITY_PROFILES].map(([id, profile]) => [

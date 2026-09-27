@@ -2,7 +2,7 @@
 // (GET /bounties, six steps): check orders numbered inline. The first
 // failing step wins; no later step runs.
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { SpecError, canonicalise, sha256 } from "@hackathon/shared";
+import { SpecError, canonicalise, isValidLat, isValidLon, sha256 } from "@hackathon/shared";
 import type { Pool } from "pg";
 import type { Clock } from "../clock.ts";
 import type { Config } from "../config.ts";
@@ -20,7 +20,6 @@ import {
   validateRequirements,
   type PolicyLimits,
 } from "./policy.ts";
-import { isValidLat, isValidLon } from "./gps.ts";
 import { snapLat, snapLon } from "./snap.ts";
 import { listItem, ownerView, publicView } from "./views.ts";
 

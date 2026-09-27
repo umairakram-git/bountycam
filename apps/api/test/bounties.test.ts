@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { canonicalise, sha256 } from "@hackathon/shared";
+import { canonicalise, isValidLat, isValidLon, sha256 } from "@hackathon/shared";
 import type { FastifyRequest } from "fastify";
 import { base58 } from "@scure/base";
 import { SignJWT } from "jose";
@@ -16,7 +16,6 @@ import { authUser } from "../src/auth/middleware.ts";
 import type { Clock } from "../src/clock.ts";
 import { loadConfig } from "../src/config.ts";
 import type { Randomness } from "../src/randomness.ts";
-import { isValidLat, isValidLon } from "../src/bounties/gps.ts";
 import { snapLat, snapLon } from "../src/bounties/snap.ts";
 
 // --- scratch database, same pattern as auth.test.ts ---

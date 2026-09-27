@@ -462,3 +462,6 @@ export function eligibilityMessage(fields: EligibilityMessageFields): Uint8Array
   view.setBigInt64(204, expiresAt, true);
   return out;
 }
+
+// SPEC.md section 8: the funding-path helpers (Session 17, D121).
+export * from "./funding.js";

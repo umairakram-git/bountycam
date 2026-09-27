@@ -1,7 +1,7 @@
 // POLICY.md section 9.1: deterministic grid snap in scaled-integer arithmetic
 // only — no floating point, no jitter (D58). The sole production caller is
 // bounty creation, after the section 5 form checks have passed.
-import { toScaled } from "./gps.ts";
+import { gpsToScaled } from "@hackathon/shared";
 
 const SCALE = 10_000_000n;
 const CELL = 100_000n;
@@ -34,7 +34,7 @@ function render(scaled: bigint): string {
 }
 
 function snap(value: string, minCell: bigint, maxCell: bigint): string {
-  const cell = clamp(floorDiv(toScaled(value), CELL), minCell, maxCell);
+  const cell = clamp(floorDiv(gpsToScaled(value), CELL), minCell, maxCell);
   return render(cell * CELL + HALF_CELL);
 }
 

@@ -1,47 +1,22 @@
 // POLICY.md sections 2, 3 and 6: policy field validation, the sixteen-field
 // build, canonical form and hash. Hashing is packages/shared and nothing else
 // (SECURITY.md section 5); this module never reimplements it.
-import { canonicalise, sha256 } from "@hackathon/shared";
-import type { EligibilityProfile } from "@hackathon/shared";
+import {
+  ELIGIBILITY_PROFILES,
+  admissibleProfileId,
+  canonicalise,
+  isValidLat,
+  isValidLon,
+  sha256,
+} from "@hackathon/shared";
 import type { Randomness } from "../randomness.ts";
-import { isValidLat, isValidLon } from "./gps.ts";
 
 export const DOMAIN_TAG = "BOUNTYCAM_POLICY_V1";
 export const FEE_AMOUNT = "0"; // D24: exactly the one-character string.
 
-// POLICY.md section 2.5, the registry. The objects are the SPEC.md section 7.1
-// shape; eligibilityProfileHash over them is what the on-chain binding check
-// compares against (section 2.6), so these values are on the money path.
-export const ELIGIBILITY_PROFILES: ReadonlyMap<string, EligibilityProfile> =
-  new Map([
-    [
-      "BASE_V1",
-      {
-        domain_tag: "BOUNTYCAM_ELIGIBILITY_PROFILE_V1",
-        profile_id: "BASE_V1",
-        requires_sgt: false,
-      },
-    ],
-    [
-      "A4_SEEKER_V1",
-      {
-        domain_tag: "BOUNTYCAM_ELIGIBILITY_PROFILE_V1",
-        profile_id: "A4_SEEKER_V1",
-        requires_sgt: true,
-      },
-    ],
-  ]);
-
-// Section 2.5, the bijection: assurance 0 to 3 admits BASE_V1 only, assurance 4
-// admits A4_SEEKER_V1 only. Indexed by assurance, so the admissible profile is
-// a lookup rather than a branch.
-const ADMISSIBLE_PROFILE: readonly string[] = [
-  "BASE_V1",
-  "BASE_V1",
-  "BASE_V1",
-  "BASE_V1",
-  "A4_SEEKER_V1",
-];
+// POLICY.md section 2.5, the registry, and its assurance bijection are
+// packages/shared's ELIGIBILITY_PROFILES and admissibleProfileId (SPEC.md
+// section 8.2, D121). This module keeps no copy.
 
 // Section 6.1: ASCII digits, no leading zero — rejects "0", signs, full
 // stops, exponent markers and whitespace in one rule.
@@ -155,7 +130,7 @@ export function validatePolicyFields(
   // position an assurance of -1 would return PROFILE_ASSURANCE_MISMATCH where
   // INVALID_ASSURANCE is required.
   if (
-    ADMISSIBLE_PROFILE[input.requiredAssurance] !== input.eligibilityProfileId
+    admissibleProfileId(input.requiredAssurance) !== input.eligibilityProfileId
   ) {
     return "PROFILE_ASSURANCE_MISMATCH";
   }
