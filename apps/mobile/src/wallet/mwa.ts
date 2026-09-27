@@ -6,7 +6,7 @@
 // the web3js package inherits `authorize` from it unchanged.
 
 import { transact } from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Transaction } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 
 import { APP_IDENTITY, MWA_CHAIN } from '../config';
@@ -18,6 +18,7 @@ import type {
   WalletFailure,
   WalletFailureKind,
   WalletProvider,
+  WalletSendResult,
   WalletSignInResult,
 } from './types';
 
@@ -80,6 +81,18 @@ function describeAuthorizeResult(result: {
     String(result.auth_token.length) +
     '>, sign_in_result: absent'
   );
+}
+
+// Thrown inside transact to abandon a send when the wallet's account is not
+// the one this session signed in with; caught by the adapter alone.
+class AccountChanged extends Error {
+  readonly address: string;
+
+  constructor(address: string) {
+    super('account changed');
+    this.name = 'AccountChanged';
+    this.address = address;
+  }
 }
 
 export function createMwaWalletProvider(): WalletProvider {
@@ -184,6 +197,47 @@ export function createMwaWalletProvider(): WalletProvider {
         signatureType: signInResult.signature_type,
         addressBase64: signInResult.address,
       };
+    },
+
+    async signAndSendTransaction(transaction: Uint8Array): Promise<WalletSendResult> {
+      const token = authToken;
+      const stored = account;
+      if (token === undefined || stored === undefined) {
+        return fail('NOT_AUTHORIZED', 'signAndSendTransaction() before a successful authorize()');
+      }
+      // The bytes the caller checked are the bytes deserialised here; nothing
+      // is added between the check and the wallet (FUNDING.md 2.3 step 5).
+      const tx = Transaction.from(transaction);
+
+      let signatures: string[];
+      try {
+        // The MWA spike's proven sequence (12 September): reauthorize with the
+        // stored token inside one session, then signAndSendTransactions.
+        signatures = await transact(async (wallet) => {
+          const reauthorized = await wallet.authorize({
+            identity: APP_IDENTITY,
+            chain: MWA_CHAIN,
+            auth_token: token,
+          });
+          authToken = reauthorized.auth_token;
+          const first = reauthorized.accounts[0];
+          if (first === undefined || first.address !== stored.addressBase64) {
+            throw new AccountChanged(first === undefined ? '<none>' : first.address);
+          }
+          return wallet.signAndSendTransactions({ transactions: [tx] });
+        });
+      } catch (error: unknown) {
+        if (error instanceof AccountChanged) {
+          return fail('ACCOUNT_CHANGED', 'wallet returned a different account; nothing sent',
+            'raw base64: ' + error.address);
+        }
+        return fail('WALLET_ERROR', 'signAndSendTransactions threw: ' + describeThrown(error));
+      }
+      const signature = signatures[0];
+      if (signature === undefined) {
+        return fail('NO_SIGNATURE', 'wallet returned no signature for the transaction');
+      }
+      return { ok: true, signature };
     },
 
     disconnect(): void {

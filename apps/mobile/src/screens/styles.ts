@@ -1,0 +1,62 @@
+// One dark stylesheet for every screen. Session 12's palette, unchanged.
+import { StyleSheet } from 'react-native';
+
+export const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: '#12131a',
+    paddingTop: 56,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+  title: { color: '#e7e9f0', fontSize: 16, fontWeight: '600', marginBottom: 12 },
+  label: { color: '#9aa0b4', fontSize: 12, marginTop: 10, marginBottom: 4 },
+  value: { color: '#e7e9f0', fontSize: 14, marginBottom: 2 },
+  muted: { color: '#6b7080', fontSize: 12, marginBottom: 6 },
+  input: {
+    backgroundColor: '#0b0c11',
+    borderColor: '#2a2d38',
+    borderRadius: 6,
+    borderWidth: 1,
+    color: '#e7e9f0',
+    fontSize: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  buttons: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12, marginBottom: 12 },
+  button: {
+    backgroundColor: '#3f6ae0',
+    borderRadius: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  buttonSecondary: { backgroundColor: '#3a3d4a' },
+  buttonDisabled: { backgroundColor: '#2c3350' },
+  buttonPressed: { opacity: 0.7 },
+  buttonLabel: { color: '#ffffff', fontSize: 15, fontWeight: '600' },
+  chipRow: { flexDirection: 'row', gap: 8 },
+  chip: {
+    backgroundColor: '#3a3d4a',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  chipSelected: { backgroundColor: '#3f6ae0' },
+  log: {
+    flex: 1,
+    backgroundColor: '#0b0c11',
+    borderColor: '#2a2d38',
+    borderRadius: 6,
+    borderWidth: 1,
+    minHeight: 120,
+  },
+  logContent: { padding: 10 },
+  placeholder: { color: '#6b7080', fontFamily: 'monospace', fontSize: 12 },
+  line: { color: '#d6dae6', fontFamily: 'monospace', fontSize: 12, marginBottom: 6 },
+  row: {
+    borderBottomColor: '#2a2d38',
+    borderBottomWidth: 1,
+    paddingVertical: 10,
+  },
+  notice: { color: '#ffd166', fontSize: 14, marginTop: 8, marginBottom: 8 },
+});

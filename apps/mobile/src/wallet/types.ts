@@ -54,7 +54,11 @@ export type WalletFailureKind =
   /** `signIn` was called before a successful `authorize`. */
   | 'NOT_AUTHORIZED'
   /** The wallet, or the transport to it, threw. */
-  | 'WALLET_ERROR';
+  | 'WALLET_ERROR'
+  /** The reauthorize inside a send returned a different account (FUNDING.md 3). */
+  | 'ACCOUNT_CHANGED'
+  /** The wallet sent nothing back for the one transaction it was given. */
+  | 'NO_SIGNATURE';
 
 export interface WalletFailure {
   readonly ok: false;
@@ -89,6 +93,14 @@ export type WalletAuthorizeResult = WalletAuthorizeSuccess | WalletFailure;
 export type WalletAddressResult = WalletAddress | WalletFailure;
 export type WalletSignInResult = WalletSignInSuccess | WalletFailure;
 
+export interface WalletSendSuccess {
+  readonly ok: true;
+  /** The transaction signature in base58, as the wallet returned it. */
+  readonly signature: string;
+}
+
+export type WalletSendResult = WalletSendSuccess | WalletFailure;
+
 export interface WalletProvider {
   /**
    * Connect and select an account. Must succeed before `signIn`, because the
@@ -108,6 +120,14 @@ export interface WalletProvider {
    * same object reference it arrived as — see the adapter for why that matters.
    */
   signIn(input: SiwsInput): Promise<WalletSignInResult>;
+
+  /**
+   * Sign and send one transaction (FUNDING.md section 3). The argument is the
+   * unsigned transaction's wire bytes, so this interface names no chain-library
+   * type. A failure result does not prove nothing was sent: the caller must
+   * still ask the server (FUNDING.md 2.3 step 8).
+   */
+  signAndSendTransaction(transaction: Uint8Array): Promise<WalletSendResult>;
 
   /** Drop local session state. Local only; talks to no wallet. */
   disconnect(): void;

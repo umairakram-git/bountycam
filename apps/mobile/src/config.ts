@@ -43,3 +43,27 @@ export const APP_IDENTITY = { name: 'BountyCam', uri: 'https://bountycam.invalid
 // For the same reason the challenge request sends no `chain` field at all —
 // see apps/mobile/src/auth/signIn.ts.
 export const MWA_CHAIN = 'solana:devnet';
+
+// --- Session 17, P1: funding (FUNDING.md section 4) ---
+
+// The client RPC. Used only for the recent blockhash and the courtesy balance
+// checks of FUNDING.md 2.3 step 3: chain data for UX, never for authorisation
+// (SECURITY.md 12). The program and the API's projection are the checks.
+export const SOLANA_RPC_URL = 'https://api.devnet.solana.com';
+
+// The devnet deployment (HANDOFF.md Environment). The config account is the
+// program-derived address of the seed `config`; fund.ts re-derives it and
+// refuses to run if the derivation disagrees with this value.
+export const ESCROW_PROGRAM_ID = '6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS';
+export const ESCROW_CONFIG_ACCOUNT = 'DqHBCi3KYaZSSgMGcPY8QftYnns8k2vcg9GCJejKBaAb';
+export const SETTLEMENT_MINT = 'ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR';
+
+// The policy's cluster value (POLICY.md 2.1) — the canonical form, not the MWA
+// selector above. Sent explicitly so a wrong environment fails at creation.
+export const POLICY_CLUSTER = 'devnet';
+
+// Display only (SECURITY.md 14): the mint has 6 decimals.
+export const USDC_DECIMALS = 6;
+
+// FUNDING.md 2.3 step 3: rent for the bounty and its vault plus the fee.
+export const MIN_LAMPORTS_FOR_FUNDING = 6_000_000;

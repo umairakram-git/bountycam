@@ -1,0 +1,138 @@
+// FUNDING.md 2.4: GET /me/bounties; on load, one report per DRAFT row so a
+// lost report is picked up when its requester looks; Fund and Cancel on DRAFT.
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { ScrollView, Text, View } from 'react-native';
+
+import { apiGet, apiPostEmpty } from '../api/client';
+import { formatUsdc } from '../create/createBounty';
+import { Button } from './common';
+import { styles } from './styles';
+
+export interface ListItem {
+  readonly id: string;
+  readonly title: string;
+  readonly state: string;
+  readonly reward_amount: string;
+}
+
+function rewardText(baseUnits: string): string {
+  return /^[0-9]+$/.test(baseUnits) ? formatUsdc(BigInt(baseUnits)) : baseUnits;
+}
+
+function asItems(body: unknown): ListItem[] {
+  const list = (body as { bounties?: unknown }).bounties;
+  if (!Array.isArray(list)) return [];
+  return list.map((raw) => {
+    const r = raw as Partial<ListItem>;
+    return {
+      id: String(r.id),
+      title: String(r.title),
+      state: String(r.state),
+      reward_amount: String(r.reward_amount),
+    };
+  });
+}
+
+export function MyBountiesScreen(props: {
+  readonly token: string;
+  readonly busy: boolean;
+  readonly onFund: (id: string) => void;
+  readonly onBack: () => void;
+}): ReactNode {
+  const [items, setItems] = useState<readonly ListItem[] | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [cancelling, setCancelling] = useState(false);
+  const { token } = props;
+
+  const load = useCallback(async () => {
+    setError(undefined);
+    try {
+      const first = await apiGet(token, '/me/bounties');
+      if (first.status !== 200) {
+        setError('Could not load your bounties (HTTP ' + String(first.status) + ').');
+        return;
+      }
+      const drafts = asItems(first.body).filter((i) => i.state === 'DRAFT');
+      // POLICY.md 15.4: one report per DRAFT, results ignored here; the reload
+      // below shows whatever the server now says.
+      for (const d of drafts) {
+        try {
+          await apiPostEmpty(token, '/bounties/' + d.id + '/funding');
+        } catch {
+          // The list still loads; the next open reports again.
+        }
+      }
+      const second = drafts.length === 0 ? first : await apiGet(token, '/me/bounties');
+      setItems(asItems(second.body));
+    } catch (error: unknown) {
+      setError('Could not reach the server: ' + String(error));
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // POLICY.md 8.7 and 15.6: no body; a funded bounty answers 409 and the
+  // reload shows it AVAILABLE.
+  const cancel = useCallback(
+    async (id: string) => {
+      setCancelling(true);
+      try {
+        const result = await apiPostEmpty(token, '/bounties/' + id + '/cancel');
+        if (result.status !== 200) {
+          setError('Cancel answered HTTP ' + String(result.status) + '.');
+        }
+      } catch (error: unknown) {
+        setError('Could not reach the server: ' + String(error));
+      } finally {
+        setCancelling(false);
+      }
+      await load();
+    },
+    [load, token],
+  );
+
+  const busy = props.busy || cancelling;
+
+  return (
+    <View style={styles.screen}>
+      <Text style={styles.title}>My bounties</Text>
+      {error === undefined ? null : <Text style={styles.notice}>{error}</Text>}
+      <ScrollView>
+        {items === undefined ? (
+          <Text style={styles.placeholder}>Loading…</Text>
+        ) : items.length === 0 ? (
+          <Text style={styles.placeholder}>No bounties yet.</Text>
+        ) : (
+          items.map((item) => (
+            <View key={item.id} style={styles.row}>
+              <Text style={styles.value}>{item.title}</Text>
+              <Text style={styles.muted}>
+                {item.state + ' · ' + rewardText(item.reward_amount) + ' USDC'}
+              </Text>
+              <Text selectable style={styles.muted}>
+                {item.id}
+              </Text>
+              {item.state === 'DRAFT' ? (
+                <View style={styles.chipRow}>
+                  <Button label="Fund" disabled={busy} onPress={() => props.onFund(item.id)} />
+                  <Button
+                    label="Cancel"
+                    secondary
+                    disabled={busy}
+                    onPress={() => void cancel(item.id)}
+                  />
+                </View>
+              ) : null}
+            </View>
+          ))
+        )}
+      </ScrollView>
+      <View style={styles.buttons}>
+        <Button label="Refresh" secondary disabled={busy} onPress={() => void load()} />
+        <Button label="Back" secondary disabled={busy} onPress={props.onBack} />
+      </View>
+    </View>
+  );
+}
