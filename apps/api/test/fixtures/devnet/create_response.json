@@ -1,0 +1,49 @@
+{
+  "id": "46551b54-9a59-4400-8bca-fc0f00e76a7e",
+  "title": "Check EV Charger",
+  "category": "Infrastructure",
+  "state": "DRAFT",
+  "program_account": null,
+  "created_at": "2026-09-28T09:35:34.227071+10:00",
+  "policy_hash": "636d2ea79d35f1fa6d5d9a0e782412611a7d1ec61722588a1f6fa2ed38dd4a83",
+  "policy": {
+    "acceptance_window_seconds": 86400,
+    "capture_radius_m": 150,
+    "chain": "solana",
+    "challenge_window_seconds": 3600,
+    "cluster": "devnet",
+    "completion_window_seconds": 7200,
+    "domain_tag": "BOUNTYCAM_POLICY_V1",
+    "eligibility_profile_id": "BASE_V1",
+    "evidence_requirements": [
+      {
+        "id": "40f723c3-e278-4e02-a1f5-f72440f51c87",
+        "prompt": "Charger front",
+        "required": true,
+        "type": "PHOTO"
+      },
+      {
+        "id": "86ea0a62-aee1-4f93-9e6e-195572c3abd2",
+        "prompt": "Charger ID label",
+        "required": true,
+        "type": "PHOTO"
+      },
+      {
+        "id": "330944b2-b582-4eae-9d84-5fad10124c9a",
+        "prompt": "Status display",
+        "required": true,
+        "type": "PHOTO"
+      }
+    ],
+    "fee_amount": "0",
+    "lat": "-33.8688197",
+    "lon": "151.2092955",
+    "required_assurance": 1,
+    "reward_amount": "10000000",
+    "salt": "4ac5b93d05a08a007a20d322a5d2db511bdfbf90eeb0ea0db254f01ee06095f9",
+    "settlement_mint": "ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR"
+  },
+  "requester_wallet": "9BZ17sUdF2matCurxmdmUpD3BNabBTFmsmAVu5oY9qP3",
+  "signature": "jiRcwuMYWWMF4nP6xMH9sUmK3MgqwmxtJf66vZE1VufTjx2SWdLoipRHQy1EDo1JdHSDTCLPHWjEKYtQkZBGpPw",
+  "bounty_address": "ADmbNck8Fv13JviWQgZhtVW6NJZ1quzCyS4dskoTKj1E"
+}

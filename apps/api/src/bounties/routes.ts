@@ -22,12 +22,18 @@ import {
 } from "./policy.ts";
 import { snapLat, snapLon } from "./snap.ts";
 import { listItem, ownerView, publicView } from "./views.ts";
+import type { EligibilityDeps } from "../eligibility/deps.ts";
+import { projectFunding, type ProjectionDeps } from "../funding/project.ts";
 
 export interface BountyDeps {
   pool: Pool;
   config: Config;
   clock: Clock;
   randomness: Randomness;
+  // POLICY.md 15.6: cancel reads the chain before cancelling a DRAFT when the
+  // chain dependencies exist. Test builds without them keep section 8.7 as
+  // written; every production start provides them (index.ts).
+  eligibility?: EligibilityDeps;
 }
 
 function fail(reply: FastifyReply, status: number, code: string): FastifyReply {
@@ -696,6 +702,28 @@ export function registerBountyRoutes(
       // Step 6: already cancelled — a retry is a success, not a conflict.
       if (row.state === "CANCELLED") {
         return reply.status(200).send(ownerBody("CANCELLED"));
+      }
+
+      // Step 6a (POLICY.md 15.6, D120): with the chain available, a DRAFT
+      // whose account already exists is projected instead of cancelled, and
+      // a failed read refuses the cancel rather than risk cancelling a funded
+      // bounty. No account: fall through to step 7.
+      if (row.state === "DRAFT" && deps.eligibility !== undefined) {
+        const projection: ProjectionDeps = {
+          pool,
+          chain: deps.eligibility.chain,
+          programId: deps.eligibility.config.programId,
+          programIdBytes: deps.eligibility.config.programIdBytes,
+          alarm: (outcome, bountyId) =>
+            request.log.error({ outcome, bountyId }, "funding alarm"),
+        };
+        const projected = await projectFunding(projection, row.id);
+        if (projected.outcome === "CHAIN_UNAVAILABLE") {
+          return fail(reply, 503, "CHAIN_UNAVAILABLE");
+        }
+        if (projected.outcome !== "NOT_FUNDED") {
+          return fail(reply, 409, "BOUNTY_NOT_CANCELLABLE");
+        }
       }
 
       // Step 7: the one conditional update — id, requester and DRAFT all

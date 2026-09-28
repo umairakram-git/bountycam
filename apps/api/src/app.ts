@@ -7,6 +7,7 @@ import { registerAuthRoutes } from "./auth/routes.ts";
 import { registerBountyRoutes } from "./bounties/routes.ts";
 import type { EligibilityDeps } from "./eligibility/deps.ts";
 import { registerVoucherRoutes } from "./eligibility/routes.ts";
+import { registerFundingRoutes } from "./funding/routes.ts";
 
 export interface AppDeps {
   config: Config;
@@ -43,6 +44,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerBountyRoutes(app, deps);
   if (deps.eligibility !== undefined) {
     registerVoucherRoutes(app, { ...deps, eligibility: deps.eligibility });
+    // POLICY.md 15.4: the report endpoint shares the voucher's chain reader.
+    registerFundingRoutes(app, {
+      pool: deps.pool,
+      config: deps.config,
+      clock: deps.clock,
+      chain: deps.eligibility.chain,
+      programId: deps.eligibility.config.programId,
+      programIdBytes: deps.eligibility.config.programIdBytes,
+    });
   }
   return app;
 }

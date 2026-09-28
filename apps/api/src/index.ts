@@ -14,6 +14,7 @@ import { jsonRpcChainReader } from "./chain/rpc.ts";
 import { eligibilitySigner } from "./chain/signer.ts";
 import { assertMainnet, heliusSeekerCheck } from "./eligibility/seeker.ts";
 import { startReservationSweeper } from "./eligibility/sweeper.ts";
+import { startFundingSweeper } from "./funding/sweeper.ts";
 
 let config: Config;
 try {
@@ -82,3 +83,16 @@ await app.listen({ port, host: "127.0.0.1" });
 // ELIGIBILITY.md section 6.1, the first writer. unref'd, so it never keeps
 // the process alive on its own.
 startReservationSweeper(pool, systemClock, (error) => app.log.error(error));
+
+// POLICY.md 15.5: the funding sweep, the backstop for a lost report.
+startFundingSweeper(
+  {
+    pool,
+    chain,
+    programId: eligibility.programId,
+    programIdBytes: eligibility.programIdBytes,
+    alarm: (outcome, bountyId) => app.log.error({ outcome, bountyId }, "funding alarm"),
+  },
+  systemClock,
+  (error) => app.log.error(error),
+);
