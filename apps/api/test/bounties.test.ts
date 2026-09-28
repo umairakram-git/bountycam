@@ -34,6 +34,10 @@ function psql(database: string, sql: string): string {
 const BASE = new Date("2026-09-12T00:00:00.000Z");
 let nowMs = BASE.getTime();
 const clock: Clock = { now: () => new Date(nowMs) };
+// POLICY.md 16.3: seeded AVAILABLE rows carry a cutoff one day after BASE.
+const SEED_AVAILABLE =
+  "UPDATE bounties SET state = 'AVAILABLE', " +
+  "acceptance_cutoff = '2026-09-13T00:00:00.000Z' WHERE id = $1";
 
 // --- configuration through the production parser (tests 70 to 72) ---
 //
@@ -1051,7 +1055,7 @@ test("51 AVAILABLE within radius returned; two rows in distance-ascending order"
     const res = await createBounty(requester.token, body);
     assert.equal(res.statusCode, 201);
     const id: string = res.json().id;
-    await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+    await pool.query(SEED_AVAILABLE, [
       id,
     ]);
     return id;
@@ -1103,7 +1107,7 @@ test("52 DRAFT and CANCELLED rows within the radius are absent", async () => {
   const control = await createBounty(requester.token, at());
   assert.equal(control.statusCode, 201);
   const controlId: string = control.json().id;
-  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+  await pool.query(SEED_AVAILABLE, [
     controlId,
   ]);
   const res = await app.inject({
@@ -1130,7 +1134,7 @@ test("53 an AVAILABLE row outside the radius is absent", async () => {
   const created = await createBounty(requester.token, body);
   assert.equal(created.statusCode, 201);
   const id: string = created.json().id;
-  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+  await pool.query(SEED_AVAILABLE, [
     id,
   ]);
   const near = await app.inject({
@@ -1179,7 +1183,7 @@ test("54 list item keys exact; salt and requirement uuids absent from body", asy
   const id = created.json().id;
   // Unfunded is never discoverable (7.3) and no Session 7 API funds, so
   // the state is seeded by SQL (section 12 preamble).
-  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+  await pool.query(SEED_AVAILABLE, [
     id,
   ]);
 
@@ -1287,7 +1291,7 @@ test("56 limit and offset produce a deterministic slice of the 8.4 ordering", as
     const res = await createBounty(requester.token, body);
     assert.equal(res.statusCode, 201);
     const id: string = res.json().id;
-    await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+    await pool.query(SEED_AVAILABLE, [
       id,
     ]);
     seeded.push(id);
@@ -1385,7 +1389,7 @@ test("59 non-requester reads AVAILABLE: public view, thirteen fields, no leaks",
   const created = await createBounty(requester.token, body);
   assert.equal(created.statusCode, 201);
   const id = created.json().id;
-  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+  await pool.query(SEED_AVAILABLE, [
     id,
   ]);
 
@@ -1413,6 +1417,7 @@ test("59 non-requester reads AVAILABLE: public view, thirteen fields, no leaks",
     "location_public",
     "policy_hash",
     "policy_public",
+    "program_account",
     "state",
     "title",
   ]);
@@ -1502,7 +1507,7 @@ test("62 only the caller's bounties, every state, newest first", async () => {
   // state — so its absence below is requester scoping, not visibility.
   const otherCreated = await createBounty(other.token, validBody());
   assert.equal(otherCreated.statusCode, 201);
-  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+  await pool.query(SEED_AVAILABLE, [
     otherCreated.json().id,
   ]);
   // Three rows for the caller: DRAFT, CANCELLED (through the API) and
@@ -1522,7 +1527,7 @@ test("62 only the caller's bounties, every state, newest first", async () => {
   assert.equal(cancelled.statusCode, 200);
   const c = await createBounty(caller.token, validBody());
   assert.equal(c.statusCode, 201);
-  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+  await pool.query(SEED_AVAILABLE, [
     c.json().id,
   ]);
   const stamps: Array<[string, Date]> = [
@@ -1673,7 +1678,7 @@ test("67 a non-owner cancels a seeded AVAILABLE: 403 FORBIDDEN", async () => {
   const created = await createBounty(requester.token, validBody());
   assert.equal(created.statusCode, 201);
   const id = created.json().id;
-  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+  await pool.query(SEED_AVAILABLE, [
     id,
   ]);
   const res = await app.inject({
@@ -1853,7 +1858,7 @@ async function seedReservedAvailable(
   const res = await createBounty(requester.token, body);
   assert.equal(res.statusCode, 201);
   const bountyId: string = res.json().id;
-  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [
+  await pool.query(SEED_AVAILABLE, [
     bountyId,
   ]);
   const inserted = await pool.query<{ id: string }>(
@@ -1895,3 +1900,39 @@ test(
     assert.ok((await discoveredIds(viewer.token)).includes(bountyId));
   },
 );
+
+// POLICY.md section 16.3 (D126): discovery lists a bounty only while its
+// acceptance cutoff is at or after the injectable clock's now.
+
+async function seedAvailableWithCutoff(cutoff: Date | null): Promise<string> {
+  const requester = await seedRequester();
+  const body = validBody();
+  body.policy["lat"] = "61.0000000";
+  body.policy["lon"] = "31.0000000";
+  const res = await createBounty(requester.token, body);
+  assert.equal(res.statusCode, 201);
+  const id: string = res.json().id;
+  await pool.query(
+    "UPDATE bounties SET state = 'AVAILABLE', acceptance_cutoff = $2 WHERE id = $1",
+    [id, cutoff],
+  );
+  return id;
+}
+
+test("79 cutoff one second before now: excluded; cutoff equal to now: listed", async () => {
+  const viewer = await seedRequester();
+  const id = await seedAvailableWithCutoff(new Date(BASE.getTime() - 1000));
+  nowMs = BASE.getTime();
+  assert.ok(!(await discoveredIds(viewer.token)).includes(id));
+  await pool.query("UPDATE bounties SET acceptance_cutoff = $2 WHERE id = $1", [id, BASE]);
+  assert.ok((await discoveredIds(viewer.token)).includes(id));
+});
+
+test("80 an AVAILABLE row with a null cutoff is excluded; a control row is listed", async () => {
+  const viewer = await seedRequester();
+  const control = await seedAvailableWithCutoff(new Date(BASE.getTime() + 86_400_000));
+  const id = await seedAvailableWithCutoff(null);
+  const ids = await discoveredIds(viewer.token);
+  assert.ok(ids.includes(control));
+  assert.ok(!ids.includes(id));
+});

@@ -46,6 +46,7 @@ export interface PublicViewInput {
   title: string;
   category: string;
   state: string;
+  programAccount: string | null;
   createdAt: Date;
   policyHashHex: string;
   canonicalJson: string;
@@ -89,7 +90,8 @@ interface StoredPolicy {
   settlement_mint: string;
 }
 
-// Section 8.2 public view: eight keys, any other authenticated caller.
+// Section 8.2 public view: nine keys with section 16.4's program_account,
+// any other authenticated caller.
 // policy_public writes the thirteen keys out literally in canonical order;
 // each requirement item is a new object of exactly prompt, required, type.
 export function publicView(input: PublicViewInput): Record<string, unknown> {
@@ -99,6 +101,7 @@ export function publicView(input: PublicViewInput): Record<string, unknown> {
     title: input.title,
     category: input.category,
     state: input.state,
+    program_account: input.programAccount,
     created_at: input.createdAt.toISOString(),
     policy_hash: input.policyHashHex,
     location_public: { lat: snapLat(policy.lat), lon: snapLon(policy.lon) },

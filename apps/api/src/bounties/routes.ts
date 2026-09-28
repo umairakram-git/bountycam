@@ -487,6 +487,7 @@ export function registerBountyRoutes(
        FROM bounties b
        JOIN policies p ON p.id = b.policy_id
        WHERE b.state = 'AVAILABLE'
+         AND b.acceptance_cutoff >= $6
          AND NOT EXISTS (
            SELECT 1 FROM assignments a
            WHERE a.bounty_id = b.id AND a.status = 'ACTIVE')
@@ -503,7 +504,8 @@ export function registerBountyRoutes(
          b.created_at DESC,
          b.id ASC
        LIMIT $4 OFFSET $5`,
-      [query.lon, query.lat, query.radiusM, query.limit, query.offset],
+      // $6: POLICY.md 16.3 (D126), the voucher check 6 comparison.
+      [query.lon, query.lat, query.radiusM, query.limit, query.offset, clock.now()],
     );
 
     // Step 6: 200, an object whose single key is bounties.
@@ -582,6 +584,7 @@ export function registerBountyRoutes(
           title: row.title,
           category: row.category,
           state: row.state,
+          programAccount: row.program_account,
           createdAt: row.created_at,
           policyHashHex: bytesToHex(row.policy_hash),
           canonicalJson: row.canonical_json,

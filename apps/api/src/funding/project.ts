@@ -145,9 +145,11 @@ export async function projectFunding(
 
   // Step 7: one conditional update.
   const updated = await deps.pool.query(
-    `UPDATE bounties SET state = 'AVAILABLE', program_account = $2
+    // POLICY.md 16.3 (D126): the account's acceptance cutoff, immutable on chain.
+    `UPDATE bounties SET state = 'AVAILABLE', program_account = $2,
+            acceptance_cutoff = to_timestamp($3::float8)
      WHERE id = $1 AND state = 'DRAFT'`,
-    [row.id, address],
+    [row.id, address, read.bounty.acceptanceCutoff.toString()],
   );
   if ((updated.rowCount ?? 0) === 1) return { outcome: "PROJECTED", address };
 

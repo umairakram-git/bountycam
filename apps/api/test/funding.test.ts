@@ -359,6 +359,15 @@ test("03 DRAFT and the recorded account: 200, AVAILABLE with the address (contro
     program_account: fixture.bounty_address,
   });
   assert.equal(alarmCount("BINDING_MISMATCH"), 0);
+  // POLICY.md 16.3: the cutoff is the account's, offset 161.
+  const cutoff = await pool.query<{ s: string }>(
+    "SELECT extract(epoch FROM acceptance_cutoff)::bigint::text AS s " +
+      "FROM bounties WHERE id = $1",
+    [fixture.id],
+  );
+  const d = recordedAccount.data;
+  const want = new DataView(d.buffer, d.byteOffset, d.byteLength).getBigInt64(161, true);
+  assert.equal(cutoff.rows[0]?.s, want.toString());
 });
 
 test("04 a repeated report: 200, the same view, no second chain read needed", async () => {

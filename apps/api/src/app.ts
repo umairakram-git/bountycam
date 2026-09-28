@@ -23,7 +23,22 @@ export interface AppDeps {
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
-  const app = Fastify({ logger: deps.logger ?? false });
+  // POLICY.md 16.11 (D127): request logs carry the path only. Discovery's
+  // query string holds the Scout's position, and the default serializer
+  // records the full URL and the remote address.
+  const serializers = {
+    req: (req: { method?: string; url?: string }) => ({
+      method: req.method,
+      url: typeof req.url === "string" ? req.url.split("?")[0] : undefined,
+    }),
+  };
+  const logger =
+    deps.logger === undefined || deps.logger === false
+      ? false
+      : deps.logger === true
+        ? { serializers }
+        : { ...deps.logger, serializers };
+  const app = Fastify({ logger });
 
   app.setErrorHandler((error, request, reply) => {
     const code = (error as { code?: string }).code;
