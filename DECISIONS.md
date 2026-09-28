@@ -2660,3 +2660,30 @@ Ruling, technical. Row 0 of section 9.4's table is signer yes, writable yes, and
 a missing privilege, not an added one. Test 123 gains the case of a Scout that is not
 writable, shown red before the gate. P1 never met this, because the requester's account is
 writable in `create_and_fund` anyway.
+
+**D129 — The acceptance tail is read by its own function; the projection checks `bounty_id`.**
+
+Context. Found while implementing POLICY.md section 16, before any of it was committed.
+Section 16.6 had `decodeBountyAccount` enforce tail rules for every state. Existing tests
+decode prefix-only accounts on purpose: chain test 07 decodes a 171-byte `Funded` account,
+chain test 08 decodes states 1 and 5 over a zero tail, and eligibility test 12 seeds an
+`Accepted` state over a zero tail. A strict prefix decoder would break all three, and no P2
+caller needs the tail of a `Funded` account.
+
+Ruling, technical.
+
+1. `decodeBountyAccount` is unchanged. A new function, `readAcceptance`, reads `scout` and
+   `deadline` from an `Accepted` account only, and anything else is `BAD_TAIL` (POLICY.md
+   section 16.6 as amended).
+2. The projection also requires the account's `bounty_id` to equal the row id's 16 bytes.
+   It reads the address from the row, and the check costs nothing and catches a row pointing
+   at another bounty's account.
+3. Section 16.10's tests 1 to 3 read the recorded account and two edits of it. Test 9 uses
+   the recorded account with its state byte set to `Funded`: P1's funded fixture belongs to
+   another bounty, so point 2 would make it `BINDING_MISMATCH`. Test 16 also covers step 4a.
+4. Placement: `GET /me/missions` and step 4a live in `bounties/routes.ts` beside
+   `/me/bounties`, whose query helper they share; the report endpoint and the projection live
+   in `src/acceptance/`.
+5. Fixtures. The accepted bounty's fixture is built from its database rows, as P1's
+   `create_response.json` was: the phone's create response was not captured. The voucher
+   response was not recorded either; no test reads it.

@@ -1927,22 +1927,19 @@ mission after a restart.
 
 The route is `/me/missions` for section 8.6's reason.
 
-### 16.6 Reading the acceptance fields
+### 16.6 Reading the acceptance fields (D129)
 
-`decodeBountyAccount` (`chain/bounty.ts`) reads the two fields `accept` writes. Anchor
-allocates the full 274 bytes; each `Option` is serialised as a tag byte, 0 for none and 1 for
-some, followed by its value only when the tag is 1. Rules by decoded state:
+`decodeBountyAccount` (`chain/bounty.ts`) is unchanged: it reads the fixed prefix only. A new
+function, `readAcceptance`, reads the two fields `accept` writes, from an `Accepted` account
+only. Anchor allocates the full 274 bytes; each `Option` is serialised as a tag byte, 0 for
+none and 1 for some, followed by its value only when the tag is 1. In an `Accepted` account
+byte 169 is 1, byte 171 (the `scout` tag) is 1, `scout` is bytes 172 to 203, byte 204 (the
+`deadline` tag) is 1, and `deadline` is the little-endian signed 64-bit integer at bytes 205
+to 212.
 
-- **`Funded`:** byte 171 (the `scout` tag) and byte 172 (the `deadline` tag) are both 0.
-  `scout` and `deadline` are null.
-- **`Accepted`:** byte 171 is 1; `scout` is bytes 172 to 203; byte 204 is 1; `deadline` is
-  the little-endian signed 64-bit integer at bytes 205 to 212.
-- **Any later state:** not read in P2; `scout` and `deadline` are null.
-
-A tail breaking its state's rule is the new error `BAD_TAIL`. The result gains `scout`
-(32 bytes or null) and `deadline` (`bigint` or null). Callers that read only the prefix are
-unchanged. The `Funded` rule makes funded-account decoding stricter; the Session 17 fixture
-satisfies it. The layout is confirmed against the recorded account of section 16.10.
+Anything else, including an account shorter than 213 bytes, is the new error `BAD_TAIL`. The
+result is `scout` (32 bytes) and `deadline` (`bigint`). The layout is confirmed against the
+recorded account of section 16.10.
 
 ### 16.7 The projection (D124)
 
@@ -1955,9 +1952,11 @@ Steps in order; the first failing step ends the call. Only step 7 writes.
 2. **Read** the account at `program_account` at `confirmed`. A reader failure is
    `CHAIN_UNAVAILABLE`. No account is `NOT_ACCEPTED`: a closed account belongs to `cancel` or
    `expire_unaccepted`, whose projections are not P2's.
-3. **Decode** (section 16.6). A failure is `BINDING_MISMATCH`.
-4. **State.** `Funded` is `NOT_ACCEPTED`. `Accepted` continues. Any other state is
-   `UNPROJECTED_STATE`: no projector for it exists yet.
+3. **Decode** the prefix. A failure, or an account `bounty_id` other than the row id's 16
+   bytes, is `BINDING_MISMATCH` (D129).
+4. **State.** `Funded` is `NOT_ACCEPTED`. Any state other than `Accepted` is
+   `UNPROJECTED_STATE`: no projector for it exists yet. `Accepted` continues with
+   `readAcceptance` (section 16.6); `BAD_TAIL` is `BINDING_MISMATCH`.
 5. **Scout.** The `users` row whose `wallet_address` is the base58 of `scout`. None is
    `UNKNOWN_SCOUT`. A voucher requires a session, so an unknown Scout means a voucher was
    signed outside this service.
@@ -2057,11 +2056,11 @@ is shown red before the gate by a scripted mutation of the check it names.
 A new file, `apps/api/test/acceptance.test.ts`, named in the test script after
 `funding.test.ts`. D36 gate: `tests 16, pass 16, fail 0`.
 
-1. The recorded account decodes: state `Accepted`, `scout` the recorded Scout wallet,
-   `deadline` the recorded value.
+1. The recorded account: state byte 1, and `readAcceptance` returns the recorded Scout wallet
+   and the recorded `deadline`.
 2. The recorded account with byte 171 set to 0: `BAD_TAIL`.
-3. The Session 17 funded fixture decodes with `scout` and `deadline` null; the same with byte
-   171 set to 1: `BAD_TAIL`.
+3. The recorded account with byte 204 set to 0, and the recorded account cut to 212 bytes:
+   `BAD_TAIL`.
 4. Report with the chain's Scout holding the reservation: 200, assigned-Scout view; the row is
    `ACCEPTED`; the assignment is `ACTIVE`, its `deadline` is the account's and its
    `accepted_at` is `deadline` minus `completion_window_secs`.
@@ -2070,7 +2069,7 @@ A new file, `apps/api/test/acceptance.test.ts`, named in the test script after
 6. A repeated report: 200, no second row, values unchanged.
 7. Report by another Scout: `ACCEPTED_BY_OTHER`.
 8. Report by the requester: 200, owner view, state `ACCEPTED`.
-9. The funded account: `NOT_ACCEPTED`; nothing written.
+9. The recorded account with its state byte set to `Funded`: `NOT_ACCEPTED`; nothing written.
 10. The reader throws: 503 `CHAIN_UNAVAILABLE`; nothing written.
 11. No account: `NOT_ACCEPTED`.
 12. The chain's Scout holds no `ACTIVE` row and another Scout does: that row becomes
@@ -2083,7 +2082,8 @@ A new file, `apps/api/test/acceptance.test.ts`, named in the test script after
 15. An `assignments` insert with `accepted_at` set and `deadline` null fails on
     `assignments_acceptance_pair`.
 16. `GET /me/missions` lists the acceptance for its Scout, with `deadline`, and nothing for
-    another caller.
+    another caller; `GET /bounties/:id` gives the Scout the assigned-Scout view (step 4a) and
+    anyone else the public view.
 
 Other suites:
 
