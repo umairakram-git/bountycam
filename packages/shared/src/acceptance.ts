@@ -221,7 +221,8 @@ export interface ExpectedAccept {
 /** The four accounts of SPEC.md 9.4 in order, each with its flags. */
 export function expectedAcceptKeys(expected: ExpectedAccept): PlainAccountMeta[] {
   return [
-    { pubkey: expected.scout, isSigner: true, isWritable: false },
+    // D128: the Scout pays the fee, and a fee payer is writable in the message.
+    { pubkey: expected.scout, isSigner: true, isWritable: true },
     { pubkey: expected.config, isSigner: false, isWritable: false },
     { pubkey: expected.bounty, isSigner: false, isWritable: true },
     { pubkey: INSTRUCTIONS_SYSVAR_ID, isSigner: false, isWritable: false },

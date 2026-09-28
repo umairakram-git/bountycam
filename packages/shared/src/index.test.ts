@@ -1576,6 +1576,9 @@ describe("checkAcceptInstructions (SPEC.md 9.4)", () => {
       expectedAcceptKeys(expected()).map((k, i) => (i === 0 ? { ...k, isSigner: false } : k)),
     );
     withKeys(
+      expectedAcceptKeys(expected()).map((k, i) => (i === 0 ? { ...k, isWritable: false } : k)),
+    );
+    withKeys(
       expectedAcceptKeys(expected()).map((k, i) => (i === 2 ? { ...k, isWritable: false } : k)),
     );
     withKeys(
