@@ -29,6 +29,14 @@ import {
   decimalToBaseUnits,
   checkFundingInstructions,
   expectedFundingKeys,
+  acceptData,
+  ACCEPT_DISCRIMINATOR,
+  ed25519InstructionData,
+  checkVoucher,
+  checkAcceptInstructions,
+  expectedAcceptKeys,
+  ED25519_PROGRAM_ID,
+  verifyAssignedPolicy,
 } from "./index.js";
 import type {
   CreatedBountyExpectation,
@@ -38,6 +46,9 @@ import type {
   FundingArgs,
   PlainAccountMeta,
   PlainInstruction,
+  ExpectedAccept,
+  ExpectedVoucher,
+  Voucher,
 } from "./index.js";
 
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
@@ -1332,5 +1343,289 @@ describe("checkFundingInstructions (SPEC.md 8.7)", () => {
     const data = createAndFundData(c1Args());
     data[100] = data[100]! ^ 0x01;
     rejectsWith(() => checkFundingInstructions([{ ...good(), data }], expected()), "TX_DATA");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SPEC.md section 9 — acceptance-path helpers (Session 18, tests 111 to 126)
+// ---------------------------------------------------------------------------
+
+const A1_HEX = "419646d885066b04c035d868000000000000";
+const D1_HEAD_HEX = "01003000ffff1000ffff7000d400ffff";
+
+// MESSAGES.md vector ELI-01 and the test eligibility authority, from vectors.json.
+const eli01 = (() => {
+  const vectors = JSON.parse(
+    readFileSync(join(process.cwd(), "vectors", "vectors.json"), "utf8"),
+  ) as {
+    authorities: { eligibility_pubkey_hex: string };
+    vectors: { name: string; message_hex: string; signature_hex: string }[];
+  };
+  const v = vectors.vectors.find((x) => x.name === "ELI-01")!;
+  const message = fromHex(v.message_hex);
+  const dv = new DataView(message.buffer, message.byteOffset, message.byteLength);
+  return {
+    message,
+    signature: fromHex(v.signature_hex),
+    authority: fromHex(vectors.authorities.eligibility_pubkey_hex),
+    expiresAt: dv.getBigInt64(204, true),
+    deploymentId: dv.getUint8(26),
+    programId: message.slice(27, 59),
+    bountyId: message.slice(59, 75),
+    scout: message.slice(107, 139),
+    policyHash: message.slice(139, 171),
+    eligibilityProfileHash: message.slice(171, 203),
+    requiredAssurance: dv.getUint8(203),
+  };
+})();
+
+const eliVoucher = (): Voucher => ({
+  message: eli01.message.slice(),
+  signature: eli01.signature.slice(),
+  authority: eli01.authority.slice(),
+  expiresAt: eli01.expiresAt,
+});
+const eliExpected = (): ExpectedVoucher => ({
+  programId: eli01.programId,
+  deploymentId: eli01.deploymentId,
+  bountyId: eli01.bountyId,
+  scout: eli01.scout,
+  policyHash: eli01.policyHash,
+  eligibilityProfileHash: eli01.eligibilityProfileHash,
+  requiredAssurance: eli01.requiredAssurance,
+  authority: eli01.authority,
+});
+
+describe("acceptData (SPEC.md 9.1)", () => {
+  test("111 reproduces A1 as a fresh 18-byte array", () => {
+    const a = acceptData(1759000000n, 0);
+    const b = acceptData(1759000000n, 0);
+    assert.equal(hex(a), A1_HEX);
+    assert.equal(a.length, 18);
+    assert.notEqual(a, b);
+  });
+
+  test("112 the discriminator is sha256(global:accept)[0..8]", () => {
+    assert.equal(hex(ACCEPT_DISCRIMINATOR), hex(sha256(utf8("global:accept")).slice(0, 8)));
+  });
+
+  test("113 ACCEPT_FIELD_RANGE", () => {
+    rejectsWith(() => acceptData(1759000000 as unknown as bigint, 0), "ACCEPT_FIELD_RANGE");
+    rejectsWith(() => acceptData(1n << 63n, 0), "ACCEPT_FIELD_RANGE");
+    for (const i of [-1, 65536, 1.5]) {
+      rejectsWith(() => acceptData(1759000000n, i), "ACCEPT_FIELD_RANGE");
+    }
+  });
+});
+
+describe("ed25519InstructionData (SPEC.md 9.2)", () => {
+  test("114 reproduces D1", () => {
+    const d = ed25519InstructionData(eli01.authority, eli01.signature, eli01.message);
+    assert.equal(d.length, 324);
+    assert.equal(hex(d.slice(0, 16)), D1_HEAD_HEX);
+    assert.equal(hex(d.slice(16, 48)), hex(eli01.authority));
+    assert.equal(hex(d.slice(48, 112)), hex(eli01.signature));
+    assert.equal(hex(d.slice(112)), hex(eli01.message));
+  });
+
+  test("115 ED25519_FIELD_LENGTH and ED25519_FIELD_NOT_BYTES", () => {
+    const { authority, signature, message } = eli01;
+    rejectsWith(
+      () => ed25519InstructionData(new Uint8Array(31), signature, message),
+      "ED25519_FIELD_LENGTH",
+    );
+    rejectsWith(
+      () => ed25519InstructionData(authority, new Uint8Array(63), message),
+      "ED25519_FIELD_LENGTH",
+    );
+    rejectsWith(
+      () => ed25519InstructionData(authority, signature, new Uint8Array(0)),
+      "ED25519_FIELD_LENGTH",
+    );
+    rejectsWith(
+      () =>
+        ed25519InstructionData(
+          authority,
+          Array(64).fill(0) as unknown as Uint8Array,
+          message,
+        ),
+      "ED25519_FIELD_NOT_BYTES",
+    );
+  });
+});
+
+describe("checkVoucher (SPEC.md 9.3)", () => {
+  test("116 accepts ELI-01 under the test eligibility authority", () => {
+    checkVoucher(eliVoucher(), eliExpected());
+  });
+
+  test("117 VOUCHER_SHAPE_INVALID", () => {
+    rejectsWith(
+      () => checkVoucher({ ...eliVoucher(), message: eli01.message.slice(0, 211) }, eliExpected()),
+      "VOUCHER_SHAPE_INVALID",
+    );
+    rejectsWith(
+      () => checkVoucher({ ...eliVoucher(), signature: new Uint8Array(63) }, eliExpected()),
+      "VOUCHER_SHAPE_INVALID",
+    );
+    rejectsWith(
+      () =>
+        checkVoucher(
+          { ...eliVoucher(), expiresAt: Number(eli01.expiresAt) as unknown as bigint },
+          eliExpected(),
+        ),
+      "VOUCHER_SHAPE_INVALID",
+    );
+  });
+
+  test("118 VOUCHER_AUTHORITY_MISMATCH", () => {
+    rejectsWith(
+      () => checkVoucher(eliVoucher(), { ...eliExpected(), authority: new Uint8Array(32) }),
+      "VOUCHER_AUTHORITY_MISMATCH",
+    );
+  });
+
+  test("119 VOUCHER_FIELD_MISMATCH", () => {
+    rejectsWith(
+      () => checkVoucher(eliVoucher(), { ...eliExpected(), scout: new Uint8Array(32).fill(7) }),
+      "VOUCHER_FIELD_MISMATCH",
+    );
+    rejectsWith(
+      () => checkVoucher(eliVoucher(), { ...eliExpected(), bountyId: new Uint8Array(16) }),
+      "VOUCHER_FIELD_MISMATCH",
+    );
+    rejectsWith(
+      () => checkVoucher({ ...eliVoucher(), expiresAt: eli01.expiresAt + 1n }, eliExpected()),
+      "VOUCHER_FIELD_MISMATCH",
+    );
+  });
+});
+
+describe("checkAcceptInstructions (SPEC.md 9.4)", () => {
+  const key = (fill: number): Uint8Array => new Uint8Array(32).fill(fill);
+  const expected = (): ExpectedAccept => ({
+    programId: key(0x10),
+    scout: key(0x11),
+    config: key(0x12),
+    bounty: key(0x13),
+    authority: eli01.authority,
+    signature: eli01.signature,
+    message: eli01.message,
+    expiresAt: eli01.expiresAt,
+  });
+  const good = (): PlainInstruction[] => [
+    {
+      programId: ED25519_PROGRAM_ID,
+      keys: [],
+      data: ed25519InstructionData(eli01.authority, eli01.signature, eli01.message),
+    },
+    {
+      programId: key(0x10),
+      keys: expectedAcceptKeys(expected()),
+      data: acceptData(eli01.expiresAt, 0),
+    },
+  ];
+  const withAccept = (patch: Partial<PlainInstruction>): PlainInstruction[] => {
+    const g = good();
+    return [g[0]!, { ...g[1]!, ...patch }];
+  };
+
+  test("120 accepts the expected pair", () => {
+    checkAcceptInstructions(good(), expected());
+  });
+
+  test("121 TX_INSTRUCTION_COUNT", () => {
+    rejectsWith(
+      () => checkAcceptInstructions(good().slice(0, 1), expected()),
+      "TX_INSTRUCTION_COUNT",
+    );
+    rejectsWith(
+      () => checkAcceptInstructions([...good(), good()[1]!], expected()),
+      "TX_INSTRUCTION_COUNT",
+    );
+  });
+
+  test("122 TX_PROGRAM", () => {
+    const g = good();
+    rejectsWith(
+      () => checkAcceptInstructions([{ ...g[0]!, programId: key(0x20) }, g[1]!], expected()),
+      "TX_PROGRAM",
+    );
+    rejectsWith(
+      () => checkAcceptInstructions(withAccept({ programId: key(0x20) }), expected()),
+      "TX_PROGRAM",
+    );
+  });
+
+  test("123 TX_ACCOUNTS: the ed25519 keys, order, flags, sysvar", () => {
+    const g = good();
+    rejectsWith(
+      () =>
+        checkAcceptInstructions(
+          [{ ...g[0]!, keys: [{ pubkey: key(0x11), isSigner: false, isWritable: false }] }, g[1]!],
+          expected(),
+        ),
+      "TX_ACCOUNTS",
+    );
+    const withKeys = (keys: PlainAccountMeta[]): void =>
+      rejectsWith(() => checkAcceptInstructions(withAccept({ keys }), expected()), "TX_ACCOUNTS");
+    const swapped = expectedAcceptKeys(expected()).slice();
+    [swapped[1], swapped[2]] = [swapped[2]!, swapped[1]!];
+    withKeys(swapped);
+    withKeys(
+      expectedAcceptKeys(expected()).map((k, i) => (i === 0 ? { ...k, isSigner: false } : k)),
+    );
+    withKeys(
+      expectedAcceptKeys(expected()).map((k, i) => (i === 2 ? { ...k, isWritable: false } : k)),
+    );
+    withKeys(
+      expectedAcceptKeys(expected()).map((k, i) => (i === 3 ? { ...k, pubkey: key(0x06) } : k)),
+    );
+  });
+
+  test("124 TX_DATA", () => {
+    const g = good();
+    const edData = g[0]!.data.slice();
+    edData[200] = edData[200]! ^ 0x01;
+    rejectsWith(
+      () => checkAcceptInstructions([{ ...g[0]!, data: edData }, g[1]!], expected()),
+      "TX_DATA",
+    );
+    rejectsWith(
+      () =>
+        checkAcceptInstructions(withAccept({ data: acceptData(eli01.expiresAt, 1) }), expected()),
+      "TX_DATA",
+    );
+  });
+});
+
+describe("verifyAssignedPolicy (SPEC.md 9.5)", () => {
+  const assigned = (policy: Record<string, unknown> = v1Policy()) => ({
+    ...v1Response(policy),
+    state: "ACCEPTED",
+  });
+
+  test("125 accepts V1's policy and returns its exact location", () => {
+    assert.deepEqual(verifyAssignedPolicy(assigned(), fromHex(V1_HASH)), {
+      lat: "40.4405556",
+      lon: "-79.9961111",
+    });
+  });
+
+  test("126 ASSIGNED_HASH_MISMATCH and ASSIGNED_SHAPE_INVALID", () => {
+    rejectsWith(
+      () => verifyAssignedPolicy(assigned(), new Uint8Array(32)),
+      "ASSIGNED_HASH_MISMATCH",
+    );
+    const noPolicy: Record<string, unknown> = { ...assigned() };
+    delete noPolicy["policy"];
+    rejectsWith(() => verifyAssignedPolicy(noPolicy, fromHex(V1_HASH)), "ASSIGNED_SHAPE_INVALID");
+    const p = v1Policy();
+    p["lat"] = "40.440555";
+    const tampered = assigned(p);
+    rejectsWith(
+      () => verifyAssignedPolicy(tampered, fromHex(tampered.policy_hash)),
+      "ASSIGNED_SHAPE_INVALID",
+    );
   });
 });

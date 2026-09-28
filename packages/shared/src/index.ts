@@ -465,3 +465,6 @@ export function eligibilityMessage(fields: EligibilityMessageFields): Uint8Array
 
 // SPEC.md section 8: the funding-path helpers (Session 17, D121).
 export * from "./funding.js";
+
+// SPEC.md section 9: the acceptance-path helpers (Session 18, D127).
+export * from "./acceptance.js";
