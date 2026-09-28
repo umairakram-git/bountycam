@@ -22,6 +22,22 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "BountyCam uses your location to find bounties near you and to confirm you are at a mission."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "BountyCam uses the camera to capture mission evidence.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ]
+    ]
   }
 }

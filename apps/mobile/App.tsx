@@ -1,5 +1,6 @@
-// Session 17: the requester's path (FUNDING.md). A small state machine over
-// six screens; no navigation library. The Session 12 sign-in screen is kept as
+// Session 17: the requester's path (FUNDING.md). Session 18 adds the Scout's
+// path (DISCOVERY.md). A small state machine over eleven screens; no navigation
+// library. The Session 12 sign-in screen is kept as
 // the first screen, and its rules stand: the JWT is never logged.
 
 import { StatusBar } from 'expo-status-bar';
@@ -23,8 +24,28 @@ import { ReviewScreen } from './src/screens/ReviewScreen';
 import { Button, LogPane } from './src/screens/common';
 import { styles } from './src/screens/styles';
 import { createMwaWalletProvider } from './src/wallet/mwa';
+import { SpecError, verifyAssignedPolicy } from '@hackathon/shared';
+import { apiGet } from './src/api/client';
+import { acceptBounty, type AcceptOutcome } from './src/scout/accept';
+import { hexToBytes, type Point, type PublicBounty } from './src/scout/views';
+import { AcceptingScreen } from './src/screens/AcceptingScreen';
+import { DetailScreen } from './src/screens/DetailScreen';
+import { FindScreen } from './src/screens/FindScreen';
+import { MissionScreen } from './src/screens/MissionScreen';
+import { MyMissionsScreen } from './src/screens/MyMissionsScreen';
 
-type Screen = 'signin' | 'home' | 'create' | 'review' | 'funding' | 'mine';
+type Screen =
+  | 'signin'
+  | 'home'
+  | 'create'
+  | 'review'
+  | 'funding'
+  | 'mine'
+  | 'find'
+  | 'detail'
+  | 'accepting'
+  | 'mission'
+  | 'missions';
 
 interface Session {
   /** A bearer credential. Never logged, never shown. */
@@ -33,6 +54,7 @@ interface Session {
 }
 
 function describeThrown(error: unknown): string {
+  if (error instanceof SpecError) return error.code + ': ' + error.message;
   if (error instanceof Error) return error.name + ': ' + error.message;
   return String(error);
 }
@@ -49,6 +71,15 @@ export default function App() {
   const [outcome, setOutcome] = useState<FundOutcome | undefined>(undefined);
   // One idempotency key per form submission, reused on a retry (POLICY.md 10).
   const idempotencyKey = useRef<string | undefined>(undefined);
+  // DISCOVERY.md 3: the Scout's path.
+  const [position, setPosition] = useState<Point | undefined>(undefined);
+  const [detailId, setDetailId] = useState<string | undefined>(undefined);
+  const [scoutBounty, setScoutBounty] = useState<PublicBounty | undefined>(undefined);
+  const [acceptOutcome, setAcceptOutcome] = useState<AcceptOutcome | undefined>(undefined);
+  const [acceptNotice, setAcceptNotice] = useState<string | undefined>(undefined);
+  const [mission, setMission] = useState<
+    { readonly view: unknown; readonly lat: string; readonly lon: string } | undefined
+  >(undefined);
 
   const append = useCallback((line: string) => {
     setLines((previous) => [...previous, line]);
@@ -151,6 +182,85 @@ export default function App() {
       .finally(() => setBusy(false));
   }, [append, bounty, provider, session]);
 
+  // DISCOVERY.md 3.4: nothing is shown unless the policy hashes as expected.
+  const showMission = useCallback(
+    (view: unknown, expectedHash: Uint8Array): boolean => {
+      try {
+        const spot = verifyAssignedPolicy(view, expectedHash);
+        setMission({ view, lat: spot.lat, lon: spot.lon });
+        setScreen('mission');
+        return true;
+      } catch (error: unknown) {
+        append('assigned view check failed: ' + describeThrown(error));
+        return false;
+      }
+    },
+    [append],
+  );
+
+  const onAccept = useCallback(
+    (target: PublicBounty) => {
+      if (session === undefined) return;
+      setScoutBounty(target);
+      setAcceptOutcome(undefined);
+      setAcceptNotice(undefined);
+      setLines(['=== accepting ' + target.id + ' ' + new Date().toISOString() + ' ===']);
+      setScreen('accepting');
+      setBusy(true);
+      acceptBounty(provider, session.token, target, session.user.wallet_address, append)
+        .then((result) => {
+          append('outcome: ' + result.kind);
+          setAcceptOutcome(result);
+          if (result.kind === 'ACCEPTED' && !showMission(result.view, result.policyHash)) {
+            setAcceptNotice(
+              "This mission's details don't match what was accepted. Contact support.",
+            );
+          }
+        })
+        .catch((error: unknown) => {
+          append('UNCAUGHT: ' + describeThrown(error));
+          setAcceptOutcome({
+            kind: 'NOT_SENT',
+            message: 'Something went wrong. See the log.',
+          });
+        })
+        .finally(() => setBusy(false));
+    },
+    [append, provider, session, showMission],
+  );
+
+  // DISCOVERY.md 3.5: from My missions the expected hash is the view's own.
+  const onOpenMission = useCallback(
+    (id: string) => {
+      if (session === undefined) return;
+      setBusy(true);
+      setLines([]);
+      apiGet(session.token, '/bounties/' + id)
+        .then((result) => {
+          const hash = (result.body as { policy_hash?: unknown } | undefined)?.policy_hash;
+          if (result.status !== 200) {
+            setLines(["Couldn't open this mission (HTTP " + String(result.status) + ').']);
+            setScreen('home');
+            return;
+          }
+          const shown =
+            typeof hash === 'string' &&
+            /^[0-9a-f]{64}$/.test(hash) &&
+            showMission(result.body, hexToBytes(hash));
+          if (!shown) {
+            setLines(["This mission's details don't match what was accepted. Contact support."]);
+            setScreen('home');
+          }
+        })
+        .catch((error: unknown) => {
+          setLines(['UNCAUGHT: ' + describeThrown(error)]);
+          setScreen('home');
+        })
+        .finally(() => setBusy(false));
+    },
+    [session, showMission],
+  );
+
   if (screen === 'signin' || session === undefined) {
     return (
       <View style={styles.screen}>
@@ -214,6 +324,68 @@ export default function App() {
     );
   }
 
+  if (screen === 'find') {
+    return (
+      <FindScreen
+        token={session.token}
+        onOpen={(id, point) => {
+          setDetailId(id);
+          setPosition(point);
+          setScreen('detail');
+        }}
+        onBack={() => setScreen('home')}
+      />
+    );
+  }
+
+  if (screen === 'detail' && detailId !== undefined) {
+    return (
+      <DetailScreen
+        token={session.token}
+        id={detailId}
+        position={position}
+        onAccept={onAccept}
+        onBack={() => setScreen('find')}
+      />
+    );
+  }
+
+  if (screen === 'accepting') {
+    return (
+      <AcceptingScreen
+        lines={lines}
+        outcome={acceptOutcome}
+        notice={acceptNotice}
+        onAgain={() => {
+          if (scoutBounty !== undefined) onAccept(scoutBounty);
+        }}
+        onDone={() => setScreen('home')}
+      />
+    );
+  }
+
+  if (screen === 'mission' && mission !== undefined) {
+    return (
+      <MissionScreen
+        view={mission.view}
+        lat={mission.lat}
+        lon={mission.lon}
+        onBack={() => setScreen('home')}
+      />
+    );
+  }
+
+  if (screen === 'missions') {
+    return (
+      <MyMissionsScreen
+        token={session.token}
+        busy={busy}
+        onOpen={onOpenMission}
+        onBack={() => setScreen('home')}
+      />
+    );
+  }
+
   return (
     <View style={styles.screen}>
       <Text style={styles.title}>BountyCam</Text>
@@ -227,6 +399,8 @@ export default function App() {
           }}
         />
         <Button label="My bounties" secondary onPress={() => setScreen('mine')} />
+        <Button label="Find bounties" onPress={() => setScreen('find')} />
+        <Button label="My missions" secondary onPress={() => setScreen('missions')} />
         <Button
           label="Sign out"
           secondary

@@ -67,3 +67,19 @@ export const USDC_DECIMALS = 6;
 
 // FUNDING.md 2.3 step 3: rent for the bounty and its vault plus the fee.
 export const MIN_LAMPORTS_FOR_FUNDING = 6_000_000;
+
+// --- Session 18, P2: discovery and accept (DISCOVERY.md section 5) ---
+
+// The eligibility authority checkVoucher compares against (SPEC.md 9.3), and
+// the deployment id of the configuration account (HANDOFF.md Environment).
+// The ed25519 program and Instructions sysvar ids are packages/shared's
+// ED25519_PROGRAM_ID and INSTRUCTIONS_SYSVAR_ID, one definition for both sides.
+export const ELIGIBILITY_AUTHORITY = 'Bg6SsTTH6EX5AaeQQ9i4yhDTwsSjxnHx9AV8cqa97xmp';
+export const DEPLOYMENT_ID = 2;
+
+// DISCOVERY.md 3.1: provisional, like the server's bounds.
+export const DISCOVERY_RADIUS_M = 50_000;
+export const DISCOVERY_LIMIT = 20;
+
+// DISCOVERY.md 3.3 step 2: two signatures' fees with headroom.
+export const MIN_LAMPORTS_FOR_ACCEPT = 20_000;
