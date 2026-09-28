@@ -1,16 +1,17 @@
 # BountyCam — Handoff
 
-**Date:** 28 September 2026
+**Date:** 29 September 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
 spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification and build;
 Session 10; Session 11 escrow initialisation; Session 12 mobile sign-in; Session 13
 eligibility specification; Sessions 14 and 15 eligibility build; Session 16 Seeker check;
-Session 17 P1 — create and fund from the device, the funding projection
-**Next session:** P2 in BACKLOG.md's Remaining plan — discovery, bounty detail, voucher request
-and `accept` from the device, and the acceptance projection (D113). Two funded bounties are
-`AVAILABLE` on devnet with their `program_account`, so the voucher endpoint can run end to end
-for the first time. Specification first; D116's order stands.
-**Deadline:** 8 October 2026 (10 days remaining)
+Session 17 P1 — create and fund from the device, the funding projection; Session 18 P2 —
+discovery, accept from the device, the acceptance projection
+**Next session:** P3 in BACKLOG.md's Remaining plan — capture nonce issuance (D73), including
+where the nonce lives and what becomes of `assignments.challenge_nonce` (D125). Specification
+first; D116's order stands.
+**Deadline:** 8 October 2026 (9 days remaining)
+
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
 
@@ -82,13 +83,13 @@ authority the upgrade authority, no freeze authority.
 ```
 hackathon202609/
 ├── apps/
-│   ├── api/          Fastify + TS, SIWS auth, eight bounty endpoints, two sweeps, 10 migrations
-│   └── mobile/       Expo + TS: sign-in, create and fund (FUNDING.md); android/ kept
+│   ├── api/          Fastify + TS, SIWS auth, bounty and acceptance endpoints, 11 migrations
+│   └── mobile/       Expo + TS: sign-in, create and fund, find and accept (DISCOVERY.md)
 ├── packages/
-│   └── shared/       SPEC.md (normative) + implementation, 110 passing tests
+│   └── shared/       SPEC.md (normative) + implementation, 126 passing tests
 ├── programs/
 │   └── escrow/       Anchor 1.1.2, SPEC.md, eleven instructions, 140 tests, on devnet
-└── scripts/          devnet_fund_requester.py — test USDC and SOL for requester wallets
+└── scripts/          devnet_fund_requester.py — test USDC and SOL; --sol-only for Scouts
 ```
 
 All work committed to `main`; Umair pushes. History: `git log`.
@@ -1444,6 +1445,90 @@ script (a no-op `check()` for shared; state and equality checks removed for the 
 **Still open.** The A30 has never signed in and holds no test USDC (run
 `scripts/devnet_fund_requester.py <wallet>` once its address is known). BACKLOG.md's Session 17
 section lists the rest.
+
+---
+
+## Session 18 — P2: discovery, accept, the acceptance projection (28–29 September)
+
+Twelve commits: `ca0962f` (specification, D123 to D127), `7b88267` (`--sol-only`), `0dcc7be`
+(shared acceptance helpers), `289a4db` (migration 11, cutoff, `program_account`, request log),
+`ad10ae9` (`expo-location`, `expo-camera`), `7c14a5b` (D128), `3782b68` (D128 fix), `a2aced6`
+(mobile Scout path), `7ee8d89` (D129), `216c6f8` (the projection), `c810ad2` (`scout-race.mjs`),
+and this records commit.
+
+**What landed.** The whole of P2.
+
+- **Shared:** `packages/shared/SPEC.md` section 9 and `src/acceptance.ts`: `acceptData`,
+  `ed25519InstructionData`, `checkVoucher`, `checkAcceptInstructions`, `verifyAssignedPolicy`;
+  tests 111 to 126, gate 126.
+- **API:** migration 11 (`bounties.acceptance_cutoff`, `assignments_acceptance_pair`); the
+  funding projection writes the cutoff and discovery filters on it (D126, POLICY.md 14.7
+  closed); `program_account` in the public view; request logs carry the path only (16.11).
+  `readAcceptance`, `projectAcceptance` and its three callers (the report endpoint, the
+  voucher on an `Accepted` account, the sweep before it flips); the assigned-Scout view;
+  `GET /me/missions`. `test/acceptance.test.ts` (16) over fixtures from the first live accept;
+  eligibility tests 25 and 26. Gate 1 / 38 / 80 / 8 / 7 / 26 / 24 / 16.
+- **Mobile:** `apps/mobile/DISCOVERY.md` and the Scout path: device GPS discovery, detail,
+  the eight accept steps, Mission, My missions. Native rebuild with `expo-location` 57.0.20 and
+  `expo-camera` 57.0.5 (unused until P4); APK sha256 `33daba3a`, installed on both phones.
+- **Tools:** `scripts/devnet_fund_requester.py --sol-only`; `apps/api/scripts/scout-race.mjs`.
+- **Decisions:** D123 (Umair's rulings) to D130.
+
+**Live, 28 and 29 September.**
+
+- The A30 (`7oSUM9a2PgNbFwYhFFXU5p1mrZr1hTykFWVqosNmT7vW`, Solflare) signed in for the first
+  time. It already held 0.049975 devnet SOL, so no relayer transfer was made to it. The laptop
+  Scout `scout2` (`vJsxBtkHXGQakZiLQr9eDV98GNAzvBAZ6Br8FjQS8Qv`) got 0.05 SOL from the relayer
+  (signature `47C6c8bo…`); the relayer holds 4.549975 SOL. `bountycam_dev` is at migration 11.
+- **The first accept.** `17e419ff-59a6-4e14-93b4-7a6550d46bd5`, `P2 accept test 1`, 10 USDC,
+  account `KkNqXiXTt3DU8jqUTCVSogaodRbHWL1NSJFe5RXxd21`. The voucher endpoint's first live run
+  answered 200 in 584 ms. Accept signature
+  `2HeE4TWmNZticNJuy5S5huWmLbCN7U1u7w7UhoBXuhDrVMmVCBw3uFb5cte1gMRyKVryS5aakEkL6Z5XFGSfJoAc`,
+  slot 505147604, fee 50000 lamports. The report endpoint did not exist yet, so the old sweep
+  flipped the reservation: the lost-report case. After `216c6f8`, a voucher request from the
+  A30 projected it through step 7.3: a new `ACTIVE` row with `accepted_at` 21:59:51+10 and
+  `expires_at` equal to it. The Mission screen showed the exact spot after
+  `verifyAssignedPolicy`.
+- **The race.** `802997ff-92d0-4502-99c2-d78bf6a0d736`, `P2 race test`, account
+  `32jEWyyJ4xXUmSU5mJAn8kcuV8MUbiPZ4QtcZ964yuq4`. The laptop won the voucher, accepted
+  (`54iG7rHvHrcYgJi2cBEV17p7JJQmQ6Q35KTZfVYp1VToWKEeH76tVZjkaWCB656BAKMGDKaXsVbVLX8j4JDmJpyK`)
+  and reported 200; the A30's request came four seconds later and got
+  `BOUNTY_NOT_ACCEPTABLE`. One acceptance in the database, for `vJsx…`. Recorded as the gate
+  under D130.
+- Both accepted bounties lapse unpaid and return to the Seeker only by CLI `expire_accepted`
+  (D123 ruling 6). The two Session 17 bounties carry no cutoff and are no longer listed (D126).
+
+**Facts worth not rediscovering.**
+
+- The fee payer is writable in every transaction, so decoded wire bytes show the Scout
+  writable in `accept` even though the program declares it a plain signer (D128). A web3.js
+  probe caught it before any phone code existed.
+- Solflare, like Seed Vault, appends two Compute Budget instructions after ours (indices 2 and
+  3). `accept`'s verification index 0 depends on the ed25519 instruction staying first.
+- The chain stores no acceptance time; `deadline − completion_window_secs` is the program's
+  clock at accept. The block time was one second later.
+- A strict tail check inside the prefix decoder breaks tests that decode zero-tail accounts on
+  purpose (D129); the tail has its own reader.
+- The production logger recorded full URLs, discovery coordinates included, until 16.11.
+- `adb reverse` is lost whenever a phone is unplugged; "Couldn't reach BountyCam" or a
+  `ConnectException` to 127.0.0.1:3000 means re-run it. An A30 stuck at `unauthorized`
+  authorised after its USB mode was set to Transferring files. The app's launcher label is
+  `mobile`.
+- A stale API from an earlier terminal held port 3000 (`EADDRINUSE`); `lsof -nP
+  -iTCP:3000 -sTCP:LISTEN` finds it. `dev.sh`'s watcher restarts on source changes; a `401`
+  from an unauthenticated `POST …/acceptance` proves the new code is serving.
+- Pasting terminal output back into zsh runs each line; the `main -> main` line of a push
+  creates an empty file `main`.
+- The accept fixture is built from the database rows, as P1's was; the voucher body was not
+  recorded and no test reads it.
+
+**Process.** Specification before code held with two amendments, both found before the code
+they govern was committed: D128 by a probe, D129 while implementing. The architect now runs
+the full API suite on Postgres 16 with PostGIS in a sandbox before issuing a script; every
+red phase, including step 10's twelve single mutations, matched there first. Every apply
+script pinned its bases and printed its written hashes; every commit script re-ran its gate.
+
+**Still open.** BACKLOG.md's Session 18 section.
 
 ---
 

@@ -657,6 +657,47 @@ open.
 - **`create_response.json` is built from the database, not the phone's response** — the same
   rows the owner view is produced from; the phone's body was not captured.
 
+## Session 18 (28–29 September)
+
+**Closed.**
+
+- **Discovery lists bounties past their acceptance cutoff** (POLICY.md 14.7) — D126,
+  `289a4db`.
+- **The A30 has never signed in** — signed in 28 September; it is the Scout device.
+- **The endpoint has never run against a real funded bounty** — first live voucher 28
+  September.
+- **Assignment cannot double-book** (verification gate) — met under D130; see below.
+
+**Still open.**
+
+- **The API type check never sees its tests** — unchanged; `acceptance.test.ts` ran in the
+  architect's sandbox, not under `tsc`.
+- **`assertMainnet` has no suite test**; **the Seeker cache is unbounded** — unchanged.
+- **The require cycle in `packages/shared`** — now also through `acceptance.js`; same safety
+  argument, same `primitives.ts` fix.
+- **The A30 requester path is untested** — the A30 has no test USDC; needed for S1.
+
+**New.**
+
+- **Reservation exclusivity has no device evidence** (D130) — eligibility test 22 races
+  voucher requests against the real database; a `--hold` flag on `scout-race.mjs` would give
+  a deterministic device run.
+- **Accept depends on the wallet appending, not prepending** — both wallets append Compute
+  Budget instructions; one that prepends would move the ed25519 check off index 0 and fail
+  every accept.
+- **The bottom buttons sit under the A30's navigation bar** on every screen — the button row
+  needs the bottom safe-area inset (O8).
+- **The launcher label is `mobile`** — `app.json` `name`; needs a native rebuild (S2).
+- **Four test bounties hold 35 test USDC** — `17e419ff` and `802997ff` (accepted, lapse to
+  `expire_accepted`), `46551b54` and `b15bd4a5` (never listed again, `expire_unaccepted`);
+  CLI until O1.
+- **Where the capture nonce lives** (D125) — owed by P3, with `challenge_nonce`'s rename or
+  removal.
+- **Two phone deviations from DISCOVERY.md** — after a wallet failure the phone makes three
+  reports before offering Accept again; the ed25519 and Instructions sysvar ids come from
+  `packages/shared`, not `config.ts`. Both keep behaviour safer or single-sourced; the
+  document should be brought in line.
+
 ---
 
 ## Notes owed to `solana-dev-notes`
@@ -765,10 +806,8 @@ HANDOFF.md; this section lists only what remains, in build order.
 
 ### Payment path, at A1
 
-- **P2** — Discovery, bounty detail, voucher request and `accept` from the device; the acceptance
-  projection writing `accepted_at`, `deadline` and `challenge_nonce` together (D113), and the
-  constraint pairing them.
-- **P3** — Capture nonce issuance (D73): API specification, then build.
+- **P3** — Capture nonce issuance (D73): API specification, then build; where the nonce lives
+  and what becomes of `assignments.challenge_nonce` (D125). P2 is done (Session 18).
 - **P4** — Guided live capture, per-slot hashes through `packages/shared`, evidence upload to
   private storage, manifest and Merkle root, wallet-signed submission.
 - **P5** — Verifier service: policy evaluation, assurance grading from A0 and A1, signed
@@ -834,7 +873,7 @@ Four things where a false pass is not discovered until week four.
 | Gate | Item | How to check |
 |---|---|---|
 | Escrow cannot be drained | done | **Passed 18 Sep**, 68750b1: tests 98, 100, 117, 121, 134 |
-| Assignment cannot double-book | P2 | Two devices accept within a second; exactly one wins |
+| Assignment cannot double-book | done | **Met 29 Sep** (D130): one accept; loser refused; see test 22 |
 | Hash is reproducible | O3 | A standalone script reproduces the Merkle root byte-for-byte |
 | Payout actually landed | P6 | Solana explorer, not the app UI |
 

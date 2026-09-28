@@ -2687,3 +2687,17 @@ Ruling, technical.
 5. Fixtures. The accepted bounty's fixture is built from its database rows, as P1's
    `create_response.json` was: the phone's create response was not captured. The voucher
    response was not recorded either; no test reads it.
+
+**D130 — The double-book gate is recorded as met by the 29 September run (Umair).**
+
+Context. BACKLOG.md's gate asks that two devices accept within a second and exactly one wins.
+In the run, the laptop Scout (`scout-race.mjs`) won the voucher at 23:33:44 UTC, accepted and
+confirmed; the A30's request arrived about four seconds later, found the bounty `Accepted`,
+and was refused `BOUNTY_NOT_ACCEPTABLE`. Exactly one acceptance exists on chain and in the
+database, but the two voucher requests did not collide, so `BOUNTY_RESERVED` was not seen.
+
+Ruling. Recorded as met. Reservation exclusivity rests on eligibility test 22, which races
+voucher requests against the real database; the device run proves the end-to-end property
+that governs money: one accept, and the loser refused before its wallet opens. Rejected: a
+deterministic re-run with a `--hold` flag, about 15 to 20 minutes and one more funded bounty.
+The gap is carried in BACKLOG.md's Session 18 section.
