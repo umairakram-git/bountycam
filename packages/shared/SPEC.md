@@ -4,6 +4,8 @@
 **Amended:** Session 5 part 2 — error model (§6), object and array shape rules
 (§1.1, §1.7), byte-input rules (§2, §3.2). Amended before implementation.
 **Amended:** Session 17 — section 8, the funding-path helpers, and section 6.5 (D121).
+**Amended:** Session 18 — section 9, the acceptance-path helpers, and section 6.6
+(D127).
 **Scope:** `canonicalise`, `sha256`, `merkleRoot` as exported from
 `packages/shared/src/index.ts`.
 
@@ -584,6 +586,23 @@ Section 8, Session 17. Each code is listed under the helper that owns it.
 `parseCoordinatePair` also throws `GPS_OUT_OF_RANGE`, from the `formatCoordinate` call it
 makes for each part.
 
+### 6.6 Acceptance-path helper codes
+
+Section 9, Session 18. Each code is listed under the helper that owns it.
+
+| Code | Function | Rejected input |
+|---|---|---|
+| `ACCEPT_FIELD_RANGE` | `acceptData` | a value outside section 9.1 |
+| `ED25519_FIELD_NOT_BYTES` | `ed25519InstructionData` | a field that is not a `Uint8Array` |
+| `ED25519_FIELD_LENGTH` | `ed25519InstructionData` | a field not at its section 9.2 width |
+| `VOUCHER_SHAPE_INVALID` | `checkVoucher` | step 1 |
+| `VOUCHER_AUTHORITY_MISMATCH` | `checkVoucher` | step 2 |
+| `VOUCHER_FIELD_MISMATCH` | `checkVoucher` | step 3 |
+| `ASSIGNED_SHAPE_INVALID` | `verifyAssignedPolicy` | steps 1 and 3 |
+| `ASSIGNED_HASH_MISMATCH` | `verifyAssignedPolicy` | step 2 |
+
+`checkAcceptInstructions` reuses the four `TX_` codes of section 6.5, with the same meanings.
+
 ---
 
 ## 7. Eligibility profiles
@@ -973,3 +992,150 @@ names, which must fail exactly that test (HANDOFF.md Working rules).
 109. `TX_ACCOUNTS`: keys 1 and 2 swapped; the requester not a signer; the bounty not
      writable; eight keys.
 110. `TX_DATA`: one byte of `data` changed.
+
+---
+
+## 9. Acceptance-path helpers
+
+**Status:** normative, Session 18 (P2, D127). Written before implementation.
+
+These helpers carry a Scout from a voucher to a signed `accept`, and from an accepted
+bounty to its exact location. The section 8 preamble applies unchanged: pure, no platform
+dependency, `SpecError` with a section 6.6 code, `bigint` for chain values, fresh byte arrays.
+None of them changes a vector in sections 4 and 7 or in MESSAGES.md.
+
+### 9.1 `acceptData(expiresAt: bigint, verificationIndex: number): Uint8Array`
+
+The `accept` instruction data, 18 bytes (escrow SPEC section 7.4):
+
+| Bytes | Content |
+|---|---|
+| 0 to 7 | discriminator: the first 8 bytes of `sha256` over `global:accept` |
+| 8 to 15 | `expiresAt`, little-endian signed 64-bit |
+| 16 to 17 | `verificationIndex`, little-endian unsigned 16-bit |
+
+`expiresAt` must be a `bigint` within the signed 64-bit range, and `verificationIndex` an
+integer from 0 to 65535. Else `ACCEPT_FIELD_RANGE`.
+
+Vector A1: `expiresAt` 1759000000 and index 0 give
+`419646d885066b04c035d868000000000000`. The discriminator is `419646d885066b04`.
+
+### 9.2 `ed25519InstructionData(authority, signature, message): Uint8Array`
+
+The native ed25519 instruction's data in the one shape escrow SPEC section 6.1 accepts: 16
+header bytes, then the 32-byte `authority`, the 64-byte `signature` and the `message`. Total
+length 112 plus the message length.
+
+| Bytes | Value |
+|---|---|
+| 0 | 1, the signature count |
+| 1 | 0, padding |
+| 2 to 3 | 48, the signature offset |
+| 4 to 5 | 65535, the signature instruction index |
+| 6 to 7 | 16, the public key offset |
+| 8 to 9 | 65535, the public key instruction index |
+| 10 to 11 | 112, the message offset |
+| 12 to 13 | the message length |
+| 14 to 15 | 65535, the message instruction index |
+
+Every offset is little-endian unsigned 16-bit. A field that is not a `Uint8Array` is
+`ED25519_FIELD_NOT_BYTES`. `authority` other than 32 bytes, `signature` other than 64, or a
+message empty or longer than 65423 bytes is `ED25519_FIELD_LENGTH`.
+
+Vector D1: MESSAGES.md vector ELI-01's message and signature, under the test eligibility
+public key `30bc4580…9474` (`vectors.json`), give 324 bytes whose first 16 are
+`01003000ffff1000ffff7000d400ffff`.
+
+### 9.3 `checkVoucher(voucher, expected): void`
+
+Checks a voucher from `POST /bounties/:id/voucher` (ELIGIBILITY.md section 3) before the
+Scout signs anything. `voucher` holds `message`, `signature` and `authority` as bytes, decoded
+by the caller, and `expiresAt` as a `bigint`. `expected` holds `programId`, `deploymentId`,
+`bountyId`, `scout`, `policyHash`, `eligibilityProfileHash`, `requiredAssurance` and
+`authority`.
+
+Steps in order; the first failure wins.
+
+1. **Shape**, else `VOUCHER_SHAPE_INVALID`: `message` 212 bytes, `signature` 64 bytes,
+   `authority` 32 bytes, each a `Uint8Array`; `expiresAt` a `bigint` within the signed 64-bit
+   range.
+2. **Authority**, else `VOUCHER_AUTHORITY_MISMATCH`: `authority` equals `expected.authority`.
+3. **Message**, else `VOUCHER_FIELD_MISMATCH`: `message` equals `eligibilityMessage` built
+   from `expected`'s fields, `requester` taken from bytes 75 to 106 of `message` itself, and
+   `expiresAt`.
+
+Not checked, and stated as such. The requester field: the phone does not hold the requester's
+wallet, and the program reconstructs it from the account. The signature: the native verifier
+checks it, and a bad one costs a failed transaction's fee and moves no money.
+
+### 9.4 `checkAcceptInstructions(instructions, expected): void`
+
+SECURITY.md section 3, applied to the accept transaction. `instructions` is as section 8.7.
+`expected` holds `programId`, `scout`, `config` and `bounty` (32 bytes each), and the checked
+voucher's `authority`, `signature`, `message` and `expiresAt`.
+
+1. Exactly two instructions, else `TX_INSTRUCTION_COUNT`.
+2. The first instruction's program is the native ed25519 program,
+   `Ed25519SigVerify111111111111111111111111111`, and the second's is `expected.programId`.
+   Else `TX_PROGRAM`.
+3. The first carries no keys. The second carries exactly these four, in this order, with
+   these flags. Else `TX_ACCOUNTS`.
+
+| # | Account | Signer | Writable |
+|---|---|---|---|
+| 0 | `scout` | yes | no |
+| 1 | `config` | no | no |
+| 2 | `bounty` | no | yes |
+| 3 | `Sysvar1nstructions1111111111111111111111111` | no | no |
+
+4. The first's data equals `ed25519InstructionData(authority, signature, message)`, and the
+   second's equals `acceptData(expiresAt, 0)`. Else `TX_DATA`.
+
+The order is fixed: the ed25519 instruction is at index 0, so the verification index is 0.
+The fee payer and wallet-added instructions are outside this check, as section 8.7 states.
+
+### 9.5 `verifyAssignedPolicy(response: unknown, expectedPolicyHash: Uint8Array)`
+
+Returns `{ lat, lon }`, the exact location strings. `response` is the parsed assigned-Scout
+view (POLICY.md section 16.4). `expectedPolicyHash` is 32 bytes: the voucher's policy hash
+when the phone holds it, otherwise the bytes of the view's own `policy_hash` (D127).
+
+1. **Shape**, else `ASSIGNED_SHAPE_INVALID`: `response` is a plain object; `policy_hash` is
+   64 lowercase hex characters; `policy` is a plain object. A `SpecError` from `canonicalise`
+   in step 2 is also this code.
+2. **Hash**, else `ASSIGNED_HASH_MISMATCH`: `sha256` over the UTF-8 bytes of
+   `canonicalise(policy)` equals both `expectedPolicyHash` and the bytes of `policy_hash`.
+3. **Location**, else `ASSIGNED_SHAPE_INVALID`: `policy.lat` passes `isValidLat` and
+   `policy.lon` passes `isValidLon`.
+
+### 9.6 Tests
+
+The package's existing test file. The D36 gate becomes `tests 126, pass 126, fail 0`. Each
+negative test is shown red before the gate by a scripted mutation of the check it names.
+
+111. `acceptData` reproduces A1 and returns a fresh 18-byte array.
+112. The discriminator equals the first 8 bytes of the package's `sha256` over
+     `global:accept`.
+113. `ACCEPT_FIELD_RANGE`: `expiresAt` as a number; 2 to the power 63; index -1, 65536 and
+     1.5.
+114. `ed25519InstructionData` reproduces D1.
+115. `ED25519_FIELD_LENGTH` for a 31-byte authority, a 63-byte signature and an empty
+     message; `ED25519_FIELD_NOT_BYTES` for a signature given as an array of numbers.
+116. `checkVoucher` accepts ELI-01 with the test eligibility public key, `expected` built from
+     that vector's fields.
+117. `VOUCHER_SHAPE_INVALID`: a 211-byte message; a 63-byte signature; `expiresAt` as a
+     number.
+118. `VOUCHER_AUTHORITY_MISMATCH`: another 32-byte authority.
+119. `VOUCHER_FIELD_MISMATCH`: a different expected `scout`; a different expected `bountyId`;
+     `expiresAt` one greater than the message's.
+120. `checkAcceptInstructions` accepts the two instructions built from ELI-01 over fixed test
+     keys.
+121. `TX_INSTRUCTION_COUNT`: one instruction, and three.
+122. `TX_PROGRAM`: the first not the ed25519 program; the second another program.
+123. `TX_ACCOUNTS`: a key on the ed25519 instruction; keys 1 and 2 swapped; the Scout not a
+     signer; the bounty not writable; another sysvar in row 3.
+124. `TX_DATA`: one byte of the ed25519 data changed; accept data with index 1.
+125. `verifyAssignedPolicy` accepts vector V1's policy with its hash, returning V1's `lat` and
+     `lon`.
+126. `ASSIGNED_HASH_MISMATCH` for a different expected hash; `ASSIGNED_SHAPE_INVALID` for a
+     missing `policy` and for a `lat` with six fraction digits under a recomputed hash.

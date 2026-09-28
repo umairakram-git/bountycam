@@ -7,6 +7,8 @@ and its endpoints, and the migrations these require (prose here; code in Session
 words, never written literally.
 **Amended:** Session 17 (P1) — sections 1, 2.6, 5, 7.2, 8.7, 8.8 and 14, and the new
 section 15: funding from the device and the funding projection (D117 to D121).
+**Amended:** Session 18 (P2) — sections 8.2, 8.4, 8.5, 8.8 and 14, and the new
+section 16: discovery, acceptance and the acceptance projection (D124 to D127).
 
 Policies and bounties share this document deliberately: the hashed policy object and the
 bounty row that references it must not drift, and a split document is how they would.
@@ -805,6 +807,9 @@ every public response is tested (section 12).
 
 Lists never carry policies or requirement data; the detail endpoint does.
 
+Section 16.4 adds `program_account` to the public view and defines a third view,
+the assigned-Scout view (D127).
+
 ### 8.3 `POST /bounties`
 
 Creates the policy and the bounty in one database transaction and returns the owner
@@ -903,6 +908,9 @@ discovery predicate, no ordering and no output.
 The radius and pagination bounds are provisional product values, same status as the
 section 2.1 window bounds.
 
+Section 16.3 adds the acceptance-cutoff conjunct to step 5 (D126). Section 16.11
+governs how the request is logged.
+
 ### 8.5 `GET /bounties/:id`
 
 Check order:
@@ -917,6 +925,8 @@ Check order:
 5. **Others.** State `DRAFT` or `CANCELLED`: `NOT_FOUND` (404), per section 7.3.
    Any other state: 200, public view. (No such state is producible by Session 7
    code; the test seeds one by SQL.)
+
+Section 16.4 inserts step 4a, the assigned-Scout view (D127).
 
 ### 8.6 `GET /me/bounties`
 
@@ -979,7 +989,7 @@ the thirteen section 2.3 policy codes, and these seven:
 | `BOUNTY_NOT_CANCELLABLE` | 409 | state admits no cancellation (section 8.7) |
 | `IDEMPOTENCY_KEY_REUSED` | 409 | same key, different `request_digest` (section 10) |
 
-Section 15.7 adds two codes for funding.
+Section 15.7 adds two codes for funding; section 16.9 adds two for acceptance.
 
 ---
 
@@ -1589,7 +1599,7 @@ incident). Each carries its revisit condition.
    that instruction yet, and the cutoff is on chain only. After the cutoff such a bounty
    is still listed, and its voucher answers `ACCEPTANCE_WINDOW_CLOSED`. Owed by P2, which
    builds discovery on the device: store the cutoff at projection and filter on it, or
-   expire the bounty.
+   expire the bounty. Closed in P2 (D126): section 16.3.
 8. **Recovering an escrow the database will never project.** A mismatched funding
    (section 15.3) and a funding confirmed after cancellation (section 15.6) both leave
    money in escrow under a row that is not `AVAILABLE`. The program returns it through
@@ -1826,3 +1836,291 @@ Cancel (section 15.6):
     `AVAILABLE`.
 23. The reader throws: 503 `CHAIN_UNAVAILABLE`; the row is `DRAFT`.
 24. No account: 200, `CANCELLED`.
+
+---
+
+## 16. Discovery, acceptance and the acceptance projection
+
+Session 18 (P2). Normative; written before implementation. The client is
+`apps/mobile/DISCOVERY.md`. The helpers the phone uses are `packages/shared/SPEC.md` section 9.
+ELIGIBILITY.md governs the voucher and is amended only where this section says so.
+
+### 16.1 What P2 adds
+
+Migration 11 (section 16.2); the acceptance cutoff, written at funding projection and read by
+discovery (16.3); `program_account` in the public view and the assigned-Scout view (16.4);
+`GET /me/missions` (16.5); reading the account's acceptance fields (16.6); the projection
+(16.7); `POST /bounties/:id/acceptance` (16.8); error codes (16.9); tests (16.10); the request
+log (16.11); the race gate's scripted Scout (16.12).
+
+### 16.2 Migration 11
+
+Up, two changes:
+
+- `bounties` gains `acceptance_cutoff timestamptz`, nullable, with no default. Section 16.3
+  names its only writer.
+- `assignments` gains the constraint `assignments_acceptance_pair`: `(accepted_at IS NULL) =
+  (deadline IS NULL)`. Every row the code writes today is a reservation with both null, so
+  the constraint is valid against existing data. A row that violates it fails the migration,
+  which is the intended result.
+
+`challenge_nonce` is not touched (D125).
+
+Down: drop the constraint, then the column. Valid against any table state.
+
+Non-test gate, from raw output: after up, every `assignments` column default is listed.
+`status` defaults to `ACTIVE`; `id` to `gen_random_uuid()`; no other column has a default
+(D115's lesson, D125).
+
+### 16.3 The acceptance cutoff (D126)
+
+Section 15.3 step 7 also writes `acceptance_cutoff`: the account's `acceptance_cutoff`, a
+Unix second count, as a UTC timestamp, in the same conditional update. The value is immutable
+on chain after funding, so no other writer exists.
+
+Section 8.4 step 5 gains a conjunct: `acceptance_cutoff >= $now`, where `$now` is the
+injectable clock's instant passed as a parameter. That is ELIGIBILITY.md check 6's comparison,
+so discovery and the voucher agree to the second. A null cutoff never satisfies it.
+
+Rows projected before migration 11 carry a null cutoff and are no longer listed. They stay
+readable by id, and the voucher treats them as before.
+
+Every section 12 test that seeds an `AVAILABLE` row also sets its cutoff one day after the
+test clock.
+
+### 16.4 Views (D127)
+
+**Public view.** Section 8.2's table gains `program_account`: the base58 string from the
+bounty row, or null. The phone needs it to build `accept`. The account is public on chain; the
+client never displays the requester wallet it contains.
+
+**Assigned-Scout view.** Section 8.5 gains step 4a, after the owner check. The caller holds
+the bounty's acceptance when an `assignments` row for the bounty has `status = 'ACTIVE'`,
+`accepted_at` set and `scout_id` equal to the caller, and the bounty's state is `ACCEPTED`.
+That caller gets 200 with:
+
+| Key | Value |
+|---|---|
+| every public-view key | as the public view |
+| `policy` | the full sixteen-field object, parsed from the stored canonical text |
+| `assignment` | object: `accepted_at` and `deadline`, ISO 8601 UTC strings |
+
+`policy` carries the exact `lat` and `lon`, the salt and the requirement ids: section 9.4's
+disclosure to the assigned Scout. Exact coordinates reach the response only through the
+policy strings; section 9.1's prohibition on reading a geography column back holds.
+
+Later states (`SUBMITTED` onward) extend step 4a in the session that projects them.
+
+### 16.5 `GET /me/missions`
+
+The caller's acceptances. A phone has no local storage, so this is how it finds an accepted
+mission after a restart.
+
+1. **Auth**; 401 codes.
+2. **Parameters.** `limit` and `offset` as section 8.4; unknown parameters `INVALID_REQUEST`
+   (400).
+3. **Query.** `assignments` rows with `status = 'ACTIVE'`, `accepted_at` set and `scout_id`
+   the caller, joined to their bounties; ordered by `accepted_at` descending, then bounty
+   `id` ascending.
+4. **Respond** 200 with an object whose single key `missions` holds list items (section 8.2),
+   each with one added key, `deadline`, an ISO 8601 UTC string.
+
+The route is `/me/missions` for section 8.6's reason.
+
+### 16.6 Reading the acceptance fields
+
+`decodeBountyAccount` (`chain/bounty.ts`) reads the two fields `accept` writes. Anchor
+allocates the full 274 bytes; each `Option` is serialised as a tag byte, 0 for none and 1 for
+some, followed by its value only when the tag is 1. Rules by decoded state:
+
+- **`Funded`:** byte 171 (the `scout` tag) and byte 172 (the `deadline` tag) are both 0.
+  `scout` and `deadline` are null.
+- **`Accepted`:** byte 171 is 1; `scout` is bytes 172 to 203; byte 204 is 1; `deadline` is
+  the little-endian signed 64-bit integer at bytes 205 to 212.
+- **Any later state:** not read in P2; `scout` and `deadline` are null.
+
+A tail breaking its state's rule is the new error `BAD_TAIL`. The result gains `scout`
+(32 bytes or null) and `deadline` (`bigint` or null). Callers that read only the prefix are
+unchanged. The `Funded` rule makes funded-account decoding stricter; the Session 17 fixture
+satisfies it. The layout is confirmed against the recorded account of section 16.10.
+
+### 16.7 The projection (D124)
+
+One function, `projectAcceptance(bountyId)`, is the only writer of `ACCEPTED` and of
+`assignments.accepted_at` and `deadline`. Its evidence is the account, not a transaction.
+Steps in order; the first failing step ends the call. Only step 7 writes.
+
+1. **Load** the row with its `program_account`. States other than `AVAILABLE` and `ACCEPTED`
+   are `NOT_APPLICABLE`, with no read.
+2. **Read** the account at `program_account` at `confirmed`. A reader failure is
+   `CHAIN_UNAVAILABLE`. No account is `NOT_ACCEPTED`: a closed account belongs to `cancel` or
+   `expire_unaccepted`, whose projections are not P2's.
+3. **Decode** (section 16.6). A failure is `BINDING_MISMATCH`.
+4. **State.** `Funded` is `NOT_ACCEPTED`. `Accepted` continues. Any other state is
+   `UNPROJECTED_STATE`: no projector for it exists yet.
+5. **Scout.** The `users` row whose `wallet_address` is the base58 of `scout`. None is
+   `UNKNOWN_SCOUT`. A voucher requires a session, so an unknown Scout means a voucher was
+   signed outside this service.
+6. **Times.** `deadline` is the account's. `accepted_at` is `deadline` minus the account's
+   `completion_window_secs`, which equals the chain clock at `accept` (escrow SPEC section 7.4
+   check 7).
+7. **Write**, one transaction:
+   1. Lock the bounty row. State `ACCEPTED`: if the chain's Scout holds an `ACTIVE` row with
+      `accepted_at` set, the outcome is `PROJECTED` and nothing is written; otherwise the
+      section 7.2 state machine is falsified, and the call raises an error and rolls back.
+      Any state other than `AVAILABLE` or `ACCEPTED`: roll back, `NOT_APPLICABLE`.
+   2. Set `status = 'EXPIRED'` on every `ACTIVE` row of the bounty whose `scout_id` is not the
+      chain's Scout.
+   3. If the chain's Scout holds an `ACTIVE` row, set its `accepted_at` and `deadline`.
+      Otherwise insert one: the bounty, the Scout, status `ACTIVE`, both times, and
+      `expires_at` equal to `accepted_at`. That case arises when the reservation was flipped
+      before any projection ran.
+   4. Set the bounty's `state` to `ACCEPTED` where its id matches and `state = 'AVAILABLE'`.
+
+   The outcome is `PROJECTED`.
+
+The outcomes are `PROJECTED`, `NOT_ACCEPTED`, `NOT_APPLICABLE`, `CHAIN_UNAVAILABLE`,
+`BINDING_MISMATCH`, `UNPROJECTED_STATE` and `UNKNOWN_SCOUT`. The last three are alarms, each
+logged as section 15.3 says: one error-level line naming the outcome and the bounty id, and
+nothing else.
+
+**Callers.**
+
+- `POST /bounties/:id/acceptance` (section 16.8).
+- **The voucher endpoint.** ELIGIBILITY.md check 5, amended: when the account is `Accepted`,
+  the endpoint runs the projection, then answers `BOUNTY_NOT_ACCEPTABLE` whatever the
+  outcome.
+- **The reservation sweep.** ELIGIBILITY.md section 6.1, amended: each tick first selects
+  `ACTIVE` rows with `accepted_at` null and `expires_at` at or before now, and runs the
+  projection for each row's bounty. It then runs the existing flip, whose predicate is
+  unchanged; a projected row no longer matches it. A failed projection does not stop the
+  flip, because a stale reservation affects visibility only.
+
+**Lag.** An accept whose report never arrives is projected when its reservation expires: at
+most 300 seconds after the voucher was issued, plus the sweep's 60-second lag bound. Until
+then the reservation itself keeps the bounty out of discovery.
+
+**Clock skew.** The program compares `expires_at` with the chain clock; the sweep compares it
+with the API clock. When the chain trails, an `accept` can land after the API flipped the
+reservation, and possibly after another Scout reserved. Step 7.2 settles it for the chain's
+Scout. The other Scout's `accept` fails on chain with `BountyNotAcceptable`, and the phone
+says so plainly (ELIGIBILITY.md section 10).
+
+Commitment is `confirmed`, as section 15.3; section 14, item 9 applies.
+
+### 16.8 `POST /bounties/:id/acceptance`
+
+The Scout's phone asks the server to look. No body and no evidence; the server reads the
+chain. The phone calls it after every accept attempt, whatever the wallet reported.
+
+1. **Auth.** 401 codes per section 8.1.
+2. **Body.** Any present body is `INVALID_REQUEST` (400), section 8.7's rule.
+3. **Id form**, as section 8.5 step 2: `NOT_FOUND` (404).
+4. **Load.** No row: `NOT_FOUND` (404).
+5. **Hidden.** State `DRAFT` or `CANCELLED` and the caller is not the requester: `NOT_FOUND`
+   (404).
+6. **Project** (section 16.7), unless the state is already `ACCEPTED`.
+7. **Respond**, from the row as it now stands:
+   - `ACCEPTED`, caller holds the acceptance: 200, assigned-Scout view.
+   - `ACCEPTED`, caller is the requester: 200, owner view.
+   - `ACCEPTED`, anyone else: `ACCEPTED_BY_OTHER` (409).
+   - Still `AVAILABLE`, by outcome: `NOT_ACCEPTED` is `NOT_ACCEPTED` (409);
+     `CHAIN_UNAVAILABLE` is 503; `BINDING_MISMATCH` is 409; `UNKNOWN_SCOUT` is
+     `ACCEPTED_BY_OTHER` (409), since the caller is a known user and not that Scout;
+     `UNPROJECTED_STATE` is `BOUNTY_NOT_ACCEPTABLE` (409).
+   - Any other state: `BOUNTY_NOT_ACCEPTABLE` (409).
+
+`NOT_ACCEPTED` is the expected answer while a transaction is in flight. The phone repeats the
+call on DISCOVERY.md's schedule without showing an error.
+
+The route is registered only when the chain dependencies exist, as section 15.4's is.
+
+### 16.9 Error codes
+
+| Code | Status | Failure |
+|---|---|---|
+| `NOT_ACCEPTED` | 409 | the account is not `Accepted`, or no account exists (section 16.8) |
+| `ACCEPTED_BY_OTHER` | 409 | the bounty was accepted by a different Scout |
+
+Reused: `BOUNTY_NOT_ACCEPTABLE`, `BINDING_MISMATCH` and `CHAIN_UNAVAILABLE` from
+ELIGIBILITY.md; `INVALID_REQUEST` and `NOT_FOUND` from section 8.
+
+### 16.10 Tests
+
+Fixtures are recorded raw from the first live accept on devnet (Session 18), under
+`apps/api/test/fixtures/devnet/`: the voucher response as returned, the create response of
+the accepted bounty, and the `getAccountInfo` response for its account at `confirmed` after
+the accept. Seeds come from the recorded create response, as in section 15.8. Mismatch tests
+edit one field of the account bytes in memory, behind an unedited control. Each negative test
+is shown red before the gate by a scripted mutation of the check it names.
+
+A new file, `apps/api/test/acceptance.test.ts`, named in the test script after
+`funding.test.ts`. D36 gate: `tests 16, pass 16, fail 0`.
+
+1. The recorded account decodes: state `Accepted`, `scout` the recorded Scout wallet,
+   `deadline` the recorded value.
+2. The recorded account with byte 171 set to 0: `BAD_TAIL`.
+3. The Session 17 funded fixture decodes with `scout` and `deadline` null; the same with byte
+   171 set to 1: `BAD_TAIL`.
+4. Report with the chain's Scout holding the reservation: 200, assigned-Scout view; the row is
+   `ACCEPTED`; the assignment is `ACTIVE`, its `deadline` is the account's and its
+   `accepted_at` is `deadline` minus `completion_window_secs`.
+5. The assigned-Scout view's keys are exactly the public-view keys plus `policy` and
+   `assignment`; `policy` hashes to `policy_hash`.
+6. A repeated report: 200, no second row, values unchanged.
+7. Report by another Scout: `ACCEPTED_BY_OTHER`.
+8. Report by the requester: 200, owner view, state `ACCEPTED`.
+9. The funded account: `NOT_ACCEPTED`; nothing written.
+10. The reader throws: 503 `CHAIN_UNAVAILABLE`; nothing written.
+11. No account: `NOT_ACCEPTED`.
+12. The chain's Scout holds no `ACTIVE` row and another Scout does: that row becomes
+    `EXPIRED`; a new `ACTIVE` row for the chain's Scout carries both times, with `expires_at`
+    equal to `accepted_at`.
+13. The chain's Scout has no `users` row: `ACCEPTED_BY_OTHER`; the bounty stays `AVAILABLE`;
+    the log line names `UNKNOWN_SCOUT`.
+14. The account's state byte set to `Refunded`: `BOUNTY_NOT_ACCEPTABLE`; nothing written; the
+    log line names `UNPROJECTED_STATE`.
+15. An `assignments` insert with `accepted_at` set and `deadline` null fails on
+    `assignments_acceptance_pair`.
+16. `GET /me/missions` lists the acceptance for its Scout, with `deadline`, and nothing for
+    another caller.
+
+Other suites:
+
+- **Eligibility** gains test 25: a voucher request on an `Accepted` account whose Scout holds
+  the reservation answers `BOUNTY_NOT_ACCEPTABLE`, and the bounty is then `ACCEPTED`. And test
+  26: a sweep tick over two expired reservations, one whose account is `Accepted` and one
+  whose account is `Funded`; the first is projected and not flipped, the second is flipped to
+  `EXPIRED`. Gate 26.
+- **Bounties** gains test 79: discovery excludes an `AVAILABLE` row whose cutoff is one second
+  before the clock and includes it when the cutoff equals the clock. And test 80: discovery
+  excludes an `AVAILABLE` row with a null cutoff. Test 59's public-view key set gains
+  `program_account`. Gate 80.
+- **Funding**: the projection test that asserts `AVAILABLE` also asserts `acceptance_cutoff`
+  equals the recorded account's. Gate unchanged at 24.
+
+Every other suite keeps its count.
+
+### 16.11 The Scout's position is not logged
+
+Discovery's query string carries the Scout's position. The production logger records each
+request's URL, and until now that included the query string. The request log serialises the
+path only, with no query string, for every route. Non-test gate: one live log line from a
+device discovery call is read from raw output and shows the path without coordinates.
+
+### 16.12 The race gate's scripted Scout (D123 ruling 5)
+
+BACKLOG.md's gate "Assignment cannot double-book" is run with the A30 and a laptop script,
+`apps/api/scripts/scout-race.mjs`. The script is a development tool, not a test.
+
+- Its key is `~/bountycam-keys/scout2.json`, mode 600, funded with 0.05 SOL from the
+  relayer.
+- It signs in by SIWS against the local API (AUTH.md), then counts down 3, 2, 1 and requests
+  a voucher at GO, while the operator taps Accept on the A30 at GO. It prints the raw HTTP
+  status and body.
+- If it wins the reservation, it builds and sends `accept` with the SPEC.md section 9 helpers
+  and checks, then calls section 16.8 and prints the answer.
+
+Pass, from raw output and the explorer: exactly one voucher request answers 200 and the other
+`BOUNTY_RESERVED`; exactly one `accept` confirms on chain; the database shows `ACCEPTED` with
+the winner's acceptance.

@@ -117,6 +117,10 @@ known to qualify.
 9. **Reservation** (section 6). Lost race: `BOUNTY_RESERVED` (409).
 10. **Sign and respond** 200.
 
+Check 5, amended by POLICY.md section 16.7 (D124): when the account is `Accepted`, the
+endpoint runs the acceptance projection before answering `BOUNTY_NOT_ACCEPTABLE`. The answer
+is unchanged.
+
 Check 3 before check 4 is deliberate: a requester asking for a voucher on their own
 bounty is a client bug, and it should not cost an RPC round trip to say so.
 
@@ -322,6 +326,10 @@ chain decides acceptance and does not read this table.
 The sweep is idempotent and its interval carries no correctness weight. Changing it
 is configuration.
 
+Amended by POLICY.md section 16.7 (D124): before flipping, each tick runs the acceptance
+projection for every expired reservation's bounty. A reservation whose `accept` landed is
+projected, not flipped, so its bounty does not reappear in discovery.
+
 ---
 
 ## 7. Error codes
@@ -409,8 +417,9 @@ shared cache is a scaling decision, not a correctness one.
 
 ## 9. Tests
 
-**Expected count: 24.** Per D36 a run is evidence only if the summary reports exactly
-24. Tests inject the controlled clock; none sleeps to reach an expiry. The Seeker RPC
+**Expected count: 26**; tests 25 and 26 are specified in POLICY.md section 16.10.
+Per D36 a run is evidence only if the summary reports exactly 26.
+Tests inject the controlled clock; none sleeps to reach an expiry. The Seeker RPC
 is a double in every test — no test calls a third party.
 
 Issuance:

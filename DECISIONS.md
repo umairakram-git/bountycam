@@ -2542,3 +2542,105 @@ with web3.js, which it already carries; a live vector ties the two (POLICY.md se
 
 `apps/mobile/FUNDING.md` records these; POLICY.md section 15 and SPEC.md section 8 carry
 the technical rulings D117 to D121.
+
+**D123 — Session 18 product rulings (Umair).**
+
+1. **Scout location.** Device GPS through `expo-location`. One native rebuild now, which P4's
+   capture needs anyway. No pasted point for the Scout.
+2. **Before acceptance** the Scout sees "About X km away. Exact spot shown after you accept."
+   No map and no requester identity.
+3. **A reservation that lapses without an accept** shows "Your hold ended. The bounty may still
+   be available." with a Try again button.
+4. **Scout devnet SOL.** 0.05 SOL from the relayer, by the D122 ruling 1 script extended for a
+   SOL-only transfer. Rejected: the public faucet, which refused the Seeker in Session 17.
+5. **The race gate's second Scout** is a scripted client on the laptop, not a second device.
+   POLICY.md section 16.12 specifies it; BACKLOG.md's gate row is amended in the records
+   commit.
+6. **Accepted test bounties.** Until P3 to P5 land, an accepted bounty cannot be submitted.
+   After its 2-hour completion window it returns to the requester only by CLI
+   `expire_accepted`. Accepted. The live run uses bounties freshly funded from the Seeker.
+
+`apps/mobile/DISCOVERY.md` records these; POLICY.md section 16 and SPEC.md section 9 carry the
+technical rulings D124 to D127.
+
+**D124 — The acceptance projection reads the account, from three callers.**
+
+Context. D79 and D97 require `ACCEPTED` to come from a confirmed `accept`, and D113 named the
+columns it fills, but no writer existed. P1 showed that a lost report is a real case, not a
+theory. The chain also stores no acceptance instant: `accept` writes `scout` and `deadline`
+only.
+
+Ruling, technical. One function, `projectAcceptance` (POLICY.md section 16.7), is the only
+writer of `ACCEPTED` and of an assignment's acceptance times. Its evidence is the bounty
+account read at `confirmed`, as in D118. `accepted_at` is `deadline` minus
+`completion_window_secs`: exactly the chain clock at `accept` (escrow SPEC section 7.4 check
+7), and the only acceptance instant the chain records. No transaction is parsed.
+
+Three callers: the report endpoint, which the phone calls after every attempt; the voucher
+endpoint, whenever it reads an `Accepted` account; and the reservation sweep, which runs the
+projection before flipping an expired reservation. Without the sweep caller, a landed accept
+whose report was lost would have its bounty reappear in discovery when the reservation
+lapsed.
+
+The chain wins every disagreement. The chain's clock can trail the API's, so an `accept` can
+land after the API flipped its reservation and another Scout reserved. The projection then
+expires the other row and records the acceptance for the chain's Scout, in one transaction.
+
+**D125 — The capture nonce is not written at acceptance; the constraint pairs two columns.**
+
+Context. D111 and D113 say `challenge_nonce` is written together with `accepted_at` and
+`deadline` when the acceptance is observed. D73 says the capture nonce is issued at
+capture-session start, not at accept, and carries its own issue time, expiry and status.
+Writing it at acceptance is the design D73 rejected, and one column cannot hold a nonce that
+expires and is issued again.
+
+Ruling, technical. The projection writes `accepted_at` and `deadline` only. Migration 11 adds
+the constraint `assignments_acceptance_pair`: both null or both set. `challenge_nonce` stays
+nullable and unwritten; P3 specifies where the capture nonce lives, and whether this column is
+renamed under D72 or dropped. D113's reading of a row is superseded: `ACTIVE` with both
+columns null is a reservation, `ACTIVE` with both set is an acceptance. D113's relaxation of
+`accepted_at` stands. D115's lesson applies: migration 11 lands with an inspection of every
+`assignments` column default.
+
+**D126 — The acceptance cutoff is stored when funding is projected; discovery filters on it.**
+
+Context. POLICY.md section 14, item 7: discovery lists bounties past their acceptance cutoff.
+
+Ruling, technical. `projectFunding` writes `bounties.acceptance_cutoff` from the account.
+Discovery lists a bounty only while its cutoff is at or after the injectable clock's now: the
+same comparison as voucher check 6, so the two agree to the second. Rejected: expiring the
+bounty through `expire_unaccepted`, which needs a fee-paying caller, and that is O1.
+
+Rows projected before migration 11 carry no cutoff and are not listed. No backfill is
+written: the only two such rows close for acceptance on 29 September, before a backfill could
+ship, and the live run uses fresh bounties (D123 ruling 6). This replaces the backfill the
+architect proposed in the Session 18 memo.
+
+**D127 — What the Scout's phone receives and checks.**
+
+Context. `accept` needs the bounty account's address, which the public view omits. POLICY.md
+section 9.4 left the assigned Scout's full policy to the acceptance flow. The phone has no
+test runner.
+
+Ruling, technical.
+
+1. The public view gains `program_account`. The account is public on chain; the requester
+   wallet inside it is never displayed by the client.
+2. A third view, the assigned-Scout view: the public view plus the full policy and the
+   assignment's times, served only to the Scout holding the acceptance (POLICY.md section
+   16.4). Before showing the exact spot, the phone checks the policy against the policy hash
+   in the voucher it accepted with. The program matched that voucher against the account, so
+   the hash is chain-anchored. After an app restart the phone no longer holds the voucher and
+   checks against the view's own `policy_hash`.
+3. The money path for `accept` lives in `packages/shared` (SPEC.md section 9), for D121's
+   reason: `acceptData`, `ed25519InstructionData`, `checkVoucher`,
+   `checkAcceptInstructions` and `verifyAssignedPolicy`.
+4. Distance is computed on the phone, to the snapped area centre only. The server still
+   returns none (POLICY.md section 9.3).
+5. `GET /me/missions`, so the phone finds an accepted mission after a restart without local
+   storage.
+6. The discovery query carries the Scout's position. The API's request log records paths
+   without query strings (POLICY.md section 16.11). Found while specifying P2: the production
+   logger records full URLs today.
+7. `expo-camera` joins `expo-location` in the same native rebuild, unused until P4, to save
+   one rebuild and reinstall cycle.
