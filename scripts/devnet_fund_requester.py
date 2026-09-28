@@ -3,11 +3,16 @@
 
 Usage:
   python3 devnet_fund_requester.py <wallet> [<wallet> ...] [--amount 1000]
+  python3 devnet_fund_requester.py <wallet> [<wallet> ...] --sol-only 0.05
 
 Per wallet: report SOL and airdrop 1 SOL if below 0.05; derive the associated token
 account for the BountyCam devnet mint, create it if absent (upgrade authority pays);
 mint --amount test USDC into it, signed by the upgrade authority (the mint authority,
 D102); print the balances after. Every command is printed with its raw output.
+
+--sol-only <amount> (D123 ruling 4), for Scout wallets: transfer that much SOL from the
+relayer (~/bountycam-keys/relayer.json), which pays the fee. No airdrop, no token
+account, no USDC. At most 0.5 SOL per wallet.
 
 Kept at scripts/devnet_fund_requester.py in the repo; the first run copies it there.
 """
@@ -21,6 +26,8 @@ import sys
 REPO = "/Users/umairakram/Developer/hackathon202609"
 REPO_COPY = os.path.join(REPO, "scripts", "devnet_fund_requester.py")
 KEY = os.path.expanduser("~/bountycam-keys/upgrade-authority.json")
+RELAYER = os.path.expanduser("~/bountycam-keys/relayer.json")
+SOL_ONLY_MAX = 0.5
 URL = "devnet"
 MINT = "ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR"
 TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
@@ -113,10 +120,36 @@ def keep_repo_copy():
     print(f"copied to {REPO_COPY}  {mine[:8]}")
 
 
+def sol_only(wallets, amount):
+    """D123 ruling 4: SOL from the relayer, which pays the fee. Nothing else."""
+    try:
+        value = float(amount)
+    except ValueError:
+        die("--sol-only is not a number: " + amount)
+    if not 0 < value <= SOL_ONLY_MAX:
+        die(f"--sol-only must be above 0 and at most {SOL_ONLY_MAX}")
+    if not os.path.isfile(RELAYER):
+        die("relayer key not found at " + RELAYER)
+    _, relayer = run(["solana", "address", "--keypair", RELAYER])
+    relayer = relayer.split()[-1]
+    sol_balance(relayer)
+    for wallet in wallets:
+        print("\n== " + wallet + " ==")
+        sol_balance(wallet)
+        run(["solana", "transfer", "--from", RELAYER, "--fee-payer", RELAYER,
+             "--allow-unfunded-recipient", "--url", URL, wallet, amount])
+        sol_balance(wallet)
+        print("explorer: https://explorer.solana.com/address/" + wallet + "?cluster=devnet")
+    print("\n== relayer ==")
+    sol_balance(relayer)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("wallets", nargs="+")
     ap.add_argument("--amount", default="1000", help="test USDC per wallet (default 1000)")
+    ap.add_argument("--sol-only", default=None,
+                    help="SOL from the relayer per wallet; no USDC (D123 ruling 4)")
     args = ap.parse_args()
     if not os.path.isfile(KEY):
         die("upgrade authority key not found at " + KEY)
@@ -124,6 +157,9 @@ def main():
         if len(b58decode(w)) != 32:
             die("not a 32-byte key: " + w)
     keep_repo_copy()
+    if args.sol_only is not None:
+        sol_only(args.wallets, args.sol_only)
+        return
 
     for wallet in args.wallets:
         print("\n== " + wallet + " ==")
