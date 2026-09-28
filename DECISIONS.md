@@ -2644,3 +2644,19 @@ Ruling, technical.
    logger records full URLs today.
 7. `expo-camera` joins `expo-location` in the same native rebuild, unused until P4, to save
    one rebuild and reinstall cycle.
+
+**D128 — The Scout's account in `accept` is writable, as the fee payer.**
+
+Context. SPEC.md section 9.4 listed the Scout as a signer and not writable, copying the
+program's account struct, where the Scout is `Signer` without `mut`. The Scout also pays the
+fee, and a fee payer is writable in every Solana transaction. Before the phone code was
+written, a probe built the accept transaction with web3.js, serialised it and decoded it with
+`Transaction.from`, the check's own input path: the Scout came back writable, and
+`checkAcceptInstructions` refused the transaction with `TX_ACCOUNTS`. Every accept the phone
+built would have stopped before the wallet opened.
+
+Ruling, technical. Row 0 of section 9.4's table is signer yes, writable yes, and
+`expectedAcceptKeys` follows it. The program accepts the extra writable flag: Anchor rejects
+a missing privilege, not an added one. Test 123 gains the case of a Scout that is not
+writable, shown red before the gate. P1 never met this, because the requester's account is
+writable in `create_and_fund` anyway.

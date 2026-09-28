@@ -1083,7 +1083,7 @@ voucher's `authority`, `signature`, `message` and `expiresAt`.
 
 | # | Account | Signer | Writable |
 |---|---|---|---|
-| 0 | `scout` | yes | no |
+| 0 | `scout` | yes | yes |
 | 1 | `config` | no | no |
 | 2 | `bounty` | no | yes |
 | 3 | `Sysvar1nstructions1111111111111111111111111` | no | no |
@@ -1092,6 +1092,9 @@ voucher's `authority`, `signature`, `message` and `expiresAt`.
    second's equals `acceptData(expiresAt, 0)`. Else `TX_DATA`.
 
 The order is fixed: the ed25519 instruction is at index 0, so the verification index is 0.
+Row 0 is writable because the Scout pays the fee, and a fee payer is writable in every
+transaction; decoding the wire bytes reports it so. The program declares the Scout a
+signer only and accepts the added writable flag (D128).
 The fee payer and wallet-added instructions are outside this check, as section 8.7 states.
 
 ### 9.5 `verifyAssignedPolicy(response: unknown, expectedPolicyHash: Uint8Array)`
@@ -1133,7 +1136,7 @@ negative test is shown red before the gate by a scripted mutation of the check i
 121. `TX_INSTRUCTION_COUNT`: one instruction, and three.
 122. `TX_PROGRAM`: the first not the ed25519 program; the second another program.
 123. `TX_ACCOUNTS`: a key on the ed25519 instruction; keys 1 and 2 swapped; the Scout not a
-     signer; the bounty not writable; another sysvar in row 3.
+     signer; the Scout not writable; the bounty not writable; another sysvar in row 3.
 124. `TX_DATA`: one byte of the ed25519 data changed; accept data with index 1.
 125. `verifyAssignedPolicy` accepts vector V1's policy with its hash, returning V1's `lat` and
      `lon`.
