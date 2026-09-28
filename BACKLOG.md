@@ -625,6 +625,40 @@ open.
 
 ---
 
+## Session 17 (28 September)
+
+**Closed.**
+
+- **The endpoint has never run against a real funded bounty** — two funded bounties are
+  `AVAILABLE` with `program_account`; P2 can call the voucher against them.
+- **The GPS profile lift has no owner** (D61, POLICY.md 14.5) — done, D121.
+- **Funding from a device and projecting confirmed transactions** (D116's missing items) —
+  P1, `fb43a3f`.
+
+**Still open.**
+
+- **The API type check never sees its tests** — unchanged; `funding.test.ts` was type-checked
+  by the architect outside the repo, not by the gate.
+- **`assertMainnet` has no suite test**; **the Seeker cache is unbounded** — unchanged.
+
+**New.**
+
+- **Discovery lists bounties past their acceptance cutoff** (POLICY.md 14.7) — owed by P2:
+  store the cutoff at projection and filter, or expire.
+- **Recovering an escrow the database never projects** (POLICY.md 14.8) — a mismatched
+  funding or a funding confirmed after cancellation; CLI `cancel` or `expire_unaccepted`
+  until O1.
+- **Projection commitment** (POLICY.md 14.9) — `confirmed` now; `finalized` before mainnet.
+- **Resume after an app restart checks editable fields by eye** (FUNDING.md 2.4) — exact
+  checking needs local storage and a dev-client rebuild.
+- **The require cycle in `packages/shared`** — safe by construction (funding.ts header), but
+  a `primitives.ts` split would remove Metro's warning.
+- **The A30 requester path is untested** — no sign-in, no test USDC; needed for S1.
+- **`create_response.json` is built from the database, not the phone's response** — the same
+  rows the owner view is produced from; the phone's body was not captured.
+
+---
+
 ## Notes owed to `solana-dev-notes`
 
 - Unknown keys in `Anchor.toml` are silently ignored, not rejected.
@@ -731,9 +765,6 @@ HANDOFF.md; this section lists only what remains, in build order.
 
 ### Payment path, at A1
 
-- **P1** — Create a bounty and `create_and_fund` from the device; the funding projection
-  (confirmed funding makes `AVAILABLE`, D79, D97). Owns the GPS profile lift into
-  `packages/shared` (D61). Specification first.
 - **P2** — Discovery, bounty detail, voucher request and `accept` from the device; the acceptance
   projection writing `accepted_at`, `deadline` and `challenge_nonce` together (D113), and the
   constraint pairing them.

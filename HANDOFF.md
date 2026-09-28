@@ -4,14 +4,12 @@
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
 spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification and build;
 Session 10; Session 11 escrow initialisation; Session 12 mobile sign-in; Session 13
-eligibility specification; Sessions 14 and 15 eligibility build; Session 16 Seeker check
-**Next session:** P1 in BACKLOG.md's Remaining plan — creating and funding a bounty from the
-device, and the funding projection. Specification first: the client create flow, the GPS
-profile lift into `packages/shared` that D61 left without an owner, and how confirmed funding
-reaches the database (D79, D97). No bounty has ever been funded; P1 produces the first. Under
-D116 nothing is cut and the payment path is built first, at A1. The escrow is deployed and
-initialised on devnet; sign-in works on device; the voucher endpoint and the Seeker check are
-live against the API.
+eligibility specification; Sessions 14 and 15 eligibility build; Session 16 Seeker check;
+Session 17 P1 — create and fund from the device, the funding projection
+**Next session:** P2 in BACKLOG.md's Remaining plan — discovery, bounty detail, voucher request
+and `accept` from the device, and the acceptance projection (D113). Two funded bounties are
+`AVAILABLE` on devnet with their `program_account`, so the voucher endpoint can run end to end
+for the first time. Specification first; D116's order stands.
 **Deadline:** 8 October 2026 (10 days remaining)
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
@@ -84,12 +82,13 @@ authority the upgrade authority, no freeze authority.
 ```
 hackathon202609/
 ├── apps/
-│   ├── api/          Fastify + TS, SIWS auth, six bounty endpoints, 10 migrations
-│   └── mobile/       Expo + TS skeleton, android/ kept, ios/ deleted
+│   ├── api/          Fastify + TS, SIWS auth, eight bounty endpoints, two sweeps, 10 migrations
+│   └── mobile/       Expo + TS: sign-in, create and fund (FUNDING.md); android/ kept
 ├── packages/
-│   └── shared/       SPEC.md (normative) + implementation, 80 passing tests
-└── programs/
-    └── escrow/       Anchor 1.1.2, SPEC.md, eleven instructions, 140 tests, on devnet
+│   └── shared/       SPEC.md (normative) + implementation, 110 passing tests
+├── programs/
+│   └── escrow/       Anchor 1.1.2, SPEC.md, eleven instructions, 140 tests, on devnet
+└── scripts/          devnet_fund_requester.py — test USDC and SOL for requester wallets
 ```
 
 All work committed to `main`; Umair pushes. History: `git log`.
@@ -1384,6 +1383,67 @@ re-run reproduced every hash. `--revert` is for failures only.
 
 **Still open.** The voucher endpoint has never run against a funded bounty; P1 produces the
 first. BACKLOG.md's Session 16 section lists the rest.
+
+---
+
+## Session 17 — P1: create and fund from the device, the funding projection (28 September)
+
+Five commits: `50b03d9` (specification), `381fb87` (shared lift), `e85ff26` (mobile),
+`fb43a3f` (API projection), and this records commit. All on the same day as Session 16.
+
+**What landed.** The whole of P1. `packages/shared/SPEC.md` section 8 and `src/funding.ts`:
+the GPS profile, the profile registry, `uuidBytes`, `createAndFundData`, `verifyCreatedBounty`,
+`decimalToBaseUnits` and `checkFundingInstructions`, tests 81 to 110; the API's `gps.ts` and
+registry copy are gone (D121). `apps/mobile/FUNDING.md` and the app: sign-in, home, create,
+review, funding and My bounties; `signAndSendTransaction` on `WalletProvider`. POLICY.md section
+15 and the API: `chain/pda.ts`, `funding/project.ts`, `POST /bounties/:id/funding`, the funding
+sweep, cancel step 6a, `test/funding.test.ts` (24) over fixtures recorded from the first real
+funding. `scripts/devnet_fund_requester.py` mints test USDC (D122). Decisions D117 to D122.
+
+**Live, 28 September.** The first bounty ever funded: `46551b54-9a59-4400-8bca-fc0f00e76a7e`,
+`Check EV Charger`, 10 USDC, account `ADmbNck8Fv13JviWQgZhtVW6NJZ1quzCyS4dskoTKj1E` (bump 254),
+vault `8Fm2KquH6Y9StMz8K8mSE5X3eWDu1HqsCazjexBw5MDT`, signature
+`jiRcwuMYWWMF4nP6xMH9sUmK3MgqwmxtJf66vZE1VufTjx2SWdLoipRHQy1EDo1JdHSDTCLPHWjEKYtQkZBGpPw`,
+finalized in slot 504954945, fee 0.000025 SOL, rent 0.00204216 (bounty) and 0.00148844 (vault)
+SOL from the requester. Funded from the Seeker before the report endpoint existed, so it sat
+`DRAFT` until the restarted API's sweep projected it within 30 seconds — the lost-report case,
+real. The second, `b15bd4a5-265b-4d5e-8b36-9c3880e39ef3`, 5 USDC, account
+`GgGMAYaKbBLrqiZ32ACLXaDAg4FKStZQwWbcrMfjEgmr`, was projected by the report path while the phone
+polled. Both `AVAILABLE` in `bountycam_dev`. Requester wallet `9BZ17s…`, token account
+`HM4Ns3Yx2C2fnK681tkBX6os2PbT2AFrKx8FCbEso35b`, 1000 test USDC minted, 0.2 SOL from the relayer
+after the faucet refused.
+
+**Facts worth not rediscovering.**
+
+- Seed Vault Wallet appends two Compute Budget instructions after the phone hands over the
+  transaction. The phone's allowlist check saw one instruction; the chain shows three. SPEC.md
+  8.7 says this is the wallet's act; the program still enforced the amount.
+- The bounty account is 274 bytes when `Funded`: Anchor allocates `INIT_SPACE`, so every
+  `Option` field is already paid for.
+- The recorded instruction data begins with the discriminator vector `51f153b313cba740` and
+  reproduces byte for byte what `createAndFundData` emits (vector C1's layout).
+- Metro warns of a require cycle `shared/dist/index.js -> funding.js -> index.js`. It is the
+  documented one (funding.ts header); nothing at funding.js's top level touches an index
+  export, and the funding proves it runs. The `rpc-websockets` and `@noble/hashes` export
+  warnings are web3.js's own.
+- `evidence_requirements.id` is a primary key, so re-creating the recorded bounty in a test
+  needs its requirement rows and policy deleted first; test 03 passed once and every later
+  seed answered 500 until that was done.
+- The public devnet faucet refused a 1 SOL airdrop to the Seeker wallet; the relayer key
+  covers it. Rent for a funding is about 0.0035 SOL plus the fee, returned on close.
+- The keyboard auto-capitalised the first title to `Check EV Charger`; it is in the hash.
+
+**Process.** Two round trips were lost to an unreplaced script in `~/Downloads`: an abort with
+the same line numbers, or a paste identical down to `duration_ms`, means the old file ran. A
+script's first sha256 chunk is now stated when a corrected copy is issued. The step 4 gate
+first refused a pre-existing 102-character line in `bounties.test.ts`; the line-length check
+was dropped from apply scripts (Umair: no cosmetic gates). Every apply script prints its
+written hashes and the commit script pins them; RED phases are automated inside the apply
+script (a no-op `check()` for shared; state and equality checks removed for the projection).
+
+**Still open.** The A30 has never signed in and holds no test USDC (run
+`scripts/devnet_fund_requester.py <wallet>` once its address is known). BACKLOG.md's Session 17
+section lists the rest.
 
 ---
 
