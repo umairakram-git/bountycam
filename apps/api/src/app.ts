@@ -8,6 +8,7 @@ import { registerBountyRoutes } from "./bounties/routes.ts";
 import type { EligibilityDeps } from "./eligibility/deps.ts";
 import { registerVoucherRoutes } from "./eligibility/routes.ts";
 import { registerFundingRoutes } from "./funding/routes.ts";
+import { registerAcceptanceRoutes } from "./acceptance/routes.ts";
 
 export interface AppDeps {
   config: Config;
@@ -67,6 +68,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       chain: deps.eligibility.chain,
       programId: deps.eligibility.config.programId,
       programIdBytes: deps.eligibility.config.programIdBytes,
+    });
+    // POLICY.md 16.8: the acceptance report, on the same chain reader.
+    registerAcceptanceRoutes(app, {
+      pool: deps.pool,
+      config: deps.config,
+      clock: deps.clock,
+      chain: deps.eligibility.chain,
+      programId: deps.eligibility.config.programId,
     });
   }
   return app;

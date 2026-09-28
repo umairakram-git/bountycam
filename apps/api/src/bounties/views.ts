@@ -143,3 +143,23 @@ export function listItem(input: ListItemInput): Record<string, unknown> {
     location_public: { lat: snapLat(policy.lat), lon: snapLon(policy.lon) },
   };
 }
+
+export interface AssignedViewInput extends PublicViewInput {
+  acceptedAt: Date;
+  deadline: Date;
+}
+
+// POLICY.md section 16.4 (D127): the assigned-Scout view. The public view plus
+// the full policy, parsed from the stored canonical text, and the assignment's
+// times. Only the Scout holding the acceptance is served it; the exact lat and
+// lon reach the response through the policy strings alone (9.1).
+export function assignedView(input: AssignedViewInput): Record<string, unknown> {
+  return {
+    ...publicView(input),
+    policy: JSON.parse(input.canonicalJson) as unknown,
+    assignment: {
+      accepted_at: input.acceptedAt.toISOString(),
+      deadline: input.deadline.toISOString(),
+    },
+  };
+}

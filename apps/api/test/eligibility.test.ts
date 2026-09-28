@@ -9,7 +9,7 @@ import pg from "pg";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { base58 } from "@scure/base";
 import { SignJWT } from "jose";
-import { ELIGIBILITY_PROFILES, eligibilityProfileHash } from "@hackathon/shared";
+import { ELIGIBILITY_PROFILES, eligibilityProfileHash, uuidBytes } from "@hackathon/shared";
 import { buildApp } from "../src/app.ts";
 import { BOUNTY_DISCRIMINATOR, BOUNTY_MAX_LENGTH } from "../src/chain/bounty.ts";
 import type { EligibilityConfig } from "../src/chain/config.ts";
@@ -22,12 +22,15 @@ import { loadConfig } from "../src/config.ts";
 import type { SeekerCheck } from "../src/eligibility/deps.ts";
 import { heliusSeekerCheck, SEEKER_CACHE_MS } from "../src/eligibility/seeker.ts";
 import type { Randomness } from "../src/randomness.ts";
+import { projectAcceptance } from "../src/acceptance/project.ts";
+import { sweepExpiredReservations } from "../src/eligibility/sweeper.ts";
 
-// ELIGIBILITY.md section 9. Expected count: 24. The controlled clock reaches
-// every window boundary; nothing sleeps. The chain and the deployment are
-// doubles. The Seeker check is a double in tests 5 and 16 to 19, and the real
-// check over recorded mainnet responses in 20 and 21. The signer is the real
-// one over the published test seed (MESSAGES.md section 8).
+// ELIGIBILITY.md section 9. Expected count: 26 (25 and 26: POLICY.md 16.10).
+// The controlled clock reaches every window boundary; nothing sleeps. The
+// chain and the deployment are doubles. The Seeker check is a double in tests
+// 5 and 16 to 19, and the real check over recorded mainnet responses in 20 and
+// 21. The signer is the real one over the published test seed (MESSAGES.md
+// section 8).
 
 // --- scratch database, the bounties.test.ts pattern ---
 
@@ -700,4 +703,76 @@ test("24 past a reservation's expiry another Scout succeeds; the stale row flips
     statuses.rows.map((r) => [r.scout_id, r.status]).sort(),
     [[a.id, "EXPIRED"], [b.id, "ACTIVE"]].sort(),
   );
+});
+
+// --- POLICY.md 16.7 (D124): the voucher and the sweep as projection callers ---
+
+/** Turns a seeded account into one that `accept` wrote for `scout`. */
+function acceptOnChain(seeded: Seeded, scout: User, deadline: bigint): void {
+  const account = chainAccounts.get(seeded.address);
+  if (account === undefined) throw new Error("no seeded account");
+  const d = Uint8Array.from(account.data);
+  const v = new DataView(d.buffer);
+  d.set(uuidBytes(seeded.id), 8);
+  v.setUint8(169, 1);
+  v.setUint8(171, 1);
+  d.set(base58.decode(scout.wallet), 172);
+  v.setUint8(204, 1);
+  v.setBigInt64(205, deadline, true);
+  chainAccounts.set(seeded.address, { owner: account.owner, data: d });
+}
+
+async function holdFor(seeded: Seeded, scout: User, expiresAt: Date): Promise<void> {
+  await pool.query(
+    "INSERT INTO assignments (bounty_id, scout_id, status, expires_at) " +
+      "VALUES ($1, $2, 'ACTIVE', $3)",
+    [seeded.id, scout.id, expiresAt],
+  );
+}
+
+async function rowOf(seeded: Seeded, scout: User) {
+  const bounty = await pool.query<{ state: string }>("SELECT state FROM bounties WHERE id = $1", [
+    seeded.id,
+  ]);
+  const a = await pool.query<{ status: string; accepted_at: Date | null }>(
+    "SELECT status, accepted_at FROM assignments WHERE bounty_id = $1 AND scout_id = $2",
+    [seeded.id, scout.id],
+  );
+  return { state: bounty.rows[0]?.state, assignment: a.rows[0] };
+}
+
+test("25 a voucher on an Accepted account projects it, then BOUNTY_NOT_ACCEPTABLE", async () => {
+  const seeded = await seedFunded();
+  const scout = await seedUser();
+  acceptOnChain(seeded, scout, BASE_SECONDS + 7200n);
+  await holdFor(seeded, scout, new Date(BASE.getTime() + 300_000));
+  const res = await voucher(scout.token, seeded.id);
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.json(), { error: "BOUNTY_NOT_ACCEPTABLE" });
+  const after = await rowOf(seeded, scout);
+  assert.equal(after.state, "ACCEPTED");
+  assert.equal(after.assignment?.status, "ACTIVE");
+  assert.equal(after.assignment?.accepted_at?.getTime(), BASE.getTime());
+});
+
+test("26 the sweep projects a landed accept's reservation; flips the other", async () => {
+  const accepted = await seedFunded();
+  const funded = await seedFunded();
+  const a = await seedUser();
+  const b = await seedUser();
+  acceptOnChain(accepted, a, BASE_SECONDS + 7200n);
+  const past = new Date(BASE.getTime() - 1000);
+  await holdFor(accepted, a, past);
+  await holdFor(funded, b, past);
+  await sweepExpiredReservations(pool, clock.now(), (bountyId) =>
+    projectAcceptance({ pool, chain, programId: PROGRAM, alarm: () => undefined }, bountyId),
+  );
+  const first = await rowOf(accepted, a);
+  assert.equal(first.state, "ACCEPTED");
+  assert.equal(first.assignment?.status, "ACTIVE");
+  assert.equal(first.assignment?.accepted_at?.getTime(), BASE.getTime());
+  const second = await rowOf(funded, b);
+  assert.equal(second.state, "AVAILABLE");
+  assert.equal(second.assignment?.status, "EXPIRED");
+  assert.equal(second.assignment?.accepted_at, null);
 });

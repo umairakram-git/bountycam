@@ -21,7 +21,7 @@ import {
   type PolicyLimits,
 } from "./policy.ts";
 import { snapLat, snapLon } from "./snap.ts";
-import { listItem, ownerView, publicView } from "./views.ts";
+import { assignedView, listItem, ownerView, publicView } from "./views.ts";
 import type { EligibilityDeps } from "../eligibility/deps.ts";
 import { projectFunding, type ProjectionDeps } from "../funding/project.ts";
 
@@ -573,6 +573,33 @@ export function registerBountyRoutes(
         );
       }
 
+      // Step 4a (POLICY.md 16.4, D127): the Scout holding the acceptance gets
+      // the assigned-Scout view, with the exact location inside the policy.
+      if (row.state === "ACCEPTED") {
+        const held = await pool.query<{ accepted_at: Date; deadline: Date }>(
+          "SELECT accepted_at, deadline FROM assignments WHERE bounty_id = $1 " +
+            "AND scout_id = $2 AND status = 'ACTIVE' AND accepted_at IS NOT NULL",
+          [row.id, caller.id],
+        );
+        const acceptance = held.rows[0];
+        if (acceptance !== undefined) {
+          return reply.status(200).send(
+            assignedView({
+              id: row.id,
+              title: row.title,
+              category: row.category,
+              state: row.state,
+              programAccount: row.program_account,
+              createdAt: row.created_at,
+              policyHashHex: bytesToHex(row.policy_hash),
+              canonicalJson: row.canonical_json,
+              acceptedAt: acceptance.accepted_at,
+              deadline: acceptance.deadline,
+            }),
+          );
+        }
+      }
+
       // Step 5: DRAFT and CANCELLED are hidden from anyone else (7.3);
       // any other state gets the public view.
       if (row.state === "DRAFT" || row.state === "CANCELLED") {
@@ -639,6 +666,45 @@ export function registerBountyRoutes(
             canonicalJson: row.canonical_json,
           }),
         ),
+      });
+    },
+  );
+
+  // POLICY.md section 16.5: GET /me/missions, the caller's acceptances. The
+  // phone has no local storage; this is how it finds a mission after a
+  // restart. Registered beside /me/bounties for section 8.6's reason.
+  app.get(
+    "/me/missions",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const caller = authUser(request);
+      const query = extractMeQuery(request.query);
+      if (query === null) return fail(reply, 400, "INVALID_REQUEST");
+      const result = await pool.query<ListItemRow & { deadline: Date }>(
+        `SELECT b.id, b.title, b.category, b.state, b.created_at,
+                b.reward_amount, p.required_assurance, p.canonical_json, a.deadline
+         FROM assignments a
+         JOIN bounties b ON b.id = a.bounty_id
+         JOIN policies p ON p.id = b.policy_id
+         WHERE a.scout_id = $1 AND a.status = 'ACTIVE' AND a.accepted_at IS NOT NULL
+         ORDER BY a.accepted_at DESC, b.id ASC
+         LIMIT $2 OFFSET $3`,
+        [caller.id, query.limit, query.offset],
+      );
+      return reply.status(200).send({
+        missions: result.rows.map((row) => ({
+          ...listItem({
+            id: row.id,
+            title: row.title,
+            category: row.category,
+            state: row.state,
+            createdAt: row.created_at,
+            rewardAmount: row.reward_amount,
+            requiredAssurance: row.required_assurance,
+            canonicalJson: row.canonical_json,
+          }),
+          deadline: row.deadline.toISOString(),
+        })),
       });
     },
   );

@@ -15,6 +15,7 @@ import { UUID_FORM } from "../bounties/extract.ts";
 import { decodeBountyAccount } from "../chain/bounty.ts";
 import { bytesEqual } from "../chain/config.ts";
 import { ChainError } from "../chain/rpc.ts";
+import { projectAcceptance } from "../acceptance/project.ts";
 import type { Clock } from "../clock.ts";
 import type { Config } from "../config.ts";
 import type { EligibilityDeps } from "./deps.ts";
@@ -98,7 +99,24 @@ export function registerVoucherRoutes(app: FastifyInstance, deps: VoucherDeps): 
       if (!decoded.ok) return fail(reply, 409, "BINDING_MISMATCH");
       const bounty = decoded.bounty;
 
-      // Step 5.
+      // Step 5. POLICY.md 16.7 (D124): an Accepted account is projected first;
+      // the answer is BOUNTY_NOT_ACCEPTABLE whatever the projection says.
+      if (bounty.state === "Accepted") {
+        try {
+          await projectAcceptance(
+            {
+              pool,
+              chain,
+              programId,
+              alarm: (outcome, bountyId) =>
+                request.log.error({ outcome, bountyId }, "acceptance alarm"),
+            },
+            row.id,
+          );
+        } catch (error) {
+          request.log.error(error);
+        }
+      }
       if (bounty.state !== "Funded") return fail(reply, 409, "BOUNTY_NOT_ACCEPTABLE");
 
       // Step 6: the app clock, in whole seconds, at or before the cutoff.

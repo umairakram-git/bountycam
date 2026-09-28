@@ -85,3 +85,22 @@ export function decodeBountyAccount(
     },
   };
 }
+
+// POLICY.md 16.6 (D129): the two fields `accept` writes, read only from an
+// Accepted account. Each Option is a tag byte, 1 for some, then its value:
+// scout at 171 (tag) and 172..203, deadline at 204 (tag) and 205..212. The
+// prefix decoder above never reads the tail, so its callers are unchanged.
+export type AcceptanceRead =
+  | { readonly ok: true; readonly scout: Uint8Array; readonly deadline: bigint }
+  | { readonly ok: false; readonly error: "BAD_TAIL" };
+
+export const ACCEPTED_TAIL_END = 213;
+
+export function readAcceptance(info: AccountInfo): AcceptanceRead {
+  const d = info.data;
+  if (d.length < ACCEPTED_TAIL_END || d[169] !== 1 || d[171] !== 1 || d[204] !== 1) {
+    return { ok: false, error: "BAD_TAIL" };
+  }
+  const view = new DataView(d.buffer, d.byteOffset, d.byteLength);
+  return { ok: true, scout: d.slice(172, 204), deadline: view.getBigInt64(205, true) };
+}

@@ -13,7 +13,8 @@ import { resolveDeployment, type Deployment } from "./chain/deployment.ts";
 import { jsonRpcChainReader } from "./chain/rpc.ts";
 import { eligibilitySigner } from "./chain/signer.ts";
 import { assertMainnet, heliusSeekerCheck } from "./eligibility/seeker.ts";
-import { startReservationSweeper } from "./eligibility/sweeper.ts";
+import { SWEEP_INTERVAL_MS, startReservationSweeper } from "./eligibility/sweeper.ts";
+import { projectAcceptance } from "./acceptance/project.ts";
 import { startFundingSweeper } from "./funding/sweeper.ts";
 
 let config: Config;
@@ -82,7 +83,19 @@ await app.listen({ port, host: "127.0.0.1" });
 
 // ELIGIBILITY.md section 6.1, the first writer. unref'd, so it never keeps
 // the process alive on its own.
-startReservationSweeper(pool, systemClock, (error) => app.log.error(error));
+// POLICY.md 16.7: it projects each expired reservation's bounty before flipping.
+startReservationSweeper(pool, systemClock, (error) => app.log.error(error), SWEEP_INTERVAL_MS,
+  (bountyId) =>
+    projectAcceptance(
+      {
+        pool,
+        chain,
+        programId: eligibility.programId,
+        alarm: (outcome, id) => app.log.error({ outcome, bountyId: id }, "acceptance alarm"),
+      },
+      bountyId,
+    ),
+);
 
 // POLICY.md 15.5: the funding sweep, the backstop for a lost report.
 startFundingSweeper(

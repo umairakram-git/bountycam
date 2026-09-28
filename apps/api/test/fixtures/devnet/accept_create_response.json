@@ -1,0 +1,38 @@
+{
+  "id": "17e419ff-59a6-4e14-93b4-7a6550d46bd5",
+  "title": "P2 accept test 1",
+  "category": "Infrastructure",
+  "state": "AVAILABLE",
+  "program_account": "KkNqXiXTt3DU8jqUTCVSogaodRbHWL1NSJFe5RXxd21",
+  "created_at": "2026-09-28T21:52:13.709458+10:00",
+  "policy_hash": "4825d278d271863b3be65718bf78e16c36df48d9fcfddc862e970bac9c25625a",
+  "policy": {
+    "acceptance_window_seconds": 86400,
+    "capture_radius_m": 150,
+    "chain": "solana",
+    "challenge_window_seconds": 3600,
+    "cluster": "devnet",
+    "completion_window_seconds": 7200,
+    "domain_tag": "BOUNTYCAM_POLICY_V1",
+    "eligibility_profile_id": "BASE_V1",
+    "evidence_requirements": [
+      {
+        "id": "235ea30e-4e3e-427b-92e0-0449223520e9",
+        "prompt": "One",
+        "required": true,
+        "type": "PHOTO"
+      }
+    ],
+    "fee_amount": "0",
+    "lat": "-33.7116180",
+    "lon": "150.9649920",
+    "required_assurance": 1,
+    "reward_amount": "10000000",
+    "salt": "eb0b23a0a0c9d8a8e924762e747bcd1a3f153d34ac3168bee38e4f27e5046440",
+    "settlement_mint": "ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR"
+  },
+  "requester_wallet": "9BZ17sUdF2matCurxmdmUpD3BNabBTFmsmAVu5oY9qP3",
+  "acceptance_cutoff": "2026-09-29T21:52:35+10:00",
+  "signature": "2LRzp1h9RSvyuPGSgVnUAD2tiDh2i9KMCV5RHrtVTLTzCdjSnMVSEccEAeEKreM4H61dvJDLiHU11zi8mDghnML2",
+  "bounty_address": "KkNqXiXTt3DU8jqUTCVSogaodRbHWL1NSJFe5RXxd21"
+}
