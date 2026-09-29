@@ -97,7 +97,7 @@ the server at creation.
 | `chain` | constant | string | exactly `solana` |
 | `challenge_window_seconds` | request | integer | 60 to 86400 inclusive |
 | `cluster` | request, optional | string | the configured cluster; currently `devnet` |
-| `completion_window_seconds` | request | integer | 60 to 2592000 inclusive |
+| `completion_window_seconds` | request | integer | section 17.4 floor to 2592000 inclusive |
 | `domain_tag` | constant | string | exactly `BOUNTYCAM_POLICY_V1` |
 | `eligibility_profile_id` | request | string | a section 2.5 registry id; see 2.5 |
 | `evidence_requirements` | request | array | 1 to 20 items, each per section 2.2 |
@@ -926,7 +926,8 @@ Check order:
    Any other state: 200, public view. (No such state is producible by Session 7
    code; the test seeds one by SQL.)
 
-Section 16.4 inserts step 4a, the assigned-Scout view (D127).
+Section 16.4 inserts step 4a, the assigned-Scout view (D127); section 17.7 adds its
+`capture` key.
 
 ### 8.6 `GET /me/bounties`
 
@@ -989,7 +990,8 @@ the thirteen section 2.3 policy codes, and these seven:
 | `BOUNTY_NOT_CANCELLABLE` | 409 | state admits no cancellation (section 8.7) |
 | `IDEMPOTENCY_KEY_REUSED` | 409 | same key, different `request_digest` (section 10) |
 
-Section 15.7 adds two codes for funding; section 16.9 adds two for acceptance.
+Section 15.7 adds two codes for funding; section 16.9 adds two for acceptance; section 17.10
+adds five for the capture nonce.
 
 ---
 
@@ -1414,8 +1416,8 @@ Middleware unit test — no database, no app boot, like 73 to 75:
 Discovery, reservation exclusion (section 7.3):
 
 77. An `AVAILABLE` bounty with a seeded `assignments` row at `status = 'ACTIVE'` is
-    absent from discovery — reserved is never discoverable. The seeded row must set
-    `challenge_nonce` (a D72 non-term pending rename; the rename updates this test).
+    absent from discovery — reserved is never discoverable. Migration 12 dropped
+    `challenge_nonce` (D131); the seeded row sets no nonce.
 78. The same bounty with the row flipped to `EXPIRED` is returned — the flip, not a
     timestamp, restores discoverability (section 14 item 6).
 
@@ -2124,3 +2126,343 @@ BACKLOG.md's gate "Assignment cannot double-book" is run with the A30 and a lapt
 Pass, from raw output and the explorer: exactly one voucher request answers 200 and the other
 `BOUNTY_RESERVED`; exactly one `accept` confirms on chain; the database shows `ACCEPTED` with
 the winner's acceptance.
+
+---
+
+## 17. The capture nonce
+
+Session 19 (P3). Normative; written before implementation. D73 defines the mechanism; D131 to
+D137 settle what it left open. The client is `apps/mobile/CAPTURE.md`. The location helpers
+are `packages/shared/SPEC.md` section 10.
+
+### 17.1 What P3 adds
+
+Migration 12 (section 17.2); seven configuration keys (17.3); a completion-window minimum at
+creation (17.4); the start gate's server check and the stored start fix (17.5);
+`POST /bounties/:id/capture-nonce` (17.6); the `capture` key of the assigned-Scout view (17.7);
+`consumeCaptureNonce`, which P4's submission calls (17.8); what P4 and P5 must bind (17.9);
+error codes (17.10); tests (17.11); the live run's deferral to P4 (17.12).
+
+Capture itself, the camera, evidence and the manifest are P4's.
+
+### 17.2 Migration 12
+
+Up, in order:
+
+1. `CREATE TYPE capture_nonce_status AS ENUM ('ACTIVE', 'SUPERSEDED', 'EXPIRED', 'CONSUMED')`.
+2. `assignments` gains `assignments_binding_key UNIQUE (id, bounty_id, scout_id)`, the target of
+   step 3's foreign key.
+3. The table `capture_nonces`:
+
+| Column | Type | Rule |
+|---|---|---|
+| `id` | `uuid` | primary key, default `gen_random_uuid()`; the capture-session id (D134) |
+| `assignment_id` | `uuid` | not null |
+| `bounty_id` | `uuid` | not null |
+| `scout_id` | `uuid` | not null |
+| `deployment_id` | `smallint` | not null, 0 to 255 |
+| `value` | `bytea` | not null, unique, exactly 32 bytes |
+| `status` | `capture_nonce_status` | not null, no default |
+| `issued_at` | `timestamptz` | not null |
+| `expires_at` | `timestamptz` | not null, after `issued_at` |
+| `consumed_at` | `timestamptz` | set exactly when `status` is `CONSUMED` |
+| `start_lat` | `text` | not null; the start fix, GPS profile string |
+| `start_lon` | `text` | not null |
+| `start_accuracy_m` | `double precision` | not null, 0 or more |
+| `start_fixed_at` | `timestamptz` | not null; the phone's fix time, recorded, never judged |
+
+   Constraints: `capture_nonces_assignment_fkey`, a foreign key on `(assignment_id, bounty_id,
+   scout_id)` to `assignments_binding_key`, so a nonce cannot name a bounty or Scout other than
+   its assignment's; `capture_nonces_expiry_after_issue`; `capture_nonces_consumed_pair`,
+   `(status = 'CONSUMED') = (consumed_at IS NOT NULL)`; and the partial unique index
+   `capture_nonces_one_active_idx` on `(assignment_id) WHERE status = 'ACTIVE'`.
+4. `assignments` drops `challenge_nonce`, and with it `assignments_challenge_nonce_key` (D131).
+   No row has ever held a value.
+
+Down, in reverse: `challenge_nonce bytea UNIQUE`, nullable, is restored; the table, the
+binding key and the type are dropped. Valid against any table state.
+
+Non-test gate, from raw output: after up, every `capture_nonces` column default is listed;
+only `id` has one. `\d assignments` shows no `challenge_nonce`.
+
+### 17.3 Configuration
+
+Seven keys join section 8.1's, all optional, each a positive integer when set; anything else
+exits at startup, as section 8.1 says. They are operational configuration, never policy
+fields: the V1 policy is frozen (D112).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `CAPTURE_NONCE_LIFETIME_S` | 1200 | a nonce's longest capture window |
+| `CAPTURE_DEADLINE_BUFFER_S` | 600 | time kept clear before the deadline |
+| `CAPTURE_MIN_WINDOW_S` | 600 | the shortest capture window any Start may give |
+| `CAPTURE_SUBMISSION_GRACE_S` | 480 | how long after `expires_at` consumption succeeds |
+| `LOCATION_MAX_ACCURACY_M` | 200 | the initial configured accuracy ceiling (D133) |
+| `LOCATION_FIX_TIMEOUT_S` | 10 | the phone's wait for a fix |
+| `LOCATION_MAX_AGE_S` | 30 | the oldest fix the phone may use |
+
+Two invariants, checked at startup: `CAPTURE_NONCE_LIFETIME_S >= CAPTURE_MIN_WINDOW_S`, so every
+issued nonce gives at least the minimum window; and `CAPTURE_SUBMISSION_GRACE_S <
+CAPTURE_DEADLINE_BUFFER_S`, so a submission accepted at the end of its grace still leaves time
+before the deadline for verification and `submit_attestation` (D132).
+
+The 200 m figure is a configured ceiling on the phone's reported uncertainty, not a claim that
+200 m is the correct threshold; tuning it is a configuration change, not a change to the model
+of section 17.5.
+
+### 17.4 The completion window minimum (D135)
+
+Section 2.1's rule for `completion_window_seconds` becomes: `CAPTURE_DEADLINE_BUFFER_S +
+CAPTURE_MIN_WINDOW_S` (1200 by default) to 2592000 inclusive; failure `INVALID_WINDOW`, at the
+same place in section 8.3's step 5. A shorter window would close Start at the moment of
+acceptance: the Scout could accept but never capture. The bound is request validation, which
+D112 leaves amendable; no hash changes. Bounties already created keep their windows.
+
+### 17.5 The start gate on the server (D133)
+
+The phone decides whether to offer Start (CAPTURE.md). The server repeats the decision with the
+same function, `checkCaptureStart` (SPEC.md section 10), on the fix the phone sends: the target
+is the policy's `lat` and `lon` strings, parsed from the stored canonical text as section 16.4
+does, the radius is the policy's `capture_radius_m`, and the ceiling is
+`LOCATION_MAX_ACCURACY_M`. `IMPRECISE` is `LOCATION_TOO_IMPRECISE`; `TOO_FAR` is
+`LOCATION_TOO_FAR`.
+
+The rule, stated here once: `effective_distance_m = max(0, distance_m -
+horizontal_accuracy_m)`, where `distance_m` is the haversine distance of SPEC.md section 10.1;
+the gate passes when `horizontal_accuracy_m <= LOCATION_MAX_ACCURACY_M` and
+`effective_distance_m <= capture_radius_m`. It answers "is presence plausible enough to start
+collecting evidence", nothing more. The fix is phone-reported and can be spoofed; the check
+exists to keep honest Scouts and the server in agreement, not as proof of presence.
+
+The fix's age is judged on the phone, against the phone's clock that stamped it; the server
+records `fixed_at` and never compares it with its own clock (D133).
+
+**The stored fix.** Each issued nonce stores its start fix (section 17.2). It appears in no
+view, response, error or log line, never reaches the requester, and is read only by an operator
+investigating a start report. Its retention is O6's to set. The request log already carries
+the path only (section 16.11); the body is never logged.
+
+### 17.6 `POST /bounties/:id/capture-nonce`
+
+The Scout's phone starts a capture session. Every successful call issues a new nonce (D134).
+
+Body, a JSON object with exactly four keys:
+
+| Key | Type | Rule |
+|---|---|---|
+| `lat` | string | GPS profile (section 5), -90 to 90 |
+| `lon` | string | GPS profile (section 5), -180 to 180 |
+| `horizontal_accuracy_m` | number | finite, 0 or more |
+| `fixed_at` | string | ISO 8601 UTC: `YYYY-MM-DDTHH:MM:SS`, optional `.` and 1 to 3 digits, `Z` |
+
+Check order; the first failing step wins:
+
+1. **Auth.** 401 codes per section 8.1.
+2. **Body shape.** Missing body, a missing or unknown key, a wrong type, a non-finite or
+   negative accuracy, a malformed `fixed_at`: `INVALID_REQUEST` (400). Runs before the id form,
+   as section 8.7 step 2 does.
+3. **Coordinates.** `lat` or `lon` failing its profile or range: `INVALID_GPS` (400).
+4. **Id form**, as section 8.5 step 2: `NOT_FOUND` (404).
+5. **Load.** No row: `NOT_FOUND` (404).
+6. **Hidden.** State `DRAFT` or `CANCELLED` and the caller is not the requester: `NOT_FOUND`
+   (404).
+7. **State.** Any state other than `ACCEPTED`: `BOUNTY_NOT_CAPTURABLE` (409). This covers a
+   reservation (`AVAILABLE`), and every later or terminal state.
+8. **Holder.** The caller holds the acceptance, as section 16.4 step 4a defines it; otherwise
+   `NOT_ASSIGNED` (403). The requester, other Scouts and a Scout whose earlier assignment of the
+   bounty is no longer `ACTIVE` all land here.
+9. **Time.** With `now` from the injectable clock and `deadline` the assignment's: `now >
+   deadline - CAPTURE_DEADLINE_BUFFER_S - CAPTURE_MIN_WINDOW_S` is `CAPTURE_WINDOW_CLOSED` (409).
+   Start is allowed at equality.
+10. **Location** (section 17.5): `LOCATION_TOO_IMPRECISE` or `LOCATION_TOO_FAR` (400).
+11. **Write**, one transaction:
+    1. Lock the bounty row, then the assignment row (the projection's order). If step 7 or 8
+       would now fail, roll back and return that step's code.
+    2. Set `status = 'SUPERSEDED'` on the assignment's `ACTIVE` row, if one exists, whatever its
+       expiry. Reissue always supersedes; `EXPIRED` is written only by section 17.8.
+    3. Insert the new row: the assignment's `id`, `bounty_id` and `scout_id`; `deployment_id`
+       from the configuration account (ELIGIBILITY.md section 3); `value` from
+       `randomness.randomBytes(32)` (D54); `status` `ACTIVE`; `issued_at` `now`; `expires_at =
+       min(now + CAPTURE_NONCE_LIFETIME_S, deadline - CAPTURE_DEADLINE_BUFFER_S)`; the four
+       start-fix columns from the body.
+12. **Respond** 201 with an object whose single key `capture` is section 17.7's object, its
+    `capture_nonce` the row just inserted.
+
+Steps 9 and 11.3 give every issued nonce a window of at least `CAPTURE_MIN_WINDOW_S`: at the
+latest permitted start, `now + CAPTURE_NONCE_LIFETIME_S` is at or after `deadline -
+CAPTURE_DEADLINE_BUFFER_S`, which is then exactly `CAPTURE_MIN_WINDOW_S` after `now`.
+
+The server's clock decides every time. The phone never computes an expiry (D132).
+
+The route is registered only when the chain dependencies exist, as section 16.8's is, because
+`deployment_id` comes from them. It reads nothing from the chain: the acceptance and its
+deadline are already projected from the account, and the deadline is immutable.
+
+### 17.7 The assigned-Scout view gains `capture` (D134)
+
+Section 16.4's assigned-Scout view gains one key, `capture`, and its `assignment` object gains
+`id`, which P4's manifest carries (section 17.9). `capture` is an object:
+
+| Key | Value |
+|---|---|
+| `server_time` | the clock's `now`, ISO 8601 UTC |
+| `start_closes_at` | `deadline - CAPTURE_DEADLINE_BUFFER_S - CAPTURE_MIN_WINDOW_S`, ISO 8601 UTC |
+| `max_location_accuracy_m` | `LOCATION_MAX_ACCURACY_M` |
+| `location_fix_timeout_s` | `LOCATION_FIX_TIMEOUT_S` |
+| `max_location_age_s` | `LOCATION_MAX_AGE_S` |
+| `capture_nonce` | null, or the object below |
+
+`capture_nonce` is the assignment's `ACTIVE` row when `now < expires_at`, else null. Its keys:
+`id` (the capture-session id), `value` (64 lowercase hex characters), `issued_at` and
+`expires_at` (ISO 8601 UTC). The phone restores a session from here after a restart or a failed
+restart request, instead of superseding it.
+
+The nonce need not be secret after issuance (D73), so serving it to its holder again costs
+nothing. It is served to nobody else: the owner and public views are unchanged.
+
+### 17.8 Consumption: `consumeCaptureNonce` (D137)
+
+P3 builds and tests the function; P4's submission calls it inside its own transaction, so the
+nonce is consumed atomically with the submission's write. Placement: `src/capture/nonce.ts`.
+
+Input: the 32-byte `value` and the expected `bounty_id`, `assignment_id`, `scout_id` and
+`deployment_id`; `now` from the clock. Steps; the first that applies decides:
+
+1. Select the row by `value`, locking it. None: `UNKNOWN`.
+2. Any of the four binding fields differs: `BINDING_MISMATCH`. Nothing written.
+3. `CONSUMED`: `ALREADY_CONSUMED`. `SUPERSEDED`: `SUPERSEDED`. `EXPIRED`: `EXPIRED`.
+4. `ACTIVE` and `now >= expires_at + CAPTURE_SUBMISSION_GRACE_S`: set `status = 'EXPIRED'`;
+   `EXPIRED`.
+5. Otherwise set `status = 'CONSUMED'` and `consumed_at = now`: `CONSUMED`.
+
+Only `CONSUMED` lets a submission claim A1 freshness. The grace lets evidence captured inside
+the window be uploaded after it closes; section 17.3's invariant keeps the grace inside the
+deadline buffer.
+
+### 17.9 What P4 and P5 must bind
+
+Fixed now so that P3's format never changes:
+
+- **Manifest keys.** P4's evidence manifest carries `bounty_id` (uuid), `assignment_id` (uuid,
+  from section 17.7) and `capture_nonce` (the `value`, 64 lowercase hex characters, exactly as
+  issued). The manifest's canonical form is P4's, in `packages/shared`.
+- **Capture times.** For A1, every evidence item's capture time lies in `[issued_at,
+  expires_at)` of the consumed nonce. P4 records the times; P5 checks them.
+- **Location.** P4 records each item's `lat`, `lon`, `horizontal_accuracy_m` and fix time. P4
+  and P5 must take the reported accuracy into account and must never treat coordinates as exact
+  points. Their acceptance rule and accuracy ceiling are defined and tested when they are built,
+  and need not equal the start gate's (D133): the start gate measures plausibility, payment needs
+  sufficient evidence of presence. They reuse SPEC.md section 10.1's `distanceM`.
+- **Offline.** Evidence carrying no consumed nonce cannot be graded A1 (D73). The UI says so
+  before capture begins (P4).
+
+### 17.10 Error codes
+
+| Code | Status | Failure |
+|---|---|---|
+| `BOUNTY_NOT_CAPTURABLE` | 409 | the bounty is not `ACCEPTED` (section 17.6 step 7) |
+| `NOT_ASSIGNED` | 403 | the caller does not hold the acceptance (step 8) |
+| `CAPTURE_WINDOW_CLOSED` | 409 | too little time remains before the deadline (step 9) |
+| `LOCATION_TOO_IMPRECISE` | 400 | the fix's accuracy exceeds the ceiling (step 10) |
+| `LOCATION_TOO_FAR` | 400 | the fix fails the start gate's distance rule (step 10) |
+
+Reused: `INVALID_REQUEST`, `INVALID_GPS`, `NOT_FOUND` and the 401 codes. The outcomes of section
+17.8 are return values, not HTTP codes; P4 maps them.
+
+### 17.11 Tests
+
+A new file, `apps/api/test/capture.test.ts`, named in the test script after
+`acceptance.test.ts`. Seeds come from the recorded Session 18 accept, as section 16.10's do: the
+create response and the account after `accept`, projected through section 16.7, give an
+`ACCEPTED` bounty (radius 150 m) with its Scout's acceptance. The clock and randomness are
+injected. Each negative test is shown red before the gate by a scripted mutation of the check
+it names. D36 gate: `tests 25, pass 25, fail 0`.
+
+Fixes are at the policy's spot unless stated. "North by 0.002" is the spot with 0.002 added to
+the latitude; its `distance` is taken from `distanceM`, about 222 m.
+
+Issuance:
+
+1. The holder, clock two hours before the deadline: 201; `capture` has exactly section 17.7's
+   keys; `capture_nonce.value` is the injected bytes in hex; `issued_at` is the clock;
+   `expires_at` is `issued_at` plus 1200 s. One `ACTIVE` row, with the assignment's three ids,
+   `deployment_id` 2 and the start fix as sent.
+2. Clock 25 minutes before the deadline: `expires_at` is `deadline` minus 600 s.
+3. Clock exactly 1200 s before the deadline: 201 and a window of exactly 600 s. One
+   millisecond later: `CAPTURE_WINDOW_CLOSED`, nothing written.
+4. A second start before expiry: the first row `SUPERSEDED`, a different value, exactly one
+   `ACTIVE` row.
+5. A second start after the first nonce's `expires_at`: the first row `SUPERSEDED`, not
+   `EXPIRED`.
+6. With the production randomness module, two starts give different values.
+7. Two starts sent together: both 201; one row `SUPERSEDED` and one `ACTIVE`.
+
+Refusals:
+
+8. A signed-in user with no assignment, and the requester: `NOT_ASSIGNED` (two asserts).
+9. A reservation only (bounty `AVAILABLE`, both times null): `BOUNTY_NOT_CAPTURABLE`.
+10. Bounty states `EXPIRED`, `SUBMITTED` and `PAID`, seeded by SQL: `BOUNTY_NOT_CAPTURABLE`;
+    `CANCELLED`: `NOT_FOUND` for the Scout (four asserts).
+11. The Scout's own assignment `EXPIRED` while another Scout holds the acceptance:
+    `NOT_ASSIGNED`.
+12. No body; `{}`; a fifth key; accuracy as a string; accuracy -1; `fixed_at` without `Z`:
+    `INVALID_REQUEST` (six asserts).
+13. `lat` with six fraction digits: `INVALID_GPS`.
+14. Accuracy 200.5: `LOCATION_TOO_IMPRECISE`. Accuracy 200: 201.
+15. North by 0.002 with accuracy `distance - 150 - 1`: `LOCATION_TOO_FAR`, nothing written;
+    with accuracy `distance - 150 + 1`: 201.
+16. No token: `TOKEN_MISSING`; a malformed id and an unknown id: `NOT_FOUND`.
+
+Views and privacy:
+
+17. The assigned-Scout view: `capture_nonce` null before any start; equal to the 201's after
+    one; null again once the clock passes `expires_at`; `start_closes_at` is `deadline` minus
+    1200 s; `server_time` is the clock; `assignment.id` is the row's id.
+18. The start fix's strings appear in no response body (201, assigned-Scout, owner and public
+    views) and in no log line captured through a stream.
+
+Consumption (section 17.8), with the clock injected:
+
+19. A fresh nonce: `CONSUMED`, `consumed_at` the clock; again: `ALREADY_CONSUMED`.
+20. At `expires_at + 480 s - 1 ms`: `CONSUMED`. Another nonce at `expires_at + 480 s`:
+    `EXPIRED`, and the row is `EXPIRED`.
+21. A superseded value: `SUPERSEDED`.
+22. Another bounty id, Scout id, assignment id and deployment id: `BINDING_MISMATCH`, the row
+    unchanged (four asserts).
+23. A value never issued: `UNKNOWN`.
+
+Constraints and configuration:
+
+24. By SQL: a second `ACTIVE` row for one assignment fails on `capture_nonces_one_active_idx`; a
+    31-byte value fails; `CONSUMED` with `consumed_at` null fails; a row whose `scout_id` is not
+    its assignment's fails on `capture_nonces_assignment_fkey` (four asserts).
+25. `loadConfig` gives section 17.3's seven defaults; it throws for a lifetime of 599 against a
+    minimum window of 600, for a grace of 600 against a buffer of 600, and for `1.5`.
+
+Other suites:
+
+- **Bounties.** Test 29's completion-window floor becomes 1199, still `INVALID_WINDOW`; new test
+  81: a completion window of 1200 creates. Gate 81.
+- **Acceptance.** Test 5's key set gains `capture`, and `assignment` gains `id`. Gate 16.
+- **Migrations.** The expected tables gain `capture_nonces`; after rollback the type
+  `capture_nonce_status` is gone. Gate 1.
+- **Shared.** SPEC.md section 10.4, tests 127 to 130. Gate 130.
+
+Every other suite keeps its count.
+
+**D73's minimum tests, where each lands.** Non-assigned wallet: 8, 11. No issuance before
+acceptance: 9. None for a completed, cancelled or expired bounty: 10. Unpredictably distinct: 6
+(and 1 for propagation). Expired rejected: 20. Consumed rejected: 19. Another bounty, Scout or
+earlier assignment: 22, 11. Re-issue supersedes: 4, 5, 7. Evidence under a superseded nonce
+cannot be A1: 21 here, graded in P5. Consumed exactly once: 19, 7. Offline evidence without a
+valid nonce cannot be A1: P5, per section 17.9.
+
+### 17.12 The live run is deferred to P4 (D136)
+
+No bounty is funded for P3. P4's first live run on the A30 must also show, from raw output:
+
+1. Start Capture at the spot issues a nonce, and the row holds the start fix as sent.
+2. The phone's countdown ends at the response's `expires_at`, judged against `server_time`.
+3. A second Start after the warning supersedes the first: two rows, one `SUPERSEDED`.
+4. Start Capture indoors, or with the phone moved away, shows the phone's own failure numbers.
+5. The request log line for the call carries the path only, with no coordinates.

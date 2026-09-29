@@ -2701,3 +2701,100 @@ voucher requests against the real database; the device run proves the end-to-end
 that governs money: one accept, and the loser refused before its wallet opens. Rejected: a
 deterministic re-run with a `--hold` flag, about 15 to 20 minutes and one more funded bounty.
 The gap is carried in BACKLOG.md's Session 18 section.
+
+**D131 — The capture nonce lives in its own table; `assignments.challenge_nonce` is dropped.**
+
+Context. D125 left P3 to say where the nonce lives and whether `challenge_nonce` is renamed
+under D72 or dropped. A nonce has its own issue time, expiry and status and is issued again on
+restart; one column holds one value and no history. `bountycam_dev` on 29 September: two
+`ACTIVE` and one `EXPIRED` assignment, none with `challenge_nonce` set.
+
+Ruling, technical. Migration 12 creates `capture_nonces` (POLICY.md section 17.2), bound to its
+assignment, bounty and Scout by one composite foreign key so the three cannot disagree, and
+drops `challenge_nonce` with its unique constraint. Rejected: renaming the column, which would
+keep a second, unused home for the same concept.
+
+**D132 — Nonce timing: lifetime, deadline buffer, minimum window, grace (Umair, R1 and R2).**
+
+Context. A single "10 minutes before the deadline" rule, combined with a 20-minute nonce, could
+let a Scout start with one minute of capture left.
+
+Ruling (Umair). Three separate settings, in API configuration and never in the phone:
+`nonce_lifetime` 20 minutes, `deadline_buffer` 10 minutes, `minimum_capture_window` 10 minutes.
+Start is allowed while `now <= deadline - deadline_buffer - minimum_capture_window`;
+`expires_at = min(now + nonce_lifetime, deadline - deadline_buffer)`. With the defaults Start
+closes 20 minutes before the deadline and every nonce gives at least 10 minutes. The API exits
+at startup unless `nonce_lifetime >= minimum_capture_window`. The server's clock decides every
+time; responses carry `server_time` so the phone's countdown is independent of its own clock.
+
+Addition, technical. `submission_grace`, 8 minutes: consumption succeeds until `expires_at` plus
+the grace, so evidence captured inside the window can finish uploading after it closes. The API
+exits at startup unless `submission_grace < deadline_buffer`, leaving at least 2 minutes before
+the deadline for verification and `submit_attestation`. It is configuration; Umair may change
+the value without a specification change. This settles MESSAGES.md's open
+`CAPTURE_START_DEADLINE_BUFFER_SECS`: its role is the pair `deadline_buffer` and
+`minimum_capture_window`.
+
+**D133 — The start gate is uncertainty-aware; payment verification is not bound to it (Umair,
+R3).**
+
+Context. Indoors the phone's reported accuracy radius grows from 5 to 15 metres to 20 to 100 or
+more, so a check on the bare point fails Scouts standing inside the store.
+
+Ruling (Umair). The phone offers Start capture only when `effective_distance_m = max(0,
+distance_m - horizontal_accuracy_m)` is at or under `capture_radius_m`, with
+`horizontal_accuracy_m` at or under `max_location_accuracy_m`. The check runs once, at Start;
+nothing afterwards is gated on location. `distance_m` is the haversine distance of SPEC.md
+section 10.1, never a planar comparison of degrees. Initial values: 200 m, the initial
+configured accuracy ceiling, not an intrinsically correct threshold; a 10-second fix timeout; a
+30-second maximum fix age. Failures are distinguished: permission denied, location services off,
+no fix, too imprecise, too far; the phone shows the numbers it judged.
+
+P4 and P5 must use the reported accuracy and must never treat coordinates as exact points, but
+their acceptance rule and ceiling are defined and tested when they are built and need not equal
+the start gate's. The gate asks whether presence is plausible enough to start collecting
+evidence; payment asks whether the evidence is strong enough to pay.
+
+Technical. One function in `packages/shared` (section 10) serves the phone and the server. The
+phone sends its fix with the request; the server re-runs the gate and stores the fix on the
+nonce row, visible to no view, response or log. The fix's age is judged only on the phone,
+against the clock that stamped it: comparing a phone timestamp with the server's clock would
+fail honest Scouts whose phone runs a few seconds off. A failed start never reaches the server,
+so its record is the phone's on-screen numbers.
+
+**D134 — Restarting a capture session (Umair, R4).**
+
+Ruling (Umair). Restarting is allowed, after the warning "Starting again will discard the photos
+from your current capture." The server is authoritative about which nonce is current.
+
+Technical. One transaction supersedes the current nonce and inserts exactly one new one. The
+nonce row's `id` is the capture-session id: D73 rules out a separate capture-session object, and
+the row already carries one value, one issue time and one expiry. The assigned-Scout view serves
+the current nonce back to its holder, so the phone restores a session after an app restart, and
+after a failed restart request it reloads the view before discarding anything: a request can
+reach the server and lose only its response.
+
+**D135 — The completion window has a floor of the deadline buffer plus the minimum window
+(Umair, R6).**
+
+Context. Creation accepted completion windows from 60 seconds. The deadline is the acceptance
+time plus the window, so any window under 20 minutes closes Start at the moment of acceptance:
+the Scout can accept and travel but never capture, and the funds stay locked until expiry.
+
+Ruling (Umair). Creation rejects `completion_window_seconds` below `CAPTURE_DEADLINE_BUFFER_S +
+CAPTURE_MIN_WINDOW_S`, 1200 by default, as `INVALID_WINDOW`. Request validation is amendable
+under D112; no hash changes. The app's default, 7200, is unaffected.
+
+**D136 — P3's live run is deferred to P4's first run (Umair, R5).**
+
+Ruling (Umair). No bounty is funded for P3. P4's first live run carries P3's live acceptance
+items, listed in POLICY.md section 17.12, so they cannot drop out of testing.
+
+**D137 — P3 builds consumption; P4's manifest binding is fixed now.**
+
+Ruling, technical. `consumeCaptureNonce` (POLICY.md section 17.8) is built and tested in P3, so
+every D73 lifecycle test lands before evidence code exists; P4 calls it inside its submission
+transaction. The manifest keys `bounty_id`, `assignment_id` and `capture_nonce`, the nonce as 64
+lowercase hex characters exactly as issued, are fixed now (section 17.9), so P3's format never
+changes. The nonce is 32 bytes from the D54 randomness module; `NOT_ASSIGNED` is 403 because the
+caller can see the bounty but lacks the right, as `FORBIDDEN` is in section 8.7.

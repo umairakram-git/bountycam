@@ -1142,3 +1142,77 @@ negative test is shown red before the gate by a scripted mutation of the check i
      `lon`.
 126. `ASSIGNED_HASH_MISMATCH` for a different expected hash; `ASSIGNED_SHAPE_INVALID` for a
      missing `policy` and for a `lat` with six fraction digits under a recomputed hash.
+
+---
+
+## 10. Location helpers
+
+Session 19 (P3). The start gate of `apps/api/POLICY.md` section 17.5 and `apps/mobile/CAPTURE.md`
+runs these functions on both sides, so the phone and the server cannot disagree (D133). P4 and
+P5 reuse `distanceM`; they do not inherit the gate's thresholds (POLICY.md section 17.9).
+
+### 10.1 `distanceM(aLat, aLon, bLat, bLon): number`
+
+The horizontal distance in metres between two points given in decimal degrees, by the
+haversine formula on a sphere of radius `R = 6371008.8` metres, computed in exactly this order:
+
+1. `rad = Math.PI / 180`; `p1 = aLat * rad`; `p2 = bLat * rad`; `dp = (bLat - aLat) * rad`;
+   `dl = (bLon - aLon) * rad`.
+2. `x = sin(dp / 2) ** 2 + cos(p1) * cos(p2) * sin(dl / 2) ** 2`.
+3. The result is `2 * R * asin(min(1, sqrt(x)))`.
+
+Latitude and longitude are never compared as planar coordinates. Treating the Earth as a sphere
+errs by well under 1 percent at capture-radius scales, far inside any accuracy the phone
+reports. A non-finite argument, a latitude outside -90 to 90 or a longitude outside -180 to 180
+is `LOCATION_INPUT_INVALID`.
+
+### 10.2 `captureStartDecision(distanceM, accuracyM, radiusM, maxAccuracyM)`
+
+Returns `PASS`, `IMPRECISE` or `TOO_FAR`, in this order:
+
+1. Every argument must be finite, `distanceM` and `accuracyM` 0 or more, `radiusM` and
+   `maxAccuracyM` more than 0; otherwise `LOCATION_INPUT_INVALID`.
+2. `accuracyM > maxAccuracyM`: `IMPRECISE`. The ceiling is checked first: past it the
+   uncertainty circle is too wide for the distance rule to mean anything.
+3. `effective = max(0, distanceM - accuracyM)`. `effective <= radiusM`: `PASS`.
+4. Otherwise `TOO_FAR`.
+
+Step 3 passes exactly when the circle of radius `accuracyM` around the fix overlaps the capture
+circle: presence is possible, not proven.
+
+### 10.3 `checkCaptureStart(fix, target, radiusM, maxAccuracyM)`
+
+`fix` is `{ lat: number; lon: number; accuracyM: number }`, as the phone's location module
+reports it. `target` is `{ lat: string; lon: string }`, the policy's strings. Each target string
+must pass `isValidLat` or `isValidLon` (section 8.1), else `LOCATION_INPUT_INVALID`; it is then
+converted with `Number`. The result is `{ decision, distanceM, effectiveDistanceM }`, where
+`distanceM` is section 10.1's from the fix to the target, `decision` is section 10.2's, and
+`effectiveDistanceM` is `max(0, distanceM - accuracyM)`.
+
+Section 6 gains one code, `LOCATION_INPUT_INVALID`, owned by all three functions.
+
+### 10.4 Vectors and tests
+
+Distance vectors, target T = (-33.8567844, 151.2152967), within 0.001 m:
+
+| Vector | From | To | `distanceM` |
+|---|---|---|---|
+| L0 | T | T | 0.000000 |
+| L1 | (0, 0) | (0, 1) | 111195.080234 |
+| L2 | T | (-33.8558844, 151.2152967) | 100.075572 |
+| L3 | T | (-33.8567844, 151.2163967) | 101.574038 |
+| L4 | T | (-33.8547844, 151.2152967) | 222.390160 |
+
+The package's existing test file. The D36 gate becomes `tests 130, pass 130, fail 0`. Each
+negative test is shown red before the gate by a scripted mutation of the check it names.
+
+127. `distanceM` reproduces L0 to L4 within 0.001 m, and L2 with its points swapped.
+128. `captureStartDecision`: (60, 10, 50, 200) `PASS`; (60.001, 10, 50, 200) `TOO_FAR`;
+     (5, 30, 10, 200) `PASS`; (0, 200, 10, 200) `PASS`; (0, 200.001, 10, 200) `IMPRECISE`;
+     (220, 180, 50, 200) `PASS`.
+129. `checkCaptureStart` against T's strings, maximum 200: the fix at T, accuracy 0, radius 10,
+     `PASS` with distance 0; L2's point, accuracy 50, radius 50, `TOO_FAR`, effective distance
+     50.075572; the same with accuracy 51, `PASS`; L4's point, accuracy 180, radius 50, `PASS`;
+     L4's point, accuracy 200.5, radius 5000, `IMPRECISE`.
+130. `LOCATION_INPUT_INVALID`: a `NaN` latitude; latitude 90.5; accuracy -1; radius 0; a target
+     `lat` of `-33.856784`, six fraction digits.

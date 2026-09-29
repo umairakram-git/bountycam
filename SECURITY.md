@@ -93,6 +93,8 @@ May not: move funds; change bounty policy; determine assurance; sign the evidenc
 attestation. If compromised or colluding with a Scout it can weaken freshness by
 issuing earlier than represented, so A1 freshness can no longer be trusted; the
 attester and the on-chain settlement rules retain their separate authorities.
+It also receives the Scout's start fix with each request (`apps/api/POLICY.md` section
+17.5) and stores it on the nonce row, where no view, response or log reads it (D133).
 
 **Relayer** — trusted for liveness only (D2).
 May: pay fees; submit already-authorised transactions; submit the permissionless `release`,
