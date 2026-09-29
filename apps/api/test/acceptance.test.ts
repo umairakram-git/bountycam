@@ -396,12 +396,20 @@ test("05 the assigned-Scout view: public keys plus policy and assignment", async
   const scout = await seedUser(SCOUT_WALLET);
   await reserveFor(scout);
   const view = (await report(scout.token)).json() as Record<string, unknown>;
-  assert.deepEqual(Object.keys(view).sort(), [...PUBLIC_KEYS, "assignment", "policy"].sort());
+  assert.deepEqual(
+    Object.keys(view).sort(),
+    [...PUBLIC_KEYS, "assignment", "capture", "policy"].sort(),
+  );
   const policy = view["policy"] as Record<string, unknown>;
   const hash = Buffer.from(sha256(new TextEncoder().encode(canonicalise(policy)))).toString("hex");
   assert.equal(hash, view["policy_hash"]);
   assert.equal(policy["lat"], fixture.policy["lat"]);
+  const held = await pool.query<{ id: string }>(
+    "SELECT id FROM assignments WHERE bounty_id = $1 AND status = 'ACTIVE'",
+    [fixture.id],
+  );
   assert.deepEqual(view["assignment"], {
+    id: held.rows[0]?.id,
     accepted_at: ACCEPTED_AT.toISOString(),
     deadline: DEADLINE.toISOString(),
   });

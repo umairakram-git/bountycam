@@ -8,6 +8,7 @@ import { authUser, makeRequireAuth } from "../auth/middleware.ts";
 import { UUID_FORM } from "../bounties/extract.ts";
 import { bytesToHex } from "../bounties/policy.ts";
 import { assignedView, ownerView } from "../bounties/views.ts";
+import { captureObject, liveNonce } from "../capture/nonce.ts";
 import type { ChainReader } from "../chain/rpc.ts";
 import type { Clock } from "../clock.ts";
 import type { Config } from "../config.ts";
@@ -94,18 +95,26 @@ export function registerAcceptanceRoutes(app: FastifyInstance, deps: AcceptanceR
         canonicalJson: fresh.canonical_json,
       };
       if (fresh.state === "ACCEPTED") {
-        const held = await pool.query<{ accepted_at: Date; deadline: Date }>(
-          "SELECT accepted_at, deadline FROM assignments WHERE bounty_id = $1 " +
+        const held = await pool.query<{ id: string; accepted_at: Date; deadline: Date }>(
+          "SELECT id, accepted_at, deadline FROM assignments WHERE bounty_id = $1 " +
             "AND scout_id = $2 AND status = 'ACTIVE' AND accepted_at IS NOT NULL",
           [id, caller.id],
         );
         const acceptance = held.rows[0];
         if (acceptance !== undefined) {
+          const now = clock.now();
           return reply.status(200).send(
             assignedView({
               ...fields,
+              assignmentId: acceptance.id,
               acceptedAt: acceptance.accepted_at,
               deadline: acceptance.deadline,
+              capture: captureObject(
+                config.capture,
+                acceptance.deadline,
+                now,
+                await liveNonce(pool, acceptance.id, now),
+              ),
             }),
           );
         }

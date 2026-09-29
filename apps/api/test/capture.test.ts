@@ -16,7 +16,9 @@ import { eligibilitySigner } from "../src/chain/signer.ts";
 import type { Clock } from "../src/clock.ts";
 import { loadConfig } from "../src/config.ts";
 import type { SeekerCheck } from "../src/eligibility/deps.ts";
-import type { Randomness } from "../src/randomness.ts";
+import { systemRandomness, type Randomness } from "../src/randomness.ts";
+import { consumeCaptureNonce, type ConsumeInput } from "../src/capture/nonce.ts";
+import { distanceM, formatCoordinate } from "@hackathon/shared";
 
 // POLICY.md section 17.11. The seeds are the recorded Session 18 accept, as in
 // acceptance.test.ts: the bounty is re-created through the API under a
@@ -121,7 +123,8 @@ const chain: ChainReader = {
 const bytesQueue: Uint8Array[] = [];
 const uuidQueue: string[] = [];
 const randomness: Randomness = {
-  randomBytes: (length) => bytesQueue.shift() ?? Uint8Array.from(randomBytes(length)),
+  // Unqueued calls reach the production module itself (test 06).
+  randomBytes: (length) => bytesQueue.shift() ?? systemRandomness.randomBytes(length),
   randomUUID: () => uuidQueue.shift() ?? randomUUID(),
 };
 
@@ -286,15 +289,6 @@ async function seedAccepted(): Promise<Accepted> {
   return { requester, scout, assignmentId };
 }
 
-interface NonceRow {
-  assignment_id: string;
-  bounty_id: string;
-  scout_id: string;
-  value: Buffer;
-  status: string;
-  consumed_at: Date | null;
-}
-
 /** A row by SQL, for the constraint tests; `over` replaces any column. */
 async function insertNonce(a: Accepted, over: Partial<Record<string, unknown>> = {}) {
   const row: Record<string, unknown> = {
@@ -327,6 +321,406 @@ async function violates(promise: Promise<unknown>, constraint: string): Promise<
     return true;
   });
 }
+
+// --- issuance (tests 01 to 07) ---
+
+const POLICY_LAT = fixture.policy.lat;
+const POLICY_LON = fixture.policy.lon;
+const RADIUS = fixture.policy["capture_radius_m"] as number;
+
+function fixBody(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    lat: POLICY_LAT,
+    lon: POLICY_LON,
+    horizontal_accuracy_m: 12,
+    fixed_at: new Date(nowMs - 2000).toISOString(),
+    ...over,
+  };
+}
+
+// A default parameter would replace an explicit undefined, so "no body" is a marker.
+const NO_BODY = Symbol("no body");
+
+async function start(token: string, payload: unknown = fixBody()) {
+  return app.inject({
+    method: "POST",
+    url: `/bounties/${fixture.id}/capture-nonce`,
+    headers: { authorization: `Bearer ${token}` },
+    ...(payload === NO_BODY ? {} : { payload: payload as Record<string, unknown> }),
+  });
+}
+
+interface StoredNonce {
+  id: string;
+  assignment_id: string;
+  bounty_id: string;
+  scout_id: string;
+  deployment_id: number;
+  value: Buffer;
+  status: string;
+  issued_at: Date;
+  expires_at: Date;
+  consumed_at: Date | null;
+  start_lat: string;
+  start_lon: string;
+  start_accuracy_m: number;
+  start_fixed_at: Date;
+}
+
+async function nonces(): Promise<StoredNonce[]> {
+  const r = await pool.query<StoredNonce>(
+    "SELECT * FROM capture_nonces WHERE bounty_id = $1 ORDER BY issued_at, status",
+    [fixture.id],
+  );
+  return r.rows;
+}
+
+function bytes(fill: number): Uint8Array {
+  return new Uint8Array(32).fill(fill);
+}
+
+const CAPTURE_KEYS = [
+  "capture_nonce",
+  "location_fix_timeout_s",
+  "max_location_accuracy_m",
+  "max_location_age_s",
+  "server_time",
+  "start_closes_at",
+];
+
+test("01 the holder starts: 201, the injected value, expiry after 1200 s, the row", async () => {
+  const a = await seedAccepted();
+  bytesQueue.push(bytes(0xab));
+  const body = fixBody();
+  const res = await start(a.scout.token, body);
+  assert.equal(res.statusCode, 201, res.body);
+  const cap = res.json().capture as Record<string, unknown>;
+  assert.deepEqual(Object.keys(res.json() as object), ["capture"]);
+  assert.deepEqual(Object.keys(cap).sort(), CAPTURE_KEYS);
+  const n = cap["capture_nonce"] as Record<string, string>;
+  assert.deepEqual(Object.keys(n).sort(), ["expires_at", "id", "issued_at", "value"]);
+  assert.equal(n["value"], "ab".repeat(32));
+  assert.equal(n["issued_at"], BASE.toISOString());
+  assert.equal(n["expires_at"], new Date(BASE.getTime() + 1_200_000).toISOString());
+  const rows = await nonces();
+  assert.equal(rows.length, 1);
+  const r = rows[0]!;
+  assert.equal(r.id, n["id"]);
+  assert.equal(r.status, "ACTIVE");
+  assert.equal(r.assignment_id, a.assignmentId);
+  assert.equal(r.bounty_id, fixture.id);
+  assert.equal(r.scout_id, a.scout.id);
+  assert.equal(r.deployment_id, 2);
+  assert.equal(r.value.toString("hex"), "ab".repeat(32));
+  assert.equal(r.start_lat, body["lat"]);
+  assert.equal(r.start_lon, body["lon"]);
+  assert.equal(r.start_accuracy_m, 12);
+  assert.equal(r.start_fixed_at.toISOString(), body["fixed_at"]);
+});
+
+test("02 25 minutes before the deadline: expiry is the deadline minus 600 s", async () => {
+  const a = await seedAccepted();
+  nowMs = DEADLINE.getTime() - 25 * 60_000;
+  const res = await start(a.scout.token);
+  assert.equal(res.statusCode, 201, res.body);
+  const n = res.json().capture.capture_nonce as Record<string, string>;
+  assert.equal(n["expires_at"], new Date(DEADLINE.getTime() - 600_000).toISOString());
+});
+
+test("03 the latest start gives exactly 600 s; one millisecond later is closed", async () => {
+  const a = await seedAccepted();
+  nowMs = DEADLINE.getTime() - 1_200_000;
+  const res = await start(a.scout.token);
+  assert.equal(res.statusCode, 201, res.body);
+  const n = res.json().capture.capture_nonce as Record<string, string>;
+  assert.equal(Date.parse(n["expires_at"]!) - Date.parse(n["issued_at"]!), 600_000);
+  nowMs += 1;
+  const late = await start(a.scout.token);
+  assert.equal(late.statusCode, 409);
+  assert.equal(late.json().error, "CAPTURE_WINDOW_CLOSED");
+  assert.equal((await nonces()).length, 1);
+});
+
+test("04 a second start before expiry supersedes the first", async () => {
+  const a = await seedAccepted();
+  bytesQueue.push(bytes(1), bytes(2));
+  assert.equal((await start(a.scout.token)).statusCode, 201);
+  nowMs += 60_000;
+  assert.equal((await start(a.scout.token)).statusCode, 201);
+  const rows = await nonces();
+  assert.deepEqual(rows.map((r) => r.status), ["SUPERSEDED", "ACTIVE"]);
+  assert.notEqual(rows[0]!.value.toString("hex"), rows[1]!.value.toString("hex"));
+});
+
+test("05 a second start after the first expired: the first is SUPERSEDED", async () => {
+  const a = await seedAccepted();
+  assert.equal((await start(a.scout.token)).statusCode, 201);
+  nowMs += 1_201_000;
+  assert.equal((await start(a.scout.token)).statusCode, 201);
+  assert.deepEqual((await nonces()).map((r) => r.status), ["SUPERSEDED", "ACTIVE"]);
+});
+
+test("06 the production randomness module gives two different values", async () => {
+  const a = await seedAccepted();
+  assert.equal(bytesQueue.length, 0);
+  const first = (await start(a.scout.token)).json().capture.capture_nonce.value as string;
+  const second = (await start(a.scout.token)).json().capture.capture_nonce.value as string;
+  assert.match(first, /^[0-9a-f]{64}$/);
+  assert.notEqual(first, second);
+});
+
+test("07 two starts sent together: both 201, one SUPERSEDED and one ACTIVE", async () => {
+  const a = await seedAccepted();
+  const [x, y] = await Promise.all([start(a.scout.token), start(a.scout.token)]);
+  assert.equal(x.statusCode, 201, x.body);
+  assert.equal(y.statusCode, 201, y.body);
+  assert.deepEqual((await nonces()).map((r) => r.status).sort(), ["ACTIVE", "SUPERSEDED"]);
+});
+
+// --- refusals (tests 08 to 16) ---
+
+async function refused(res: { statusCode: number; json(): unknown }, status: number, code: string) {
+  assert.equal(res.statusCode, status);
+  assert.equal((res.json() as { error: string }).error, code);
+}
+
+test("08 a user with no assignment, and the requester: NOT_ASSIGNED", async () => {
+  const a = await seedAccepted();
+  const other = await seedUser();
+  await refused(await start(other.token), 403, "NOT_ASSIGNED");
+  await refused(await start(a.requester.token), 403, "NOT_ASSIGNED");
+  assert.equal((await nonces()).length, 0);
+});
+
+test("09 a reservation only: BOUNTY_NOT_CAPTURABLE", async () => {
+  const a = await seedAccepted();
+  await pool.query("UPDATE bounties SET state = 'AVAILABLE' WHERE id = $1", [fixture.id]);
+  await pool.query(
+    "UPDATE assignments SET accepted_at = NULL, deadline = NULL WHERE id = $1",
+    [a.assignmentId],
+  );
+  await refused(await start(a.scout.token), 409, "BOUNTY_NOT_CAPTURABLE");
+});
+
+test("10 EXPIRED, SUBMITTED, PAID: BOUNTY_NOT_CAPTURABLE; CANCELLED: NOT_FOUND", async () => {
+  const a = await seedAccepted();
+  for (const state of ["EXPIRED", "SUBMITTED", "PAID"]) {
+    await pool.query("UPDATE bounties SET state = $2 WHERE id = $1", [fixture.id, state]);
+    await refused(await start(a.scout.token), 409, "BOUNTY_NOT_CAPTURABLE");
+  }
+  await pool.query("UPDATE bounties SET state = 'CANCELLED' WHERE id = $1", [fixture.id]);
+  await refused(await start(a.scout.token), 404, "NOT_FOUND");
+  assert.equal((await nonces()).length, 0);
+});
+
+test("11 an earlier assignment, another Scout holding the acceptance: NOT_ASSIGNED", async () => {
+  const a = await seedAccepted();
+  const other = await seedUser();
+  await pool.query("UPDATE assignments SET status = 'EXPIRED' WHERE id = $1", [a.assignmentId]);
+  await pool.query(
+    `INSERT INTO assignments (bounty_id, scout_id, status, expires_at, accepted_at, deadline)
+     VALUES ($1, $2, 'ACTIVE', $3, $3, $4)`,
+    [fixture.id, other.id, BASE, DEADLINE],
+  );
+  await refused(await start(a.scout.token), 403, "NOT_ASSIGNED");
+});
+
+test("12 malformed bodies: INVALID_REQUEST", async () => {
+  const a = await seedAccepted();
+  const cases: unknown[] = [
+    NO_BODY,
+    {},
+    fixBody({ extra: 1 }),
+    fixBody({ horizontal_accuracy_m: "12" }),
+    fixBody({ horizontal_accuracy_m: -1 }),
+    fixBody({ fixed_at: "2026-09-28T11:59:58.000" }),
+  ];
+  for (const payload of cases) {
+    await refused(await start(a.scout.token, payload), 400, "INVALID_REQUEST");
+  }
+  assert.equal((await nonces()).length, 0);
+});
+
+test("13 a latitude with six fraction digits: INVALID_GPS", async () => {
+  const a = await seedAccepted();
+  await refused(await start(a.scout.token, fixBody({ lat: "-33.711618" })), 400, "INVALID_GPS");
+});
+
+test("14 accuracy 200.5: LOCATION_TOO_IMPRECISE; accuracy 200: 201", async () => {
+  const a = await seedAccepted();
+  await refused(
+    await start(a.scout.token, fixBody({ horizontal_accuracy_m: 200.5 })),
+    400,
+    "LOCATION_TOO_IMPRECISE",
+  );
+  assert.equal((await start(a.scout.token, fixBody({ horizontal_accuracy_m: 200 }))).statusCode, 201);
+});
+
+test("15 north by 0.002: accuracy distance - 151 too far, distance - 149 passes", async () => {
+  const a = await seedAccepted();
+  const lat = formatCoordinate(Number(POLICY_LAT) + 0.002, "lat");
+  const d = distanceM(Number(lat), Number(POLICY_LON), Number(POLICY_LAT), Number(POLICY_LON));
+  assert.ok(d > 200 && d < 250);
+  await refused(
+    await start(a.scout.token, fixBody({ lat, horizontal_accuracy_m: d - RADIUS - 1 })),
+    400,
+    "LOCATION_TOO_FAR",
+  );
+  assert.equal((await nonces()).length, 0);
+  const ok = await start(a.scout.token, fixBody({ lat, horizontal_accuracy_m: d - RADIUS + 1 }));
+  assert.equal(ok.statusCode, 201, ok.body);
+});
+
+test("16 no token: TOKEN_MISSING; a malformed id and an unknown id: NOT_FOUND", async () => {
+  const a = await seedAccepted();
+  const bare = await app.inject({
+    method: "POST",
+    url: `/bounties/${fixture.id}/capture-nonce`,
+    payload: fixBody(),
+  });
+  await refused(bare, 401, "TOKEN_MISSING");
+  for (const id of ["not-a-uuid", randomUUID()]) {
+    const res = await app.inject({
+      method: "POST",
+      url: `/bounties/${id}/capture-nonce`,
+      headers: { authorization: `Bearer ${a.scout.token}` },
+      payload: fixBody(),
+    });
+    await refused(res, 404, "NOT_FOUND");
+  }
+});
+
+// --- views and privacy (tests 17 and 18) ---
+
+async function view(token: string) {
+  const res = await app.inject({
+    method: "GET",
+    url: `/bounties/${fixture.id}`,
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  return res;
+}
+
+test("17 the assigned-Scout view's capture key follows the session", async () => {
+  const a = await seedAccepted();
+  const before = (await view(a.scout.token)).json() as Record<string, any>;
+  assert.deepEqual(Object.keys(before["capture"]).sort(), CAPTURE_KEYS);
+  assert.equal(before["capture"]["capture_nonce"], null);
+  assert.equal(before["capture"]["server_time"], BASE.toISOString());
+  assert.equal(
+    before["capture"]["start_closes_at"],
+    new Date(DEADLINE.getTime() - 1_200_000).toISOString(),
+  );
+  assert.equal(before["assignment"]["id"], a.assignmentId);
+  const issued = (await start(a.scout.token)).json().capture.capture_nonce;
+  const during = (await view(a.scout.token)).json() as Record<string, any>;
+  assert.deepEqual(during["capture"]["capture_nonce"], issued);
+  nowMs = Date.parse(issued.expires_at as string);
+  const after = (await view(a.scout.token)).json() as Record<string, any>;
+  assert.equal(after["capture"]["capture_nonce"], null);
+});
+
+test("18 the start fix appears in no response and no log line", async () => {
+  const a = await seedAccepted();
+  const lat = formatCoordinate(Number(POLICY_LAT) + 0.0001, "lat");
+  const lon = formatCoordinate(Number(POLICY_LON) + 0.0001, "lon");
+  const fixedAt = "2026-09-28T11:59:57.321Z";
+  const payload = fixBody({ lat, lon, horizontal_accuracy_m: 17.25, fixed_at: fixedAt });
+  const bodies = [(await start(a.scout.token, payload)).body];
+  bodies.push((await view(a.scout.token)).body);
+  bodies.push((await view(a.requester.token)).body);
+  bodies.push((await view((await seedUser()).token)).body);
+  const stored = (await nonces())[0]!;
+  assert.equal(stored.start_lat, lat);
+  for (const text of [...bodies, captured]) {
+    for (const secret of [lat, lon, "17.25", fixedAt]) {
+      assert.ok(!text.includes(secret), "found " + secret);
+    }
+  }
+});
+
+// --- consumption (tests 19 to 23) ---
+
+async function consume(a: Accepted, valueHex: string, over: Partial<ConsumeInput> = {}) {
+  const client = await pool.connect();
+  try {
+    return await consumeCaptureNonce(
+      client,
+      {
+        value: Uint8Array.from(Buffer.from(valueHex, "hex")),
+        bountyId: fixture.id,
+        assignmentId: a.assignmentId,
+        scoutId: a.scout.id,
+        deploymentId: 2,
+        ...over,
+      },
+      clock.now(),
+      config.capture.submissionGraceS,
+    );
+  } finally {
+    client.release();
+  }
+}
+
+async function issue(a: Accepted): Promise<{ value: string; expires_at: string }> {
+  const res = await start(a.scout.token);
+  assert.equal(res.statusCode, 201, res.body);
+  return res.json().capture.capture_nonce as { value: string; expires_at: string };
+}
+
+test("19 a fresh nonce is CONSUMED once; again it is ALREADY_CONSUMED", async () => {
+  const a = await seedAccepted();
+  const n = await issue(a);
+  nowMs += 300_000;
+  assert.equal(await consume(a, n.value), "CONSUMED");
+  const row = (await nonces())[0]!;
+  assert.equal(row.status, "CONSUMED");
+  assert.equal(row.consumed_at?.getTime(), nowMs);
+  assert.equal(await consume(a, n.value), "ALREADY_CONSUMED");
+});
+
+test("20 the grace: one millisecond inside is CONSUMED; at its end, EXPIRED", async () => {
+  const a = await seedAccepted();
+  const first = await issue(a);
+  nowMs = Date.parse(first.expires_at) + 480_000 - 1;
+  assert.equal(await consume(a, first.value), "CONSUMED");
+  nowMs = BASE.getTime();
+  const second = await issue(a);
+  nowMs = Date.parse(second.expires_at) + 480_000;
+  assert.equal(await consume(a, second.value), "EXPIRED");
+  const rows = await pool.query<{ status: string }>(
+    "SELECT status FROM capture_nonces WHERE value = decode($1, 'hex')",
+    [second.value],
+  );
+  assert.equal(rows.rows[0]?.status, "EXPIRED");
+});
+
+test("21 a superseded value: SUPERSEDED", async () => {
+  const a = await seedAccepted();
+  const first = await issue(a);
+  await issue(a);
+  assert.equal(await consume(a, first.value), "SUPERSEDED");
+});
+
+test("22 another bounty, Scout, assignment or deployment: BINDING_MISMATCH", async () => {
+  const a = await seedAccepted();
+  const n = await issue(a);
+  for (const over of [
+    { bountyId: randomUUID() },
+    { scoutId: randomUUID() },
+    { assignmentId: randomUUID() },
+    { deploymentId: 3 },
+  ]) {
+    assert.equal(await consume(a, n.value, over), "BINDING_MISMATCH");
+  }
+  assert.equal((await nonces())[0]?.status, "ACTIVE");
+});
+
+test("23 a value never issued: UNKNOWN", async () => {
+  const a = await seedAccepted();
+  assert.equal(await consume(a, "cd".repeat(32)), "UNKNOWN");
+});
 
 // --- constraints and configuration (tests 24 and 25) ---
 

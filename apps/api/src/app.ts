@@ -9,6 +9,7 @@ import type { EligibilityDeps } from "./eligibility/deps.ts";
 import { registerVoucherRoutes } from "./eligibility/routes.ts";
 import { registerFundingRoutes } from "./funding/routes.ts";
 import { registerAcceptanceRoutes } from "./acceptance/routes.ts";
+import { registerCaptureRoutes } from "./capture/routes.ts";
 
 export interface AppDeps {
   config: Config;
@@ -76,6 +77,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       clock: deps.clock,
       chain: deps.eligibility.chain,
       programId: deps.eligibility.config.programId,
+    });
+    // POLICY.md 17.6: deployment_id comes from the configuration account.
+    registerCaptureRoutes(app, {
+      pool: deps.pool,
+      config: deps.config,
+      clock: deps.clock,
+      randomness: deps.randomness,
+      deploymentId: deps.eligibility.deployment.deploymentId,
     });
   }
   return app;

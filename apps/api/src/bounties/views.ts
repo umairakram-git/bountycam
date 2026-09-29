@@ -145,8 +145,11 @@ export function listItem(input: ListItemInput): Record<string, unknown> {
 }
 
 export interface AssignedViewInput extends PublicViewInput {
+  assignmentId: string;
   acceptedAt: Date;
   deadline: Date;
+  // POLICY.md section 17.7 (D134): built by captureObject in capture/nonce.ts.
+  capture: Record<string, unknown>;
 }
 
 // POLICY.md section 16.4 (D127): the assigned-Scout view. The public view plus
@@ -158,8 +161,10 @@ export function assignedView(input: AssignedViewInput): Record<string, unknown> 
     ...publicView(input),
     policy: JSON.parse(input.canonicalJson) as unknown,
     assignment: {
+      id: input.assignmentId,
       accepted_at: input.acceptedAt.toISOString(),
       deadline: input.deadline.toISOString(),
     },
+    capture: input.capture,
   };
 }

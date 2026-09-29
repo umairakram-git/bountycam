@@ -22,6 +22,7 @@ import {
 } from "./policy.ts";
 import { snapLat, snapLon } from "./snap.ts";
 import { assignedView, listItem, ownerView, publicView } from "./views.ts";
+import { captureObject, liveNonce } from "../capture/nonce.ts";
 import type { EligibilityDeps } from "../eligibility/deps.ts";
 import { projectFunding, type ProjectionDeps } from "../funding/project.ts";
 
@@ -577,13 +578,21 @@ export function registerBountyRoutes(
       // Step 4a (POLICY.md 16.4, D127): the Scout holding the acceptance gets
       // the assigned-Scout view, with the exact location inside the policy.
       if (row.state === "ACCEPTED") {
-        const held = await pool.query<{ accepted_at: Date; deadline: Date }>(
-          "SELECT accepted_at, deadline FROM assignments WHERE bounty_id = $1 " +
+        const held = await pool.query<{ id: string; accepted_at: Date; deadline: Date }>(
+          "SELECT id, accepted_at, deadline FROM assignments WHERE bounty_id = $1 " +
             "AND scout_id = $2 AND status = 'ACTIVE' AND accepted_at IS NOT NULL",
           [row.id, caller.id],
         );
         const acceptance = held.rows[0];
         if (acceptance !== undefined) {
+          // Section 17.7: the live capture session, if any, from the server's clock.
+          const now = clock.now();
+          const capture = captureObject(
+            config.capture,
+            acceptance.deadline,
+            now,
+            await liveNonce(pool, acceptance.id, now),
+          );
           return reply.status(200).send(
             assignedView({
               id: row.id,
@@ -594,8 +603,10 @@ export function registerBountyRoutes(
               createdAt: row.created_at,
               policyHashHex: bytesToHex(row.policy_hash),
               canonicalJson: row.canonical_json,
+              assignmentId: acceptance.id,
               acceptedAt: acceptance.accepted_at,
               deadline: acceptance.deadline,
+              capture,
             }),
           );
         }
