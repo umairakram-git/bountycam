@@ -23,6 +23,7 @@ function migrate(...args: string[]): string {
 const expectedTables = [
   "assignments",
   "bounties",
+  "capture_nonces",
   "decisions",
   "evidence_items",
   "evidence_requirements",
@@ -62,6 +63,12 @@ test("migrations apply to a scratch database and roll back cleanly", () => {
       "SELECT count(*) FROM pg_type WHERE typname = 'bounty_state'",
     );
     assert.equal(enumCount, "0", "bounty_state enum not dropped on rollback");
+
+    const nonceEnum = psql(
+      dbName,
+      "SELECT count(*) FROM pg_type WHERE typname = 'capture_nonce_status'",
+    );
+    assert.equal(nonceEnum, "0", "capture_nonce_status enum not dropped on rollback");
   } finally {
     psql("postgres", `DROP DATABASE IF EXISTS ${dbName}`);
   }

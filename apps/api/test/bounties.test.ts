@@ -724,7 +724,7 @@ test("29 each window below minimum and above maximum is INVALID_WINDOW", async (
     ["acceptance_window_seconds", 2_592_001],
     ["challenge_window_seconds", 59],
     ["challenge_window_seconds", 86_401],
-    ["completion_window_seconds", 59],
+    ["completion_window_seconds", 1199],
     ["completion_window_seconds", 2_592_001],
   ];
   for (const [field, value] of cases) {
@@ -1935,4 +1935,14 @@ test("80 an AVAILABLE row with a null cutoff is excluded; a control row is liste
   const ids = await discoveredIds(viewer.token);
   assert.ok(ids.includes(control));
   assert.ok(!ids.includes(id));
+});
+
+test("81 a completion window at the section 17.4 floor creates", async () => {
+  // The floor is the production parser's default, not a test literal (D135).
+  assert.equal(config.capture.deadlineBufferS + config.capture.minWindowS, 1200);
+  const requester = await seedRequester();
+  const body = validBody();
+  body.policy["completion_window_seconds"] = 1200;
+  const res = await createBounty(requester.token, body);
+  assert.equal(res.statusCode, 201, res.body);
 });

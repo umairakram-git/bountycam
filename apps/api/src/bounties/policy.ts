@@ -30,6 +30,8 @@ const UUID_V4 =
 export interface PolicyLimits {
   cluster: string;
   settlementMint: string;
+  // Section 17.4 (D135): CAPTURE_DEADLINE_BUFFER_S + CAPTURE_MIN_WINDOW_S.
+  minCompletionWindowSeconds: number;
 }
 
 // Extracted field by field from the request body at step 2; the raw body
@@ -104,7 +106,7 @@ export function validatePolicyFields(
     return "CLUSTER_NOT_ALLOWED";
   }
   if (
-    input.completionWindowSeconds < 60 ||
+    input.completionWindowSeconds < limits.minCompletionWindowSeconds ||
     input.completionWindowSeconds > 2_592_000
   ) {
     return "INVALID_WINDOW";

@@ -8,7 +8,7 @@ import { base58 } from "@scure/base";
 import { createSignInMessageText } from "@solana/wallet-standard-util";
 import { SignJWT, jwtVerify, base64url } from "jose";
 import { buildApp } from "../src/app.ts";
-import type { Config } from "../src/config.ts";
+import { loadCaptureConfig, type Config } from "../src/config.ts";
 import type { Clock } from "../src/clock.ts";
 
 // --- scratch database, same pattern as migrations.test.ts ---
@@ -37,6 +37,7 @@ const config: Config = {
   jwtSecret,
   jwtIssuer: "bountycam-api",
   jwtAudience: "bountycam-app",
+  capture: loadCaptureConfig({}),
 };
 
 // --- keys: the AUTH.md section 12 vector key (TEST KEY ONLY), plus one

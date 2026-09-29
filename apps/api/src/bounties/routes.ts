@@ -274,6 +274,7 @@ export function registerBountyRoutes(
   const limits: PolicyLimits = {
     cluster: config.cluster,
     settlementMint: config.settlementMint,
+    minCompletionWindowSeconds: config.capture.deadlineBufferS + config.capture.minWindowS,
   };
 
   app.post("/bounties", { preHandler: requireAuth }, async (request, reply) => {

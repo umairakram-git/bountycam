@@ -9,6 +9,18 @@ import { isBase58For32Bytes } from "./base58.ts";
 // ATTESTER_PUBKEYS is deliberately absent (D108). The policy carries no
 // attester, so the variable is neither read nor validated; leaving it set in an
 // environment file has no effect.
+// POLICY.md section 17.3 (D132, D133): the capture nonce's timing and the
+// start gate's limits. Operational configuration, never policy fields.
+export interface CaptureConfig {
+  readonly nonceLifetimeS: number;
+  readonly deadlineBufferS: number;
+  readonly minWindowS: number;
+  readonly submissionGraceS: number;
+  readonly maxLocationAccuracyM: number;
+  readonly locationFixTimeoutS: number;
+  readonly maxLocationAgeS: number;
+}
+
 export interface Config {
   readonly siwsDomain: string;
   readonly allowedChains: ReadonlySet<string>;
@@ -17,9 +29,44 @@ export interface Config {
   readonly jwtAudience: string;
   readonly cluster: string;
   readonly settlementMint: string;
+  readonly capture: CaptureConfig;
 }
 
 const SECRET_HEX = /^[0-9a-f]{64}$/;
+// A positive integer: no sign, no leading zero, no fraction, at most nine
+// digits so the value stays well inside the safe integer range.
+const POSITIVE_INT = /^[1-9][0-9]{0,8}$/;
+
+function positiveInt(
+  env: Record<string, string | undefined>,
+  key: string,
+  fallback: number,
+): number {
+  const raw = env[key];
+  if (raw === undefined || raw === "") return fallback;
+  if (!POSITIVE_INT.test(raw)) throw new Error(`${key} must be a positive integer`);
+  return Number(raw);
+}
+
+// Section 17.3: seven optional keys and two invariants, checked before listening.
+export function loadCaptureConfig(env: Record<string, string | undefined>): CaptureConfig {
+  const capture: CaptureConfig = {
+    nonceLifetimeS: positiveInt(env, "CAPTURE_NONCE_LIFETIME_S", 1200),
+    deadlineBufferS: positiveInt(env, "CAPTURE_DEADLINE_BUFFER_S", 600),
+    minWindowS: positiveInt(env, "CAPTURE_MIN_WINDOW_S", 600),
+    submissionGraceS: positiveInt(env, "CAPTURE_SUBMISSION_GRACE_S", 480),
+    maxLocationAccuracyM: positiveInt(env, "LOCATION_MAX_ACCURACY_M", 200),
+    locationFixTimeoutS: positiveInt(env, "LOCATION_FIX_TIMEOUT_S", 10),
+    maxLocationAgeS: positiveInt(env, "LOCATION_MAX_AGE_S", 30),
+  };
+  if (capture.nonceLifetimeS < capture.minWindowS) {
+    throw new Error("CAPTURE_NONCE_LIFETIME_S must be at least CAPTURE_MIN_WINDOW_S");
+  }
+  if (capture.submissionGraceS >= capture.deadlineBufferS) {
+    throw new Error("CAPTURE_SUBMISSION_GRACE_S must be less than CAPTURE_DEADLINE_BUFFER_S");
+  }
+  return capture;
+}
 
 export function loadConfig(env: Record<string, string | undefined>): Config {
   const secretPath = env["JWT_SECRET_PATH"];
@@ -56,5 +103,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     jwtAudience: env["JWT_AUDIENCE"] ?? "bountycam-app",
     cluster: env["SOLANA_CLUSTER"] ?? "devnet",
     settlementMint,
+    capture: loadCaptureConfig(env),
   };
 }
