@@ -37,6 +37,9 @@ import {
   expectedAcceptKeys,
   ED25519_PROGRAM_ID,
   verifyAssignedPolicy,
+  distanceM,
+  captureStartDecision,
+  checkCaptureStart,
 } from "./index.js";
 import type {
   CreatedBountyExpectation,
@@ -1629,6 +1632,59 @@ describe("verifyAssignedPolicy (SPEC.md 9.5)", () => {
     rejectsWith(
       () => verifyAssignedPolicy(tampered, fromHex(tampered.policy_hash)),
       "ASSIGNED_SHAPE_INVALID",
+    );
+  });
+});
+
+describe("location helpers (SPEC.md 10)", () => {
+  const T = { lat: -33.8567844, lon: 151.2152967 };
+  const TS = { lat: "-33.8567844", lon: "151.2152967" };
+  const L2 = { lat: -33.8558844, lon: 151.2152967 };
+  const L4 = { lat: -33.8547844, lon: 151.2152967 };
+  const near = (actual: number, expected: number) =>
+    assert.ok(Math.abs(actual - expected) <= 0.001, `${actual} is not within 0.001 of ${expected}`);
+
+  test("127 distanceM reproduces L0 to L4 and is symmetric", () => {
+    near(distanceM(T.lat, T.lon, T.lat, T.lon), 0);
+    near(distanceM(0, 0, 0, 1), 111195.080234);
+    near(distanceM(T.lat, T.lon, L2.lat, L2.lon), 100.075572);
+    near(distanceM(T.lat, T.lon, -33.8567844, 151.2163967), 101.574038);
+    near(distanceM(T.lat, T.lon, L4.lat, L4.lon), 222.39016);
+    near(distanceM(L2.lat, L2.lon, T.lat, T.lon), 100.075572);
+  });
+
+  test("128 captureStartDecision at its boundaries", () => {
+    assert.equal(captureStartDecision(60, 10, 50, 200), "PASS");
+    assert.equal(captureStartDecision(60.001, 10, 50, 200), "TOO_FAR");
+    assert.equal(captureStartDecision(5, 30, 10, 200), "PASS");
+    assert.equal(captureStartDecision(0, 200, 10, 200), "PASS");
+    assert.equal(captureStartDecision(0, 200.001, 10, 200), "IMPRECISE");
+    assert.equal(captureStartDecision(220, 180, 50, 200), "PASS");
+  });
+
+  test("129 checkCaptureStart against the target's strings", () => {
+    const atT = checkCaptureStart({ ...T, accuracyM: 0 }, TS, 10, 200);
+    assert.equal(atT.decision, "PASS");
+    near(atT.distanceM, 0);
+    const far = checkCaptureStart({ ...L2, accuracyM: 50 }, TS, 50, 200);
+    assert.equal(far.decision, "TOO_FAR");
+    near(far.effectiveDistanceM, 50.075572);
+    assert.equal(checkCaptureStart({ ...L2, accuracyM: 51 }, TS, 50, 200).decision, "PASS");
+    assert.equal(checkCaptureStart({ ...L4, accuracyM: 180 }, TS, 50, 200).decision, "PASS");
+    assert.equal(
+      checkCaptureStart({ ...L4, accuracyM: 200.5 }, TS, 5000, 200).decision,
+      "IMPRECISE",
+    );
+  });
+
+  test("130 LOCATION_INPUT_INVALID", () => {
+    rejectsWith(() => distanceM(Number.NaN, 0, 0, 0), "LOCATION_INPUT_INVALID");
+    rejectsWith(() => distanceM(90.5, 0, 0, 0), "LOCATION_INPUT_INVALID");
+    rejectsWith(() => captureStartDecision(10, -1, 50, 200), "LOCATION_INPUT_INVALID");
+    rejectsWith(() => captureStartDecision(10, 5, 0, 200), "LOCATION_INPUT_INVALID");
+    rejectsWith(
+      () => checkCaptureStart({ ...T, accuracyM: 5 }, { ...TS, lat: "-33.856784" }, 50, 200),
+      "LOCATION_INPUT_INVALID",
     );
   });
 });

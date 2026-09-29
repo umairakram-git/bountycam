@@ -468,3 +468,6 @@ export * from "./funding.js";
 
 // SPEC.md section 9: the acceptance-path helpers (Session 18, D127).
 export * from "./acceptance.js";
+
+// SPEC.md section 10: the location helpers (Session 19, D133).
+export * from "./location.js";
