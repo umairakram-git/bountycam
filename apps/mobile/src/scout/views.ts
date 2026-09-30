@@ -88,14 +88,18 @@ export function asPublicBounty(body: unknown): PublicBounty | undefined {
 
 /** The assigned-Scout view's display fields, read after verifyAssignedPolicy passed. */
 export function missionDetails(body: unknown): {
+  id: string;
   title: string;
   rewardAmount: string;
   deadline: string;
+  captureRadiusM: number;
   prompts: string[];
 } {
   const policy = get(body, 'policy');
   const requirements = get(policy, 'evidence_requirements');
   return {
+    id: str(get(body, 'id')),
+    captureRadiusM: num(get(policy, 'capture_radius_m')),
     title: str(get(body, 'title')),
     rewardAmount: str(get(policy, 'reward_amount')),
     deadline: str(get(get(body, 'assignment'), 'deadline')),

@@ -370,7 +370,9 @@ export default function App() {
         view={mission.view}
         lat={mission.lat}
         lon={mission.lon}
+        token={session?.token ?? ''}
         onBack={() => setScreen('home')}
+        onMissions={() => setScreen('missions')}
       />
     );
   }
