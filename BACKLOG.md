@@ -839,7 +839,8 @@ HANDOFF.md; this section lists only what remains, in build order.
 - **P4** — Guided live capture, per-slot hashes through `packages/shared`, evidence upload to
   private storage, manifest and Merkle root, wallet-signed submission. The manifest carries
   POLICY.md 17.9's keys and the submission calls `consumeCaptureNonce`; the first live run
-  carries 17.12's items (D136). P3 is done (Session 19).
+  carries 17.12's items (D136). P3 is done (Session 19). Specified in Session 20: POLICY.md
+  section 18, SPEC.md section 11, CAPTURE.md section 7 (D138 to D144).
 - **P5** — Verifier service: policy evaluation, assurance grading from A0 and A1, signed
   attestation per MESSAGES.md, `submit_attestation`.
 - **P6** — Requester review, `approve`, and `reject` with a named requirement; payout confirmed

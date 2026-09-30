@@ -181,8 +181,10 @@ acceptance, an evidence submission, a payout approval, or an on-chain authorisat
 ## 5. Signed-object domain separation
 
 Every non-transaction signature identifies what it authorises. Never sign ambiguous
-JSON. Every signed object begins with a versioned domain tag. `BOUNTYCAM_EVIDENCE_V1`
-is canonical JSON, signed off-chain; `BOUNTYCAM_ATTESTATION_V1` and
+JSON. Every signed object carries a versioned domain tag: a binary layout at offset 0, a
+canonical JSON object as its required `domain_tag` key (D141). `BOUNTYCAM_EVIDENCE_V1`
+is canonical JSON, signed off-chain (`packages/shared/SPEC.md` section 11.6);
+`BOUNTYCAM_ATTESTATION_V1` and
 `BOUNTYCAM_ELIGIBILITY_V1` are fixed binary layouts verified on-chain (D70).
 `BOUNTYCAM_ACCEPTANCE_V1` is retired: D49's acceptance-signature concept is
 superseded by D68's eligibility voucher, which the Scout's own transaction
@@ -254,6 +256,8 @@ are in `SECURITY-PRODUCTION.md` section 1.
 - **relayer** — pay gas. Leak: SOL burned; USDC cannot move.
 - **escrow-keypair** — program identity. Needed for redeploy only.
 - **JWT secret** — sessions. Leak: anyone is anyone for up to 7 days (D46).
+- **Evidence store secret** — private evidence (D140). Leak: every stored photo can be read,
+  overwritten or deleted; no money moves. Lives in `~/bountycam-env`, mode 600.
 
 Rules:
 

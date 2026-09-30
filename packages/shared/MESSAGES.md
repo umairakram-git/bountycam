@@ -306,7 +306,7 @@ implementation task in `programs/escrow/SPEC.md`.
    and D76 name on-chain `Funded` as the state a bounty is accepted or cancelled
    from, and `AVAILABLE` is the database projection (D79).
 
-Also open, and not this document's to settle: `CAPTURE_START_DEADLINE_BUFFER_SECS`,
-the nonce-service rule that stops a Scout beginning work too close to the deadline
-to settle. It is operational configuration, deliberately not part of the hashed
-policy or of either layout.
+`CAPTURE_START_DEADLINE_BUFFER_SECS`, once open here, is settled by D132 as the pair
+`CAPTURE_DEADLINE_BUFFER_S` and `CAPTURE_MIN_WINDOW_S` (`apps/api/POLICY.md` section
+17.3): operational configuration, deliberately not part of the hashed policy or of
+either layout.

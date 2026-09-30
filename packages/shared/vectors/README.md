@@ -16,3 +16,9 @@ Requires Python 3 and the `cryptography` package.
 Signing keys are derived from fixed ASCII seeds so any implementation can
 reproduce the same keypairs. They are test values and must never be used on a
 live deployment.
+
+Evidence manifest vectors, `packages/shared/SPEC.md` section 11 (Session 20):
+
+- `evidence_vectors.json` — vectors V6 and V7. Immutable under D78.
+- `gen_evidence_vectors.py` — regenerates it from a Python implementation independent of
+  `packages/shared`; `--check` exits non-zero if the published file differs from a fresh run.

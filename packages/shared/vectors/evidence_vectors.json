@@ -1,0 +1,98 @@
+{
+  "spec": "packages/shared/SPEC.md section 11",
+  "scout_seed_ascii": "BOUNTYCAM-TEST-SCOUT-SEED-000001",
+  "scout_public_key_hex": "bf3df534da85a4866eeca3c3fbb2459a83264bda120576add183f6e6d3d0513c",
+  "scout_base58": "DsXfdkkMDVSP7XWDZcmN9jMeoXGqyF9BgfmvB4YWdhJs",
+  "vectors": [
+    {
+      "name": "V6",
+      "manifest": {
+        "header": {
+          "assignment_id": "96135a13-e126-4213-bc31-58184a6f1e08",
+          "bounty_id": "17e419ff-59a6-4e14-93b4-7a6550d46bd5",
+          "capture_nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "deployment_id": 2,
+          "manifest_version": 1,
+          "policy_hash": "36716ae9e3646914ef9a2fe9fd7e2bf4cb6d986a3cade07aaec97068a6dc58a2",
+          "scout": "DsXfdkkMDVSP7XWDZcmN9jMeoXGqyF9BgfmvB4YWdhJs"
+        },
+        "items": [
+          {
+            "byte_length": 1425407,
+            "captured_at": "2026-10-01T00:05:12.345Z",
+            "fixed_at": "2026-10-01T00:05:11.900Z",
+            "horizontal_accuracy_m": 12,
+            "lat": "-33.8568000",
+            "lon": "151.2153000",
+            "photo_sha256": "9e6dbb065c29ce8052addfabf844817acd39577c4420f4fc9cfa9230e11b425d",
+            "requirement_id": "11111111-1111-4111-8111-111111111111"
+          },
+          {
+            "byte_length": 983211,
+            "captured_at": "2026-10-01T00:06:40.000Z",
+            "fixed_at": "2026-10-01T00:06:38.120Z",
+            "horizontal_accuracy_m": 35,
+            "lat": "-33.8569123",
+            "lon": "151.2150456",
+            "photo_sha256": "15cd446c6ee5474de09b0f98868a32c7c6aa3d7e08202ca11fdb6b3bc6657021",
+            "requirement_id": "22222222-2222-4222-8222-222222222222"
+          }
+        ]
+      },
+      "manifest_canonical": "{\"header\":{\"assignment_id\":\"96135a13-e126-4213-bc31-58184a6f1e08\",\"bounty_id\":\"17e419ff-59a6-4e14-93b4-7a6550d46bd5\",\"capture_nonce\":\"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\",\"deployment_id\":2,\"manifest_version\":1,\"policy_hash\":\"36716ae9e3646914ef9a2fe9fd7e2bf4cb6d986a3cade07aaec97068a6dc58a2\",\"scout\":\"DsXfdkkMDVSP7XWDZcmN9jMeoXGqyF9BgfmvB4YWdhJs\"},\"items\":[{\"byte_length\":1425407,\"captured_at\":\"2026-10-01T00:05:12.345Z\",\"fixed_at\":\"2026-10-01T00:05:11.900Z\",\"horizontal_accuracy_m\":12,\"lat\":\"-33.8568000\",\"lon\":\"151.2153000\",\"photo_sha256\":\"9e6dbb065c29ce8052addfabf844817acd39577c4420f4fc9cfa9230e11b425d\",\"requirement_id\":\"11111111-1111-4111-8111-111111111111\"},{\"byte_length\":983211,\"captured_at\":\"2026-10-01T00:06:40.000Z\",\"fixed_at\":\"2026-10-01T00:06:38.120Z\",\"horizontal_accuracy_m\":35,\"lat\":\"-33.8569123\",\"lon\":\"151.2150456\",\"photo_sha256\":\"15cd446c6ee5474de09b0f98868a32c7c6aa3d7e08202ca11fdb6b3bc6657021\",\"requirement_id\":\"22222222-2222-4222-8222-222222222222\"}]}",
+      "header_canonical": "{\"assignment_id\":\"96135a13-e126-4213-bc31-58184a6f1e08\",\"bounty_id\":\"17e419ff-59a6-4e14-93b4-7a6550d46bd5\",\"capture_nonce\":\"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\",\"deployment_id\":2,\"manifest_version\":1,\"policy_hash\":\"36716ae9e3646914ef9a2fe9fd7e2bf4cb6d986a3cade07aaec97068a6dc58a2\",\"scout\":\"DsXfdkkMDVSP7XWDZcmN9jMeoXGqyF9BgfmvB4YWdhJs\"}",
+      "item_canonical": [
+        "{\"byte_length\":1425407,\"captured_at\":\"2026-10-01T00:05:12.345Z\",\"fixed_at\":\"2026-10-01T00:05:11.900Z\",\"horizontal_accuracy_m\":12,\"lat\":\"-33.8568000\",\"lon\":\"151.2153000\",\"photo_sha256\":\"9e6dbb065c29ce8052addfabf844817acd39577c4420f4fc9cfa9230e11b425d\",\"requirement_id\":\"11111111-1111-4111-8111-111111111111\"}",
+        "{\"byte_length\":983211,\"captured_at\":\"2026-10-01T00:06:40.000Z\",\"fixed_at\":\"2026-10-01T00:06:38.120Z\",\"horizontal_accuracy_m\":35,\"lat\":\"-33.8569123\",\"lon\":\"151.2150456\",\"photo_sha256\":\"15cd446c6ee5474de09b0f98868a32c7c6aa3d7e08202ca11fdb6b3bc6657021\",\"requirement_id\":\"22222222-2222-4222-8222-222222222222\"}"
+      ],
+      "leaves": [
+        "cd4788230fa3c308a9c34e7e2663d4e3977e3fa23a124a77a0867039eeab5d98",
+        "1c7e7f7d434221e742f869a90b4edeb7fe01204b5a874882544719b27b7ace09",
+        "94f145de771a8266605bdaaa802aca6970322d489121a33e36faad7753556dc4"
+      ],
+      "evidence_root": "2114b0e795a837c9cccc81f8d447b3b98c3913ca942a78e7aefa057f16fc2ebb",
+      "statement_canonical": "{\"bounty_id\":\"17e419ff-59a6-4e14-93b4-7a6550d46bd5\",\"domain_tag\":\"BOUNTYCAM_EVIDENCE_V1\",\"evidence_root\":\"2114b0e795a837c9cccc81f8d447b3b98c3913ca942a78e7aefa057f16fc2ebb\",\"schema_version\":1}",
+      "statement_sha256": "078ba0ebb74cf6e0402b89ed29e263a35d2f6ebc095658b4bbfb6eb5b8b7b9b7",
+      "signature": "c5d5e8b558f0a63f409e70d856638858eeadc98de2f12d0bdab77cab399bb3813a6377efb06520582d307ed65251c65538e81c8f23f1d1d42aa6d4838d3de101"
+    },
+    {
+      "name": "V7",
+      "manifest": {
+        "header": {
+          "assignment_id": "96135a13-e126-4213-bc31-58184a6f1e08",
+          "bounty_id": "17e419ff-59a6-4e14-93b4-7a6550d46bd5",
+          "capture_nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "deployment_id": 2,
+          "manifest_version": 1,
+          "policy_hash": "36716ae9e3646914ef9a2fe9fd7e2bf4cb6d986a3cade07aaec97068a6dc58a2",
+          "scout": "DsXfdkkMDVSP7XWDZcmN9jMeoXGqyF9BgfmvB4YWdhJs"
+        },
+        "items": [
+          {
+            "byte_length": 1425407,
+            "captured_at": "2026-10-01T00:05:12.345Z",
+            "fixed_at": "2026-10-01T00:05:11.900Z",
+            "horizontal_accuracy_m": 12,
+            "lat": "-33.8568000",
+            "lon": "151.2153000",
+            "photo_sha256": "9e6dbb065c29ce8052addfabf844817acd39577c4420f4fc9cfa9230e11b425d",
+            "requirement_id": "11111111-1111-4111-8111-111111111111"
+          }
+        ]
+      },
+      "manifest_canonical": "{\"header\":{\"assignment_id\":\"96135a13-e126-4213-bc31-58184a6f1e08\",\"bounty_id\":\"17e419ff-59a6-4e14-93b4-7a6550d46bd5\",\"capture_nonce\":\"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\",\"deployment_id\":2,\"manifest_version\":1,\"policy_hash\":\"36716ae9e3646914ef9a2fe9fd7e2bf4cb6d986a3cade07aaec97068a6dc58a2\",\"scout\":\"DsXfdkkMDVSP7XWDZcmN9jMeoXGqyF9BgfmvB4YWdhJs\"},\"items\":[{\"byte_length\":1425407,\"captured_at\":\"2026-10-01T00:05:12.345Z\",\"fixed_at\":\"2026-10-01T00:05:11.900Z\",\"horizontal_accuracy_m\":12,\"lat\":\"-33.8568000\",\"lon\":\"151.2153000\",\"photo_sha256\":\"9e6dbb065c29ce8052addfabf844817acd39577c4420f4fc9cfa9230e11b425d\",\"requirement_id\":\"11111111-1111-4111-8111-111111111111\"}]}",
+      "header_canonical": "{\"assignment_id\":\"96135a13-e126-4213-bc31-58184a6f1e08\",\"bounty_id\":\"17e419ff-59a6-4e14-93b4-7a6550d46bd5\",\"capture_nonce\":\"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\",\"deployment_id\":2,\"manifest_version\":1,\"policy_hash\":\"36716ae9e3646914ef9a2fe9fd7e2bf4cb6d986a3cade07aaec97068a6dc58a2\",\"scout\":\"DsXfdkkMDVSP7XWDZcmN9jMeoXGqyF9BgfmvB4YWdhJs\"}",
+      "item_canonical": [
+        "{\"byte_length\":1425407,\"captured_at\":\"2026-10-01T00:05:12.345Z\",\"fixed_at\":\"2026-10-01T00:05:11.900Z\",\"horizontal_accuracy_m\":12,\"lat\":\"-33.8568000\",\"lon\":\"151.2153000\",\"photo_sha256\":\"9e6dbb065c29ce8052addfabf844817acd39577c4420f4fc9cfa9230e11b425d\",\"requirement_id\":\"11111111-1111-4111-8111-111111111111\"}"
+      ],
+      "leaves": [
+        "cd4788230fa3c308a9c34e7e2663d4e3977e3fa23a124a77a0867039eeab5d98",
+        "1c7e7f7d434221e742f869a90b4edeb7fe01204b5a874882544719b27b7ace09"
+      ],
+      "evidence_root": "64f23b52d49a08310eb010bc59280695198ec4561e211556f93491bf26dc1c9b",
+      "statement_canonical": "{\"bounty_id\":\"17e419ff-59a6-4e14-93b4-7a6550d46bd5\",\"domain_tag\":\"BOUNTYCAM_EVIDENCE_V1\",\"evidence_root\":\"64f23b52d49a08310eb010bc59280695198ec4561e211556f93491bf26dc1c9b\",\"schema_version\":1}",
+      "statement_sha256": "7a3af34472da1853854421c597d7851aafa56ae6864fa8c1ac44ed410df4bd8f",
+      "signature": "dc1ebb2201fdb146082b94bceee8b49006b92df33e3a7da9707e093ff1862f501a4b9da02de1bded8fd596942e2740971c5fc3eec3351263e5914735418ff403"
+    }
+  ]
+}

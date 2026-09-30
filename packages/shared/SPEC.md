@@ -6,6 +6,8 @@
 **Amended:** Session 17 — section 8, the funding-path helpers, and section 6.5 (D121).
 **Amended:** Session 18 — section 9, the acceptance-path helpers, and section 6.6
 (D127).
+**Amended:** Session 20 — section 11, the evidence manifest; section 6.7; section 10's opening
+note (D141, D143, D144).
 **Scope:** `canonicalise`, `sha256`, `merkleRoot` as exported from
 `packages/shared/src/index.ts`.
 
@@ -603,6 +605,22 @@ Section 9, Session 18. Each code is listed under the helper that owns it.
 
 `checkAcceptInstructions` reuses the four `TX_` codes of section 6.5, with the same meanings.
 
+### 6.7 Evidence manifest codes
+
+Section 11, Session 20.
+
+| Code | Function | Rejected input |
+|---|---|---|
+| `MANIFEST_SHAPE` | `checkEvidenceManifest` | not an object, a wrong key set, a wrong JSON type |
+| `MANIFEST_ITEMS` | `checkEvidenceManifest` | no items, more than 20, a repeated requirement id |
+| `MANIFEST_FIELD` | `checkEvidenceManifest` | a value failing its section 11.2 or 11.3 rule |
+| `STATEMENT_INPUT_INVALID` | `evidenceStatement` | a malformed bounty id or root |
+| `ACCURACY_INVALID` | `manifestAccuracy` | non-finite, negative, or above 100000 |
+| `CHUNK_INVALID` | `sha256Chunked` | a chunk size that is not a positive safe integer |
+
+`evidenceLeaves` and `evidenceRoot` throw `checkEvidenceManifest`'s codes; `sha256Chunked` also
+throws section 6.2's `NOT_BYTES`.
+
 ---
 
 ## 7. Eligibility profiles
@@ -1148,8 +1166,9 @@ negative test is shown red before the gate by a scripted mutation of the check i
 ## 10. Location helpers
 
 Session 19 (P3). The start gate of `apps/api/POLICY.md` section 17.5 and `apps/mobile/CAPTURE.md`
-runs these functions on both sides, so the phone and the server cannot disagree (D133). P4 and
-P5 reuse `distanceM`; they do not inherit the gate's thresholds (POLICY.md section 17.9).
+runs these functions on both sides, so the phone and the server cannot disagree (D133). P4
+applies the same gate to each photo's own fix, at the shutter and at submission (D143); P5 may
+tighten it for grading, never loosen it.
 
 ### 10.1 `distanceM(aLat, aLon, bLat, bLon): number`
 
@@ -1216,3 +1235,163 @@ negative test is shown red before the gate by a scripted mutation of the check i
      L4's point, accuracy 200.5, radius 5000, `IMPRECISE`.
 130. `LOCATION_INPUT_INVALID`: a `NaN` latitude; latitude 90.5; accuracy -1; radius 0; a target
      `lat` of `-33.856784`, six fraction digits.
+
+---
+
+## 11. The evidence manifest
+
+Session 20 (P4). The phone builds the manifest, the API checks it at submission
+(`apps/api/POLICY.md` section 18.6), P5's verifier and O3's standalone script recompute its root.
+Every rule here is byte-exact, and vectors V6 and V7 (section 11.8) bind all of them (D141).
+
+### 11.1 The manifest
+
+An object with exactly two keys: `header` (section 11.2) and `items`, an array of 1 to 20 item
+objects (section 11.3). It travels and is stored as `canonicalise(manifest)`. No two items name
+the same requirement id. Items appear in the policy's `evidence_requirements` order and an
+optional requirement may have no item; POLICY.md section 18.6 checks both against the policy,
+because this section cannot see it.
+
+### 11.2 The header
+
+Exactly these keys:
+
+| Key | Type | Rule |
+|---|---|---|
+| `assignment_id` | string | uuid, section 8.3's lowercase hyphenated form |
+| `bounty_id` | string | uuid, the same form |
+| `capture_nonce` | string | 64 lowercase hex characters, exactly as issued (POLICY.md 17.9) |
+| `deployment_id` | integer | 0 to 255 |
+| `manifest_version` | integer | exactly 1 |
+| `policy_hash` | string | 64 lowercase hex characters |
+| `scout` | string | 32 to 44 characters of the base58 alphabet; the Scout's wallet |
+
+The API binds `scout` to the caller's wallet by string equality, which also establishes that it
+decodes to 32 bytes; this package holds no base58 decoder and does not decode it.
+
+### 11.3 An item
+
+One photo. Exactly these keys:
+
+| Key | Type | Rule |
+|---|---|---|
+| `byte_length` | integer | 1 or more; the length of the file uploaded |
+| `captured_at` | string | a section 11.4 time; the shutter, on the phone's server-time estimate |
+| `fixed_at` | string | a section 11.4 time; the location fix's own timestamp |
+| `horizontal_accuracy_m` | integer | 0 to 100000; `manifestAccuracy` of the reported accuracy |
+| `lat` | string | section 8.1's GPS profile, latitude |
+| `lon` | string | section 8.1's GPS profile, longitude |
+| `photo_sha256` | string | 64 lowercase hex; section 2's digest of the exact bytes uploaded |
+| `requirement_id` | string | uuid, section 8.3's form |
+
+Accuracy is a whole number of metres, rounded up: canonical JSON carries no fractions (section
+1.3), and rounding up never understates the uncertainty (D141).
+
+### 11.4 Times
+
+`YYYY-MM-DDTHH:MM:SS.sssZ`: exactly three fraction digits and `Z`, and a real calendar instant,
+so that `new Date(text).toISOString()` returns the text unchanged. That is what
+`Date.prototype.toISOString` produces for years 1970 to 9999, and SECURITY.md section 14 already
+requires UTC with milliseconds.
+
+### 11.5 Leaves and the root
+
+- Leaf 0 is `sha256(utf8(canonicalise(header)))`.
+- Leaf `i`, for `i` from 1, is `sha256(utf8(canonicalise(items[i - 1])))`.
+- `evidence_root = merkleRoot(leaves)`, section 3.
+
+The header is a leaf so that the root binds the nonce, the assignment, the policy and the
+wallet. Each item is its own leaf so that one photo's record can later be shown, with a proof,
+without the others. The root is the `evidence_root` of `BOUNTYCAM_ATTESTATION_V1` (MESSAGES.md
+section 3).
+
+### 11.6 The signed statement, `BOUNTYCAM_EVIDENCE_V1`
+
+The Scout's wallet signs, with ed25519, the UTF-8 bytes of:
+
+```
+canonicalise({
+  bounty_id: <the header's bounty_id>,
+  domain_tag: "BOUNTYCAM_EVIDENCE_V1",
+  evidence_root: <64 lowercase hex>,
+  schema_version: 1
+})
+```
+
+This is SECURITY.md section 5's `BOUNTYCAM_EVIDENCE_V1`: canonical JSON, signed off chain, the
+domain tag carried inside as the policy carries its own. It is short and readable, so a wallet
+that displays text shows the bounty and the root. It can never verify as a SIWS message, which
+begins with a domain line rather than `{`, nor as a binary message, whose tag and length are
+fixed (MESSAGES.md section 1).
+
+### 11.7 Functions
+
+- Constants: `EVIDENCE_DOMAIN_TAG` (`BOUNTYCAM_EVIDENCE_V1`), `EVIDENCE_SCHEMA_VERSION` (1),
+  `MANIFEST_VERSION` (1), `MAX_EVIDENCE_ITEMS` (20).
+- `checkEvidenceManifest(value: unknown): EvidenceManifest` checks sections 11.1 to 11.4 and
+  returns the value, typed. A value that is not an object, a key set other than the tables', or
+  a value of the wrong JSON type is `MANIFEST_SHAPE`; `items` empty or longer than 20, or a
+  repeated `requirement_id`, is `MANIFEST_ITEMS`; any value failing its rule is
+  `MANIFEST_FIELD`. Section 6.3's rule on inputs with several faults applies.
+- `evidenceLeaves(manifest: unknown): Uint8Array[]` and `evidenceRoot(manifest: unknown):
+  Uint8Array` run `checkEvidenceManifest` first, then section 11.5.
+- `evidenceStatement(bountyId: string, root: Uint8Array): Uint8Array` returns section 11.6's
+  bytes. A `bountyId` not in section 8.3's form, or a `root` that is not a 32-byte
+  `Uint8Array`, is `STATEMENT_INPUT_INVALID`.
+- `manifestAccuracy(accuracyM: number): number` returns `Math.ceil(accuracyM)`. A non-finite
+  value, a negative one, or one above 100000 is `ACCURACY_INVALID`.
+- `sha256Chunked(bytes: Uint8Array, chunkBytes: number, pause: () => Promise<void>):
+  Promise<Uint8Array>` returns `sha256(bytes)`, fed to the hash in chunks of `chunkBytes` and
+  awaiting `pause()` between consecutive chunks, never before the first or after the last.
+  `bytes` follows section 2's input rule, with `NOT_BYTES`; `chunkBytes` must be a positive safe
+  integer, else `CHUNK_INVALID`. The phone passes 65536 and a zero-delay timer, so the screen
+  stays live while a photo hashes (D144).
+
+Section 6.7 lists the codes.
+
+### 11.8 Vectors
+
+Generated by `vectors/gen_evidence_vectors.py`, which implements canonical JSON, the Merkle tree
+and base58 itself, in Python, independently of this package (D78). Published as
+`vectors/evidence_vectors.json`, immutable under D78; `--check` confirms the file matches a
+fresh run. The Scout key derives from the ASCII seed `BOUNTYCAM-TEST-SCOUT-SEED-000001`, a test
+value; its base58 is `DsXfdkkMDVSP7XWDZcmN9jMeoXGqyF9BgfmvB4YWdhJs`.
+
+Both vectors share one header: bounty `17e419ff-59a6-4e14-93b4-7a6550d46bd5`, assignment
+`96135a13-e126-4213-bc31-58184a6f1e08`, nonce bytes 0 to 31, deployment 2. Its leaf is
+`cd4788230fa3c308a9c34e7e2663d4e3977e3fa23a124a77a0867039eeab5d98`.
+
+- **V6**, the header and two items, three leaves, so the odd leaf is promoted. Item leaves
+  `1c7e7f7d434221e742f869a90b4edeb7fe01204b5a874882544719b27b7ace09` and
+  `94f145de771a8266605bdaaa802aca6970322d489121a33e36faad7753556dc4`. Root
+  `2114b0e795a837c9cccc81f8d447b3b98c3913ca942a78e7aefa057f16fc2ebb`.
+- **V7**, the header and V6's first item, two leaves. Root
+  `64f23b52d49a08310eb010bc59280695198ec4561e211556f93491bf26dc1c9b`.
+
+The JSON file carries, for each vector, the manifest, every canonical text, the leaves, the
+root, the statement text and its digest, and the Scout's signature over the statement.
+
+### 11.9 Tests
+
+The package's existing test file. The D36 gate becomes `tests 138, pass 138, fail 0`. Each
+negative test is shown red before the gate by a scripted mutation of the check it names.
+
+131. V6 and V7 from the JSON file: `checkEvidenceManifest` accepts each manifest;
+     `canonicalise` of it equals `manifest_canonical`; `evidenceLeaves` equals `leaves`;
+     `evidenceRoot` equals `evidence_root`.
+132. `evidenceStatement` reproduces each vector's `statement_canonical` bytes, and `sha256` of
+     them equals `statement_sha256`.
+133. `MANIFEST_SHAPE`: a string; a third top-level key; a header without `scout`; an item with a
+     ninth key; `deployment_id` as the string `2`; `items` as an object (six asserts).
+134. `MANIFEST_ITEMS`: no items; 21 items; two items naming one requirement (three asserts).
+135. `MANIFEST_FIELD`: an uppercase hex digit in `capture_nonce`; a 63-character `policy_hash`;
+     an uppercase `bounty_id`; `deployment_id` 256; `manifest_version` 2; a `scout` containing
+     `0`; `byte_length` 0; `captured_at` without milliseconds; `captured_at`
+     `2026-02-30T00:00:00.000Z`; a `lat` with six fraction digits; `horizontal_accuracy_m` -1
+     (eleven asserts).
+136. `manifestAccuracy`: 0 is 0; 12 is 12; 12.0001 is 13; 199.5 is 200; `ACCURACY_INVALID` for
+     -0.1, `NaN`, `Infinity` and 100000.5.
+137. `sha256Chunked` with 65536-byte chunks, for inputs of 1, 65536, 65537 and 200001 bytes:
+     equal to `sha256`, with `pause` called 0, 0, 1 and 3 times; `CHUNK_INVALID` for 0 and 1.5;
+     `NOT_BYTES` for an array of numbers.
+138. `STATEMENT_INPUT_INVALID`: an uppercase `bountyId`; a 31-byte root.

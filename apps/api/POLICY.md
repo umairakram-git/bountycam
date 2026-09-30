@@ -9,6 +9,8 @@ words, never written literally.
 section 15: funding from the device and the funding projection (D117 to D121).
 **Amended:** Session 18 (P2) — sections 8.2, 8.4, 8.5, 8.8 and 14, and the new
 section 16: discovery, acceptance and the acceptance projection (D124 to D127).
+**Amended:** Session 20 (P4) — sections 8.2, 17.6 and 17.7, and the new section 18: evidence
+upload and submission (D138 to D144).
 
 Policies and bounties share this document deliberately: the hashed policy object and the
 bounty row that references it must not drift, and a split document is how they would.
@@ -777,6 +779,8 @@ ever serialised from a bounty row.
 `policy` is byte-faithful: it is produced by parsing the stored `canonical_json`
 (section 3.4), never by re-assembling from columns, so what the owner verifies
 (section 3.5) is what was hashed.
+
+Section 18.7 adds `submission` to the owner view of a bounty in state `ACCEPTED` (D138).
 
 **Public view** — any other authenticated caller, for states that are visible at all
 (section 7.3):
@@ -2271,6 +2275,8 @@ Check order; the first failing step wins:
 8. **Holder.** The caller holds the acceptance, as section 16.4 step 4a defines it; otherwise
    `NOT_ASSIGNED` (403). The requester, other Scouts and a Scout whose earlier assignment of the
    bounty is no longer `ACTIVE` all land here.
+8a. **Submitted** (section 18.7, D142). The assignment has a `submissions` row:
+    `ALREADY_SUBMITTED` (409).
 9. **Time.** With `now` from the injectable clock and `deadline` the assignment's: `now >
    deadline - CAPTURE_DEADLINE_BUFFER_S - CAPTURE_MIN_WINDOW_S` is `CAPTURE_WINDOW_CLOSED` (409).
    Start is allowed at equality.
@@ -2314,8 +2320,8 @@ Section 16.4's assigned-Scout view gains one key, `capture`, and its `assignment
 
 `capture_nonce` is the assignment's `ACTIVE` row when `now < expires_at`, else null. Its keys:
 `id` (the capture-session id), `value` (64 lowercase hex characters), `issued_at` and
-`expires_at` (ISO 8601 UTC). The phone restores a session from here after a restart or a failed
-restart request, instead of superseding it.
+`expires_at` (ISO 8601 UTC), and `submit_by` (section 18.7). The phone restores a session from
+here after a restart or a failed restart request, instead of superseding it.
 
 The nonce need not be secret after issuance (D73), so serving it to its holder again costs
 nothing. It is served to nobody else: the owner and public views are unchanged.
@@ -2466,3 +2472,374 @@ No bounty is funded for P3. P4's first live run on the A30 must also show, from 
 3. A second Start after the warning supersedes the first: two rows, one `SUPERSEDED`.
 4. Start Capture indoors, or with the phone moved away, shows the phone's own failure numbers.
 5. The request log line for the call carries the path only, with no coordinates.
+
+---
+
+## 18. Evidence upload and submission
+
+Session 20 (P4). Normative; written before implementation. The client is
+`apps/mobile/CAPTURE.md` section 7. The manifest, its root and the signed statement are
+`packages/shared/SPEC.md` section 11. Rulings: D138 (Umair) and D139 to D144.
+
+### 18.1 What P4 adds
+
+Migration 13 (section 18.2); the evidence store configuration and client (18.3, 18.4);
+`POST /bounties/:id/evidence/upload-url` (18.5); `POST /bounties/:id/submission` (18.6); the
+views and section 17.6's new step (18.7); stated limits (18.8); error codes (18.9); tests and two
+scripts (18.10); the live run (18.11).
+
+A submission moves no bounty or assignment state (D142). `bounties.state` follows confirmed chain
+state (D79), and the chain reaches `Submitted` only at `submit_attestation`, which is P5's. Until
+then the bounty stays `ACCEPTED`, the assignment `ACTIVE`, and the `submissions` row is the
+record.
+
+### 18.2 Migration 13
+
+`submissions` and `evidence_items` exist since migration 1 and have never been written. Up
+refuses to run if either holds a row. Up, in order:
+
+1. `submissions`: drop `manifest_hash` and the foreign key `submissions_assignment_id_fkey`;
+   rename `merkle_root` to `evidence_root`; drop `NOT NULL` from `achieved_assurance`, which P5
+   sets; drop the default of `submitted_at`, which the clock sets. Add:
+
+| Column | Type | Rule |
+|---|---|---|
+| `bounty_id` | `uuid` | not null |
+| `scout_id` | `uuid` | not null |
+| `capture_nonce_id` | `uuid` | not null, unique, references `capture_nonces (id)` |
+| `manifest` | `text` | not null; `canonicalise(manifest)` exactly as received and checked |
+| `statement_signature` | `bytea` | not null, exactly 64 bytes |
+
+   Constraints: `submissions_binding_fkey`, a foreign key on `(assignment_id, bounty_id,
+   scout_id)` to `assignments_binding_key`; `submissions_one_per_assignment`, unique on
+   `assignment_id` (D138 ruling 3); `submissions_root_length`, `evidence_root` exactly 32 bytes.
+2. `evidence_items`: add `byte_length bigint` not null and above 0; `lat text` and `lon text`,
+   not null; `horizontal_accuracy_m integer` not null and 0 or more; `fixed_at timestamptz` not
+   null. Constraints: `evidence_items_hash_length`, `hash` exactly 32 bytes;
+   `evidence_items_one_per_requirement`, unique on `(submission_id, requirement_id)`.
+   `c2pa_present` keeps its type and gains no default; P4 writes false.
+
+Down, in reverse, restores migration 12's shape; like up, it refuses to run over rows.
+
+Non-test gate, from raw output: `\d submissions` and `\d evidence_items` show the columns and
+constraints above, and only `id` carries a default on either table.
+
+### 18.3 Configuration
+
+Seven keys join section 17.3's. The four marked *store* go together: all four set means the
+evidence store is configured, none set means it is not and the two routes of sections 18.5 and
+18.6 are not registered, and any other combination exits at startup. Every other key keeps
+section 8.1's startup rule.
+
+| Key | Default | Rule |
+|---|---|---|
+| `EVIDENCE_STORE_ENDPOINT` | *store* | `http` or `https` origin, no path, query or fragment |
+| `EVIDENCE_STORE_BUCKET` | *store* | 3 to 63 of lowercase letters, digits and hyphens |
+| `EVIDENCE_STORE_ACCESS_KEY_ID` | *store* | 1 to 128 printable ASCII characters |
+| `EVIDENCE_STORE_SECRET_PATH` | *store* | a file holding the secret key on one line, not empty |
+| `EVIDENCE_STORE_REGION` | `us-east-1` | the signing region; R2 uses `auto` |
+| `EVIDENCE_MAX_BYTES` | 10485760 | positive integer; the largest photo accepted |
+| `EVIDENCE_UPLOAD_URL_TTL_S` | 900 | positive integer, at most 900 (D4) |
+
+The secret follows `JWT_SECRET_PATH`'s pattern: it lives in a file outside the repo, which
+`scripts/dev.sh` requires to be mode 600, and it is never logged, echoed or returned.
+
+The endpoint's host is signed into every upload URL, so the phone must reach that same host: in
+development `http://127.0.0.1:7070` through `adb reverse`, which is also how the laptop reaches
+it (D140).
+
+### 18.4 The store
+
+**Development** is versitygw on the laptop, serving a folder outside the repo; production is
+Cloudflare R2 (D4). Both speak the S3 API; changing between them is configuration (D140).
+
+**Object keys** are `evidence/<bounty_id>/<capture_session_id>/<requirement_id>/<photo_sha256>.jpg`,
+all lowercase. A key names its content, so an upload retried with the same photo writes the same
+object. A retaken photo has a new key; the replaced object stays unused, and its deletion is
+O6's retention rule.
+
+**Upload URLs** are presigned with AWS Signature Version 4 in query form, implemented in
+`src/evidence/sigv4.ts` without an SDK (D140): method `PUT`, path style
+(`/<bucket>/<key>`), payload `UNSIGNED-PAYLOAD`, expiry `EVIDENCE_UPLOAD_URL_TTL_S`, and signed
+headers exactly `content-length`, `host` and `x-amz-checksum-sha256`. The store refuses any
+upload whose length or sha256 differs from the signed values, so the stored bytes are the bytes
+the phone hashed, and the API never reads a photo (SECURITY.md section 14). Verified on the
+laptop's versitygw on 1 October (D139).
+
+**The existence check** is a header-signed `HEAD` with `x-amz-checksum-mode: ENABLED`. It
+returns the object's length and its base64 sha256, or 404.
+
+**Interface.** Routes see only `EvidenceStore`:
+
+```ts
+interface EvidenceStore {
+  presignPut(key: string, sha256: Uint8Array, byteLength: number, now: Date):
+    { url: string; headers: Record<string, string>; expiresAt: Date };
+  head(key: string): Promise<{ byteLength: number; sha256Base64: string } | null>;
+}
+```
+
+`head` throws when the store cannot be reached or answers anything but 200 or 404. Tests inject
+a double whose answers copy the shapes recorded from versitygw.
+
+### 18.5 `POST /bounties/:id/evidence/upload-url`
+
+The phone asks where to put one photo. Every call issues a fresh URL; nothing is written.
+
+Body, a JSON object with exactly four keys:
+
+| Key | Type | Rule |
+|---|---|---|
+| `capture_session_id` | string | uuid, lowercase |
+| `requirement_id` | string | uuid, lowercase |
+| `photo_sha256` | string | 64 lowercase hex characters |
+| `byte_length` | number | a safe integer, 1 or more |
+
+Check order; the first failing step wins:
+
+1. **Auth.** 401 codes per section 8.1.
+2. **Body shape.** Anything outside the table: `INVALID_REQUEST` (400).
+3. **Size.** `byte_length` above `EVIDENCE_MAX_BYTES`: `EVIDENCE_TOO_LARGE` (400).
+4. **Id form**, as section 8.5 step 2: `NOT_FOUND` (404).
+5. **Load.** No row: `NOT_FOUND` (404).
+6. **Hidden.** As section 17.6 step 6: `NOT_FOUND` (404).
+7. **State.** Not `ACCEPTED`: `BOUNTY_NOT_CAPTURABLE` (409).
+8. **Holder**, as section 17.6 step 8: `NOT_ASSIGNED` (403).
+9. **Submitted.** The assignment has a `submissions` row: `ALREADY_SUBMITTED` (409).
+10. **Requirement.** `requirement_id` is not an id in the policy's `evidence_requirements`:
+    `UNKNOWN_REQUIREMENT` (400).
+11. **Session.** The `capture_nonces` row whose `id` is `capture_session_id` must belong to this
+    assignment, have status `ACTIVE`, and satisfy `now < expires_at +
+    CAPTURE_SUBMISSION_GRACE_S`; otherwise `CAPTURE_SESSION_NOT_LIVE` (409). The grace lets a
+    photo taken before `expires_at` finish uploading after it (D132).
+12. **Respond** 200 with an object whose single key `upload` is:
+
+| Key | Value |
+|---|---|
+| `method` | `PUT` |
+| `url` | the presigned URL |
+| `headers` | exactly `content-type` (`image/jpeg`) and `x-amz-checksum-sha256` (base64) |
+| `expires_at` | the URL's expiry, ISO 8601 UTC |
+
+The phone sends exactly those headers; its HTTP client sets `content-length` from the file. The
+URL is never logged, stored or returned by any other route (SECURITY.md section 3).
+
+### 18.6 `POST /bounties/:id/submission`
+
+The Scout submits. Body, a JSON object with exactly two keys: `manifest`, an object, and
+`signature`, 128 lowercase hex characters, the 64-byte ed25519 signature over section 11.6's
+statement.
+
+Check order; the first failing step wins:
+
+1. **Auth.** 401 codes per section 8.1.
+2. **Body shape.** Anything outside the rule above: `INVALID_REQUEST` (400).
+3. **Manifest.** `checkEvidenceManifest` (SPEC.md section 11.7) throws: `INVALID_MANIFEST`
+   (400).
+4. **Id form**, as section 8.5 step 2: `NOT_FOUND` (404).
+5. **Load.** No row: `NOT_FOUND` (404).
+6. **Hidden.** As section 17.6 step 6: `NOT_FOUND` (404).
+7. **State.** Not `ACCEPTED`: `BOUNTY_NOT_CAPTURABLE` (409).
+8. **Holder**, as section 17.6 step 8: `NOT_ASSIGNED` (403).
+9. **Submitted.** The assignment has a `submissions` row. If its `evidence_root` equals this
+   manifest's root and its `statement_signature` equals `signature`, respond 200 with step 17's
+   body for that row: a retry after a lost response. Otherwise `ALREADY_SUBMITTED` (409).
+10. **Bindings.** The header's `bounty_id` is the path id, `assignment_id` the holder's
+    assignment, `scout` the caller's wallet, `policy_hash` the bounty's policy hash in hex, and
+    `deployment_id` the configuration account's; otherwise `MANIFEST_MISMATCH` (400).
+11. **Requirements.** Every item's `requirement_id` is in the policy, else
+    `UNKNOWN_REQUIREMENT` (400); the items follow the policy's order, else `MANIFEST_MISMATCH`
+    (400); every requirement with `required` true has an item, else `REQUIREMENTS_INCOMPLETE`
+    (400); no `byte_length` exceeds `EVIDENCE_MAX_BYTES`, else `EVIDENCE_TOO_LARGE` (400).
+12. **Signature.** `signature` verifies, under the caller's wallet key, over
+    `evidenceStatement(id, evidenceRoot(manifest))`; otherwise `SUBMISSION_SIGNATURE_INVALID`
+    (400).
+13. **Session.** The `capture_nonces` row whose `value` is the header's `capture_nonce` and
+    whose `assignment_id` is the holder's assignment; none is `CAPTURE_NONCE_INVALID` (409). Its
+    `id` is the capture-session id of step 15's keys.
+14. **Times and places.** Every item's `captured_at` lies in `[issued_at, expires_at)` of that
+    row, else `CAPTURED_OUTSIDE_SESSION` (400). Every item passes `checkCaptureStart` with its
+    own `lat`, `lon` and `horizontal_accuracy_m`, the policy's `lat`, `lon` and
+    `capture_radius_m`, and `LOCATION_MAX_ACCURACY_M`: `IMPRECISE` is `LOCATION_TOO_IMPRECISE`
+    and `TOO_FAR` is `LOCATION_TOO_FAR` (400) (D143).
+15. **Uploads.** For every item, `head` of its key: null, a different length or a different
+    sha256 is `EVIDENCE_NOT_UPLOADED` (409); `head` throwing is `STORAGE_UNAVAILABLE` (503).
+16. **Write**, one transaction:
+    1. Lock the bounty row, then the assignment row. If step 7 or 8 would now fail, roll back
+       and return that step's code. If a `submissions` row now exists, roll back and apply step
+       9's rule.
+    2. `consumeCaptureNonce` (section 17.8) with the header's nonce, the path id, the holder's
+       assignment, the caller and the configured `deployment_id`:
+       - `CONSUMED`: insert the `submissions` row (the assignment, bounty and caller; the nonce
+         row's `id`; `manifest` as `canonicalise(manifest)`; the root; the signature;
+         `achieved_assurance` and `attester_signature` null; `submitted_at` the clock) and one
+         `evidence_items` row per item (its key, `photo_sha256` as `hash`, `c2pa_present`
+         false, and the item's fields); commit.
+       - `EXPIRED`: commit, keeping the nonce's new status; `CAPTURE_SESSION_EXPIRED` (409).
+       - `SUPERSEDED`: roll back; `CAPTURE_SESSION_SUPERSEDED` (409).
+       - `ALREADY_CONSUMED`: roll back; `CAPTURE_SESSION_USED` (409).
+       - `UNKNOWN`, `BINDING_MISMATCH`: roll back; `CAPTURE_NONCE_INVALID` (409).
+17. **Respond** 201 with an object whose single key `submission` holds `id`, `submitted_at`
+    (ISO 8601 UTC), `evidence_root` (64 lowercase hex) and `item_count`.
+
+Steps 13 to 15 read without locks and step 16 decides: a nonce superseded or consumed between
+them is caught by `consumeCaptureNonce` under its row lock. Nothing is written before step 16.
+
+The route is registered only when the chain dependencies exist, for `deployment_id`, and the
+store is configured. The body is never logged: it carries every photo's coordinates.
+
+### 18.7 Views, and section 17.6's new step
+
+- **Assigned-Scout view** (section 16.4) gains `submission`: null, or an object with `id`,
+  `submitted_at`, `evidence_root` and `item_count`. After a submission, `capture.capture_nonce`
+  is null, because the row is `CONSUMED`.
+- **Section 17.7's `capture_nonce` object** gains `submit_by`, ISO 8601 UTC: `expires_at` plus
+  `CAPTURE_SUBMISSION_GRACE_S`, the last moment an upload URL is issued or a submission can
+  consume the nonce. The phone shows it and stops retrying at it (CAPTURE.md section 7.4).
+- **Owner view** of a bounty in state `ACCEPTED` gains `submission`: null, or an object with
+  exactly `submitted_at` and `item_count` (D138 ruling 5). No photo, key, coordinate, root or
+  Scout detail reaches the requester before P6. Owner views of other states are unchanged.
+- **Public view** is unchanged.
+- **Section 17.6** gains step 8a, after the holder check: the assignment has a `submissions`
+  row: `ALREADY_SUBMITTED` (409). A submitted mission cannot start a new capture session.
+
+### 18.8 Stated limits
+
+- `captured_at` is the phone's claim, made on its estimate of the server's clock; `lat`, `lon`
+  and the accuracy are the phone's reported fix. Step 14 keeps honest phones and the server in
+  agreement; it does not prove when or where a photo was taken (D133, D73).
+- Step 15 proves the store holds bytes of the declared length and sha256. It says nothing about
+  what they depict (HANDOFF, honest limit).
+- The statement signature proves the Scout's wallet committed to the root. It does not make the
+  photos genuine.
+
+### 18.9 Error codes
+
+| Code | Status | Failure |
+|---|---|---|
+| `EVIDENCE_TOO_LARGE` | 400 | a photo above `EVIDENCE_MAX_BYTES` (18.5 step 3, 18.6 step 11) |
+| `ALREADY_SUBMITTED` | 409 | the assignment already has a submission (18.5, 18.6, 17.6) |
+| `UNKNOWN_REQUIREMENT` | 400 | a requirement id not in the policy (18.5 step 10, 18.6 step 11) |
+| `CAPTURE_SESSION_NOT_LIVE` | 409 | the session is not this assignment's live one (18.5 step 11) |
+| `INVALID_MANIFEST` | 400 | the manifest fails SPEC.md section 11 (18.6 step 3) |
+| `MANIFEST_MISMATCH` | 400 | a header binding or the item order is wrong (steps 10, 11) |
+| `REQUIREMENTS_INCOMPLETE` | 400 | a required requirement has no item (step 11) |
+| `SUBMISSION_SIGNATURE_INVALID` | 400 | the statement signature fails (step 12) |
+| `CAPTURE_NONCE_INVALID` | 409 | no such nonce for this assignment (steps 13, 16) |
+| `CAPTURED_OUTSIDE_SESSION` | 400 | a capture time outside the session (step 14) |
+| `EVIDENCE_NOT_UPLOADED` | 409 | a photo is missing from the store or differs (step 15) |
+| `STORAGE_UNAVAILABLE` | 503 | the store could not be asked (step 15) |
+| `CAPTURE_SESSION_EXPIRED` | 409 | the nonce's grace has passed (step 16) |
+| `CAPTURE_SESSION_SUPERSEDED` | 409 | a later Start replaced the session (step 16) |
+| `CAPTURE_SESSION_USED` | 409 | the nonce was consumed without this submission (step 16) |
+
+Reused: `INVALID_REQUEST`, `NOT_FOUND`, `BOUNTY_NOT_CAPTURABLE`, `NOT_ASSIGNED`,
+`LOCATION_TOO_IMPRECISE`, `LOCATION_TOO_FAR` and the 401 codes.
+
+### 18.10 Tests and scripts
+
+A new file, `apps/api/test/evidence.test.ts`, named in the test script after `capture.test.ts`.
+The bounty and policy come from the recorded Session 18 create response, as section 17.11's do.
+The acceptance is seeded by SQL for a Scout whose wallet is the SPEC.md section 11.8 test key,
+because the signature tests need a key the suite holds. Clock, randomness and store are injected;
+the store double's answers copy shapes recorded from versitygw. Each negative test is shown red
+before the gate by a scripted mutation of the check it names. D36 gate: `tests 26, pass 26, fail
+0`.
+
+The valid submission below has two required items, both uploaded, taken at the policy's spot
+with accuracy 12 inside a session issued two hours before the deadline.
+
+Upload URL:
+
+1. The holder, live session: 200; `upload` has exactly section 18.5's keys and `headers` exactly
+   its two; the checksum is the digest in base64; `expires_at` is the clock plus 900 s; the
+   double recorded the key of section 18.4, the length and the digest.
+2. `CAPTURE_SESSION_NOT_LIVE`: at `expires_at + 480 s`; a superseded session; another
+   assignment's session; a session id never issued. At `expires_at + 479 s`: 200 (five asserts).
+3. `byte_length` one above the maximum: `EVIDENCE_TOO_LARGE`; exactly the maximum: 200.
+4. A requirement id not in the policy: `UNKNOWN_REQUIREMENT`.
+5. `INVALID_REQUEST`: no body; a fifth key; an uppercase digest; `byte_length` 0; `byte_length`
+   1.5; a session id that is not a uuid (six asserts).
+6. The requester and a stranger: `NOT_ASSIGNED`; an `AVAILABLE` bounty: `BOUNTY_NOT_CAPTURABLE`;
+   no token: `TOKEN_MISSING`; an unknown id: `NOT_FOUND` (five asserts).
+
+Submission:
+
+7. The valid submission: 201 with exactly step 17's keys; the row holds the canonical manifest,
+   the root recomputed from it, the signature, the nonce row's id, null assurance, `submitted_at`
+   the clock; two `evidence_items` rows with their keys and fields; the nonce `CONSUMED` at the
+   clock; the bounty `ACCEPTED` and the assignment `ACTIVE`, unchanged.
+8. The same body again: 200, the same body, one row. A different, validly signed manifest
+   afterwards: `ALREADY_SUBMITTED`. An upload URL afterwards: `ALREADY_SUBMITTED`.
+9. A policy with a third, optional requirement and no item for it: 201. The same with a required
+   item removed: `REQUIREMENTS_INCOMPLETE`.
+10. Items swapped: `MANIFEST_MISMATCH`; an item naming a requirement outside the policy:
+    `UNKNOWN_REQUIREMENT`.
+11. `MANIFEST_MISMATCH` for the header's bounty id, assignment id, Scout, policy hash and
+    deployment id, one at a time, each re-signed (five asserts).
+12. `INVALID_REQUEST`: no body; no `signature`; a 127-character signature. `INVALID_MANIFEST`: an
+    uppercase digit in the nonce (four asserts).
+13. `SUBMISSION_SIGNATURE_INVALID`: one bit flipped; signed by another key; a valid signature
+    over another root (three asserts).
+14. `CAPTURE_NONCE_INVALID`: a nonce never issued; another assignment's nonce (two asserts).
+15. `CAPTURED_OUTSIDE_SESSION` at `issued_at` minus 1 ms and at `expires_at`; 201 at
+    `expires_at` minus 1 ms (three asserts, fresh seeds each).
+16. An item's accuracy 200.5: `LOCATION_TOO_IMPRECISE`; an item north by 0.002 with accuracy
+    `distance - 150 - 1`: `LOCATION_TOO_FAR`; with `distance - 150 + 1`: 201.
+17. `EVIDENCE_NOT_UPLOADED` for an item never uploaded and for one stored with another length;
+    `STORAGE_UNAVAILABLE` when `head` throws; the nonce still `ACTIVE` after each (three asserts).
+18. At `expires_at + 480 s`: `CAPTURE_SESSION_EXPIRED`, the nonce row `EXPIRED`, no submission.
+19. A second Start after the uploads: `CAPTURE_SESSION_SUPERSEDED`, no submission.
+20. A nonce set `CONSUMED` by SQL with no submission: `CAPTURE_SESSION_USED`.
+21. The nonce row's `deployment_id` set to 3 by SQL: `CAPTURE_NONCE_INVALID`, the row unchanged.
+22. The valid body sent twice together: one 201 and one 200, one row.
+23. Views: the assigned-Scout view's `submission` is null before and step 17's object after, and
+    its `capture.capture_nonce` null after; the nonce object's `submit_by` is `expires_at` plus
+    480 s; the owner view of the `ACCEPTED` bounty has `submission` with exactly `submitted_at`
+    and `item_count`; the public view is unchanged; a capture-nonce request after the submission
+    is `ALREADY_SUBMITTED`.
+24. Privacy: the upload URL, the signature and every item's `lat` appear in no log line captured
+    through a stream; the request log lines carry the paths only.
+25. The presigner reproduces AWS's published Signature Version 4 query example (the `GET` of
+    `test.txt` in `examplebucket`, 24 May 2013, signature
+    `aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404`), and for a `PUT` lists
+    exactly `content-length;host;x-amz-checksum-sha256` as signed headers.
+26. `loadConfig`: none of the store keys, no store; all four, the three defaults; two of the
+    four, a throw; `EVIDENCE_UPLOAD_URL_TTL_S` 901, a throw; an empty secret file, a throw (five
+    asserts).
+
+Other suites:
+
+- **Capture.** Tests 1 and 17: the nonce object's keys gain `submit_by`. Gate 25.
+- **Acceptance.** Test 5's key set gains `submission`. Gate 16.
+- **Migrations.** Unchanged: both tables already exist. Gate 1.
+
+Every other suite keeps its count.
+
+**Scripts**, run by hand, not in the gate:
+
+- `apps/api/scripts/evidence-store.sh` starts versitygw on `127.0.0.1:7070` over
+  `~/bountycam-evidence`, with its keys read from `~/bountycam-env` rather than the command line.
+- `apps/api/scripts/evidence-store-check.mjs` creates the bucket if absent and runs the spike's
+  nine storage checks (D139) through `src/evidence`, against the configured store.
+- `apps/api/scripts/submission-check.mjs <bounty_id>` reads the submission, recomputes the root
+  from the stored manifest, verifies the statement signature, and downloads every photo through
+  a presigned `GET` to recompute its sha256. Each result prints as one PASS or FAIL line.
+
+### 18.11 The live run
+
+On the A30 and the Seeker, with the API, versitygw and Metro on the laptop. Setup: versitygw
+through `evidence-store.sh`; the store keys in `~/bountycam-env/api.env`; `evidence-store-check`
+passes; `adb reverse` for 3000, 8081 and 7070 on both phones. A fresh bounty funded from the
+Seeker at a spot you can stand at, with two required photo requirements and one optional, and
+the default 7200-second completion window; accepted from the A30. From raw output:
+
+1. Section 17.12's five items.
+2. Each required photo reaches Uploaded; the Metro log shows each photo's size and hash time;
+   `~/bountycam-evidence` holds objects named by their digests.
+3. Submit: what Solflare shows for the statement is recorded; the response is 201.
+4. `submission-check` passes every line; the nonce row is `CONSUMED`; the bounty is `ACCEPTED`
+   and the assignment `ACTIVE`.
+5. The Seeker's bounty screen reads "Evidence received, being checked." with the time and count.
+6. The API's log lines for the upload URLs and the submission carry paths only: no URL, no
+   coordinates, no signature.

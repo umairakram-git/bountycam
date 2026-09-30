@@ -2798,3 +2798,100 @@ transaction. The manifest keys `bounty_id`, `assignment_id` and `capture_nonce`,
 lowercase hex characters exactly as issued, are fixed now (section 17.9), so P3's format never
 changes. The nonce is 32 bytes from the D54 randomness module; `NOT_ASSIGNED` is 403 because the
 caller can see the bounty but lacks the right, as `FORBIDDEN` is in section 8.7.
+
+**D138 — Session 20 product rulings for P4 (Umair, 1 October).**
+
+1. **No offline capture.** Start needs a connection; after Start, photos can be taken with weak
+   signal and upload when it returns.
+2. **Expiry during capture.** The camera locks at `expires_at`. Photos already taken upload and
+   submit until the grace ends. With a required photo missing, the Scout must Start again, which
+   discards the set.
+3. **Submitting is final.** One submission per assignment; no retakes after it. Retakes are
+   unlimited before it.
+4. **Optional requirements may be skipped.** Submit needs every required photo uploaded.
+5. **The requester before P6** sees "Evidence received, being checked.", the submission time and
+   the photo count. No photos, no locations, never the Scout's position.
+6. **Scope unchanged** (D116), after the architect flagged that P5, P6 and S0 then have roughly
+   three to four days.
+
+`apps/mobile/CAPTURE.md` section 7 and `apps/api/POLICY.md` section 18 carry them.
+
+**D139 — The P4 spike, 1 October: what the device and the store showed.**
+
+Run from an apply script and reverted; nothing committed. On the laptop, versitygw 1.8.0 passed
+nine storage checks: correct bytes stored; length and sha256 reported by `HEAD`; wrong bytes of
+the same length refused with nothing stored; a different length refused; a missing checksum
+refused; anonymous `GET` refused; an expired URL refused; a presigned `GET` returned the bytes; a
+same-key retry succeeded. On the A30: `expo-file-system`'s native module is present in the
+installed APK, so adding the package needs no rebuild; a 3456 by 4608 photo of 1425407 bytes was
+read in 57 ms, hashed with `@noble/hashes` in 4766 ms in the development build, and uploaded
+through `adb reverse` in about 0.2 s with the length signed and unsigned alike; Solflare's
+`signMessages` returned a valid ed25519 signature as the bare 64 bytes, not appended to the
+message.
+
+**D140 — The evidence store: versitygw in development, R2 in production, a presigner without an
+SDK.**
+
+Context. D4 fixes R2, private, presigned URLs with a 15-minute life, and SECURITY.md section 14
+keeps evidence bytes out of the API process. Development needs an S3-compatible server on the
+laptop.
+
+Ruling, technical. Development runs versitygw, a single Homebrew binary storing objects in a
+folder outside the repo; the phone reaches it through `adb reverse`. Production is R2 by
+configuration. Upload URLs sign `content-length` and `x-amz-checksum-sha256`, so the store itself
+refuses bytes other than those hashed, and the submission checks each object with `HEAD`, which
+never reads a photo. Keys are content-addressed, so retries rewrite the same object. Signature
+Version 4 is implemented in about sixty lines, pinned by AWS's published query-signing example
+and checked against versitygw by the D139 run; an SDK would add a large dependency tree to sign
+one request shape. Rejected: MinIO, whose repository is archived and whose Homebrew formula is
+deprecated from February 2026; uploading through the API, which section 14 forbids.
+
+**D141 — The manifest: a header leaf and one leaf per photo; accuracy in whole metres, rounded
+up.**
+
+Ruling, technical. The manifest is a header, carrying POLICY.md 17.9's keys with the
+deployment, the policy hash and the Scout's wallet, and one item per photo. The Merkle leaves are
+the header's digest followed by each item's, so the root binds the nonce and the wallet, and one
+photo's record can later be disclosed with a proof, without the others. Accuracy is a whole
+number of metres rounded up, because canonical JSON carries no fractions and rounding up never
+understates uncertainty. The Scout signs a four-key canonical statement naming the bounty and the
+root, which SECURITY.md section 5 already calls `BOUNTYCAM_EVIDENCE_V1`. Section 5's rule that
+every signed object begins with its domain tag becomes "carries": canonical JSON sorts its keys,
+so the tag cannot come first; it is a required key, as in the policy. Vectors V6 and V7 come
+from a Python generator independent of `packages/shared`, and both implementations agreed before
+the specification was committed. SPEC.md section 11.
+
+**D142 — A submission moves no state; one per assignment; an identical resend is the same
+submission.**
+
+Ruling, technical. Under D79 `bounties.state` follows the chain, whose `Submitted` arrives with
+`submit_attestation` in P5; the bounty stays `ACCEPTED` and the assignment `ACTIVE`, and the
+`submissions` row is the record. A unique constraint holds one submission per assignment (D138
+ruling 3). A resend whose root and signature match the stored ones answers 200 with the stored
+submission, so a lost response is safe to retry. `consumeCaptureNonce` runs inside the write
+transaction; an `EXPIRED` outcome is committed with its status write, and every other refusal
+rolls back. Capture-nonce issuance gains a step refusing a submitted assignment. POLICY.md
+section 18.6.
+
+**D143 — Each photo passes the start gate's rule at the shutter and at submission.**
+
+Context. D133 left the payment-side location rule to P4 and P5 and allowed it to equal the start
+gate's. Submission is final (D138 ruling 3): a photo that P5 would reject, discovered after
+submitting, leaves a bounty that can never pay.
+
+Ruling, technical. The phone applies `checkCaptureStart`, with the start gate's ceiling, to each
+photo's own fix at the shutter and refuses a failing photo on the spot; the submission applies
+the same rule to every item, and also requires each capture time to lie within the session. P5
+may tighten either for grading; it may not loosen them. SPEC.md section 10's note that P4 does
+not inherit the gate's thresholds is amended accordingly.
+
+**D144 — The phone hashes in chunks, yielding between them.**
+
+Context. D139 measured 4766 ms to hash one photo in JavaScript; in one call the screen would
+freeze that long for each photo.
+
+Ruling, technical. `packages/shared` gains `sha256Chunked`, which feeds 64 KiB chunks and yields
+to the screen between them; the Scout can frame the next shot while the previous one hashes, and
+its upload starts when its hash is done. Resolution is unchanged. Rejected: a native hashing
+module, which forces an APK rebuild on both phones; smaller photos, which trade evidence quality
+for CPU time.
