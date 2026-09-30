@@ -1,16 +1,16 @@
 # BountyCam — Handoff
 
-**Date:** 29 September 2026
+**Date:** 1 October 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
 spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification and build;
 Session 10; Session 11 escrow initialisation; Session 12 mobile sign-in; Session 13
 eligibility specification; Sessions 14 and 15 eligibility build; Session 16 Seeker check;
 Session 17 P1 — create and fund from the device, the funding projection; Session 18 P2 —
-discovery, accept from the device, the acceptance projection
-**Next session:** P3 in BACKLOG.md's Remaining plan — capture nonce issuance (D73), including
-where the nonce lives and what becomes of `assignments.challenge_nonce` (D125). Specification
-first; D116's order stands.
-**Deadline:** 8 October 2026 (9 days remaining)
+discovery, accept from the device, the acceptance projection; Session 19 P3 — the capture nonce
+**Next session:** P4 in BACKLOG.md's Remaining plan — guided live capture, evidence upload,
+manifest and signed submission, calling `consumeCaptureNonce` (POLICY.md 17.8, 17.9). Its first
+live run also carries P3's live items (D136). Specification first; D116's order stands.
+**Deadline:** 8 October 2026 (7 days remaining)
 
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
@@ -83,10 +83,11 @@ authority the upgrade authority, no freeze authority.
 ```
 hackathon202609/
 ├── apps/
-│   ├── api/          Fastify + TS, SIWS auth, bounty and acceptance endpoints, 11 migrations
-│   └── mobile/       Expo + TS: sign-in, create and fund, find and accept (DISCOVERY.md)
+│   ├── api/          Fastify + TS, SIWS auth, bounty, acceptance and capture-nonce endpoints,
+│   │                 12 migrations
+│   └── mobile/       Expo + TS: sign-in, create and fund, find and accept, start capture
 ├── packages/
-│   └── shared/       SPEC.md (normative) + implementation, 126 passing tests
+│   └── shared/       SPEC.md (normative) + implementation, 130 passing tests
 ├── programs/
 │   └── escrow/       Anchor 1.1.2, SPEC.md, eleven instructions, 140 tests, on devnet
 └── scripts/          devnet_fund_requester.py — test USDC and SOL; --sol-only for Scouts
@@ -1529,6 +1530,60 @@ red phase, including step 10's twelve single mutations, matched there first. Eve
 script pinned its bases and printed its written hashes; every commit script re-ran its gate.
 
 **Still open.** BACKLOG.md's Session 18 section.
+
+---
+
+## Session 19 — P3: the capture nonce (29 September to 1 October)
+
+Six commits: `788c12e` (specification, D131 to D137), `cbafe12` (shared location helpers),
+`8ac5f12` (migration 12, capture configuration, completion-window floor), `a1cb1b6` (the
+endpoint, view and consumption), `b17a524` (mobile Start capture), and this records commit.
+
+**What landed.** The whole of P3.
+
+- **Specification:** `apps/api/POLICY.md` section 17, `packages/shared/SPEC.md` section 10,
+  the new `apps/mobile/CAPTURE.md`, two lines in SECURITY.md. No amendment was needed after
+  the specification commit.
+- **Shared:** `src/location.ts`: `distanceM` (haversine, R 6371008.8 m),
+  `captureStartDecision`, `checkCaptureStart`; tests 127 to 130, gate 130.
+- **API:** migration 12 (`capture_nonces`, `assignments_binding_key`, `challenge_nonce`
+  dropped); seven capture keys and two startup invariants in `config.ts`; the completion window
+  floor of 1200 s; `POST /bounties/:id/capture-nonce` in twelve steps; the assigned-Scout view's
+  `capture` key and `assignment.id`; `consumeCaptureNonce` for P4. `test/capture.test.ts` (25);
+  bounties test 29 amended and 81 added; acceptance test 05 amended. Gate 1 / 38 / 81 / 8 / 7 /
+  26 / 24 / 16 / 25.
+- **Mobile:** `src/scout/capture.ts` and `src/screens/CaptureSection.tsx` on the Mission screen:
+  the start fix, the shared gate with the judged numbers on failure, the restart warning, the
+  countdown on the server's clock, recovery from the view. No camera. Gate: mobile `tsc` and a
+  Metro Android bundle. No native rebuild.
+- **Decisions:** D131 to D137. Umair ruled R1 to R6 (D132 to D136); the rest is technical.
+
+**Live, 1 October.** Migration 12 applied to `bountycam_dev`: 12 migrations, only `id` carries
+a default, `challenge_nonce` gone, assignments unchanged (2 `ACTIVE`, 1 `EXPIRED`). The laptop
+API answered `401` to an unauthenticated `POST …/capture-nonce`. On the A30, `17e419ff`'s
+Mission screen showed "It's too late to start capture on this mission." with no Start button:
+the phone read the view's `capture` key and the server's clock. No nonce has been issued
+against a real bounty; that run is P4's (D136, POLICY.md 17.12).
+
+**Facts worth not rediscovering.**
+
+- `auth.test.ts` builds its `Config` by hand; a new required key crashes every auth test at app
+  build until it is added there.
+- A TypeScript default parameter replaces an explicit `undefined`, so a test helper cannot use
+  `undefined` to mean "send no body"; test 12 uses a marker.
+- A composite foreign key on `(assignment_id, bounty_id, scout_id)` catches a wrong holder check
+  even when the check itself is broken: mutation C1 produced 500s, not wrongly bound rows.
+- `npx expo export --platform android` builds the full Metro bundle in about a minute and
+  writes nothing to the repo; it is the phone's gate where there is no test runner.
+- A second download of an apply script aborts on the tree the first run left; hashing the
+  written files shows whether that first run completed.
+
+**Process.** Specification first, and nothing in it had to change while building. The
+architect ran every script in a sandbox on Postgres 16 with PostGIS first; the red phases (4
+shared, 10 migration and configuration, 17 endpoint) all matched there before they ran here.
+Every apply script pinned its bases and printed its hashes; every commit script re-ran its gate.
+
+**Still open.** BACKLOG.md's Session 19 section.
 
 ---
 

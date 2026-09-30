@@ -698,6 +698,36 @@ open.
   `packages/shared`, not `config.ts`. Both keep behaviour safer or single-sourced; the
   document should be brought in line.
 
+## Session 19 (29 September to 1 October)
+
+**Closed.**
+
+- **Where the capture nonce lives** (D125) — its own table, `challenge_nonce` dropped (D131),
+  `8ac5f12`.
+- **MESSAGES.md's `CAPTURE_START_DEADLINE_BUFFER_SECS`** — settled by D132 as the deadline
+  buffer plus the minimum capture window.
+
+**Still open.**
+
+- **The API type check never sees its tests** — unchanged; `capture.test.ts` ran in the
+  architect's sandbox, where `tsc --noEmit` on `apps/api/src` was clean.
+- **The bottom buttons sit under the A30's navigation bar** — seen again on the Mission screen
+  on 1 October (O8).
+- **The require cycle in `packages/shared`** — now also through `location.js`; same safety
+  argument.
+
+**New.**
+
+- **P3's live items ride on P4's first run** (D136) — POLICY.md 17.12's five items: a nonce
+  issued on site with the start fix stored, the countdown against `server_time`, a restart
+  superseding, an indoor or distant refusal with the numbers shown, a path-only log line.
+- **The phone's capture section has device evidence for one state only** — the too-late state
+  on 1 October. The phone has no test runner (D127); the other states wait for P4's run.
+- **`CAPTURE_SUBMISSION_GRACE_S` is 480 by the architect's choice** (D132) — Umair may change
+  it in configuration; the startup invariant keeps it under the deadline buffer.
+- **MESSAGES.md still lists `CAPTURE_START_DEADLINE_BUFFER_SECS` as open** — the document
+  should point at D132.
+
 ---
 
 ## Notes owed to `solana-dev-notes`
@@ -806,10 +836,10 @@ HANDOFF.md; this section lists only what remains, in build order.
 
 ### Payment path, at A1
 
-- **P3** — Capture nonce issuance (D73): API specification, then build; where the nonce lives
-  and what becomes of `assignments.challenge_nonce` (D125). P2 is done (Session 18).
 - **P4** — Guided live capture, per-slot hashes through `packages/shared`, evidence upload to
-  private storage, manifest and Merkle root, wallet-signed submission.
+  private storage, manifest and Merkle root, wallet-signed submission. The manifest carries
+  POLICY.md 17.9's keys and the submission calls `consumeCaptureNonce`; the first live run
+  carries 17.12's items (D136). P3 is done (Session 19).
 - **P5** — Verifier service: policy evaluation, assurance grading from A0 and A1, signed
   attestation per MESSAGES.md, `submit_attestation`.
 - **P6** — Requester review, `approve`, and `reject` with a named requirement; payout confirmed
