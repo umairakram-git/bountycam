@@ -471,3 +471,6 @@ export * from "./acceptance.js";
 
 // SPEC.md section 10: the location helpers (Session 19, D133).
 export * from "./location.js";
+
+// SPEC.md section 11: the evidence manifest (Session 20, D141, D144).
+export * from "./evidence.js";

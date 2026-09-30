@@ -40,6 +40,12 @@ import {
   distanceM,
   captureStartDecision,
   checkCaptureStart,
+  checkEvidenceManifest,
+  evidenceLeaves,
+  evidenceRoot,
+  evidenceStatement,
+  manifestAccuracy,
+  sha256Chunked,
 } from "./index.js";
 import type {
   CreatedBountyExpectation,
@@ -1686,5 +1692,144 @@ describe("location helpers (SPEC.md 10)", () => {
       () => checkCaptureStart({ ...T, accuracyM: 5 }, { ...TS, lat: "-33.856784" }, 50, 200),
       "LOCATION_INPUT_INVALID",
     );
+  });
+});
+
+// SPEC.md section 11 (Session 20, P4): the evidence manifest, against vectors V6 and V7 from
+// the independent generator vectors/gen_evidence_vectors.py.
+describe("evidence manifest (SPEC.md 11)", () => {
+  interface EvidenceVector {
+    name: string;
+    manifest: Record<string, unknown>;
+    manifest_canonical: string;
+    leaves: string[];
+    evidence_root: string;
+    statement_canonical: string;
+    statement_sha256: string;
+  }
+  const file = JSON.parse(
+    readFileSync(join(process.cwd(), "vectors", "evidence_vectors.json"), "utf8"),
+  ) as { vectors: EvidenceVector[] };
+  const V6 = file.vectors[0] as EvidenceVector;
+  const bountyOf = (v: EvidenceVector): string =>
+    (v.manifest["header"] as Record<string, string>)["bounty_id"] as string;
+  // A fresh deep copy of V6's manifest, for mutation.
+  const v6 = (): { header: Record<string, unknown>; items: Record<string, unknown>[] } =>
+    JSON.parse(JSON.stringify(V6.manifest));
+  const item0 = (m: { items: Record<string, unknown>[] }): Record<string, unknown> =>
+    m.items[0] as Record<string, unknown>;
+
+  test("131 V6 and V7: accepted, canonical text, leaves and root reproduced", () => {
+    assert.equal(file.vectors.length, 2);
+    for (const v of file.vectors) {
+      checkEvidenceManifest(v.manifest);
+      assert.equal(canonicalise(v.manifest), v.manifest_canonical, v.name);
+      assert.deepEqual(evidenceLeaves(v.manifest).map(hex), v.leaves, v.name);
+      assert.equal(hex(evidenceRoot(v.manifest)), v.evidence_root, v.name);
+    }
+  });
+
+  test("132 evidenceStatement reproduces the statement bytes and digest", () => {
+    for (const v of file.vectors) {
+      const bytes = evidenceStatement(bountyOf(v), Buffer.from(v.evidence_root, "hex"));
+      assert.equal(new TextDecoder().decode(bytes), v.statement_canonical, v.name);
+      assert.equal(hex(sha256(bytes)), v.statement_sha256, v.name);
+    }
+  });
+
+  test("133 MANIFEST_SHAPE", () => {
+    rejectsWith(() => checkEvidenceManifest("manifest"), "MANIFEST_SHAPE");
+    rejectsWith(() => checkEvidenceManifest({ ...v6(), extra: 1 }), "MANIFEST_SHAPE");
+    const noScout = v6();
+    delete noScout.header["scout"];
+    rejectsWith(() => checkEvidenceManifest(noScout), "MANIFEST_SHAPE");
+    const ninth = v6();
+    item0(ninth)["note"] = "x";
+    rejectsWith(() => checkEvidenceManifest(ninth), "MANIFEST_SHAPE");
+    const stringDeployment = v6();
+    stringDeployment.header["deployment_id"] = "2";
+    rejectsWith(() => checkEvidenceManifest(stringDeployment), "MANIFEST_SHAPE");
+    rejectsWith(() => checkEvidenceManifest({ header: v6().header, items: {} }), "MANIFEST_SHAPE");
+  });
+
+  test("134 MANIFEST_ITEMS", () => {
+    rejectsWith(() => checkEvidenceManifest({ header: v6().header, items: [] }), "MANIFEST_ITEMS");
+    const many = v6();
+    many.items = Array.from({ length: 21 }, (_, i) => ({
+      ...item0(v6()),
+      requirement_id: "11111111-1111-4111-8111-" + String(i).padStart(12, "0"),
+    }));
+    rejectsWith(() => checkEvidenceManifest(many), "MANIFEST_ITEMS");
+    const twice = v6();
+    (twice.items[1] as Record<string, unknown>)["requirement_id"] = item0(twice)["requirement_id"];
+    rejectsWith(() => checkEvidenceManifest(twice), "MANIFEST_ITEMS");
+  });
+
+  test("135 MANIFEST_FIELD", () => {
+    const withHeader = (key: string, value: unknown) => {
+      const m = v6();
+      m.header[key] = value;
+      return m;
+    };
+    const withItem = (key: string, value: unknown) => {
+      const m = v6();
+      item0(m)[key] = value;
+      return m;
+    };
+    const nonce = V6.manifest["header"] as Record<string, string>;
+    const cases = [
+      withHeader("capture_nonce", "A" + (nonce["capture_nonce"] as string).slice(1)),
+      withHeader("policy_hash", (nonce["policy_hash"] as string).slice(1)),
+      withHeader("bounty_id", (nonce["bounty_id"] as string).toUpperCase()),
+      withHeader("deployment_id", 256),
+      withHeader("manifest_version", 2),
+      withHeader("scout", "0" + (nonce["scout"] as string).slice(1)),
+      withItem("byte_length", 0),
+      withItem("captured_at", "2026-10-01T00:05:12Z"),
+      withItem("captured_at", "2026-02-30T00:00:00.000Z"),
+      withItem("lat", "-33.856800"),
+      withItem("horizontal_accuracy_m", -1),
+    ];
+    assert.equal(cases.length, 11);
+    for (const m of cases) rejectsWith(() => checkEvidenceManifest(m), "MANIFEST_FIELD");
+  });
+
+  test("136 manifestAccuracy rounds up and rejects out-of-range input", () => {
+    assert.equal(manifestAccuracy(0), 0);
+    assert.equal(manifestAccuracy(12), 12);
+    assert.equal(manifestAccuracy(12.0001), 13);
+    assert.equal(manifestAccuracy(199.5), 200);
+    for (const bad of [-0.1, Number.NaN, Number.POSITIVE_INFINITY, 100000.5]) {
+      rejectsWith(() => manifestAccuracy(bad), "ACCURACY_INVALID");
+    }
+  });
+
+  test("137 sha256Chunked equals sha256 and pauses between chunks only", async () => {
+    for (const [length, pauses] of [[1, 0], [65536, 0], [65537, 1], [200001, 3]] as const) {
+      const bytes = new Uint8Array(length).map((_, i) => (i * 31 + 7) & 0xff);
+      let count = 0;
+      const digest = await sha256Chunked(bytes, 65536, async () => {
+        count += 1;
+      });
+      assert.equal(hex(digest), hex(sha256(bytes)), String(length));
+      assert.equal(count, pauses, String(length));
+    }
+    const noPause = async (): Promise<void> => undefined;
+    for (const bad of [0, 1.5]) {
+      await assert.rejects(sha256Chunked(new Uint8Array(4), bad, noPause), (err: unknown) =>
+        err instanceof SpecError && err.code === "CHUNK_INVALID");
+    }
+    await assert.rejects(
+      sha256Chunked([1, 2, 3] as unknown as Uint8Array, 65536, noPause),
+      (err: unknown) => err instanceof SpecError && err.code === "NOT_BYTES",
+    );
+  });
+
+  test("138 STATEMENT_INPUT_INVALID", () => {
+    const root = Buffer.from(V6.evidence_root, "hex");
+    rejectsWith(() => evidenceStatement(bountyOf(V6).toUpperCase(), root),
+      "STATEMENT_INPUT_INVALID");
+    rejectsWith(() => evidenceStatement(bountyOf(V6), root.subarray(0, 31)),
+      "STATEMENT_INPUT_INVALID");
   });
 });
