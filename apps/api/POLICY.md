@@ -11,6 +11,7 @@ section 15: funding from the device and the funding projection (D117 to D121).
 section 16: discovery, acceptance and the acceptance projection (D124 to D127).
 **Amended:** Session 20 (P4) — sections 8.2, 17.6 and 17.7, and the new section 18: evidence
 upload and submission (D138 to D144).
+**Amended:** Session 20 build — section 18.10 test 16, amendment A1.
 
 Policies and bounties share this document deliberately: the hashed policy object and the
 bounty row that references it must not drift, and a split document is how they would.
@@ -2784,8 +2785,10 @@ Submission:
 14. `CAPTURE_NONCE_INVALID`: a nonce never issued; another assignment's nonce (two asserts).
 15. `CAPTURED_OUTSIDE_SESSION` at `issued_at` minus 1 ms and at `expires_at`; 201 at
     `expires_at` minus 1 ms (three asserts, fresh seeds each).
-16. An item's accuracy 200.5: `LOCATION_TOO_IMPRECISE`; an item north by 0.002 with accuracy
-    `distance - 150 - 1`: `LOCATION_TOO_FAR`; with `distance - 150 + 1`: 201.
+16. An item's accuracy 201: `LOCATION_TOO_IMPRECISE`; an item north by 0.002 with accuracy
+    `floor(distance - 151)`: `LOCATION_TOO_FAR`; with `ceil(distance - 149)`: 201. Amendment A1
+    (Session 20, before the code): the manifest's accuracy is a whole number (SPEC.md 11.3), so
+    the values first written here, 200.5 and `distance - 150` plus or minus 1, could not be sent.
 17. `EVIDENCE_NOT_UPLOADED` for an item never uploaded and for one stored with another length;
     `STORAGE_UNAVAILABLE` when `head` throws; the nonce still `ACTIVE` after each (three asserts).
 18. At `expires_at + 480 s`: `CAPTURE_SESSION_EXPIRED`, the nonce row `EXPIRED`, no submission.
