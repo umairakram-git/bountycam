@@ -1,7 +1,8 @@
 // CAPTURE.md sections 3 to 5: the Start capture button, its failure messages,
 // the restart warning, the countdown and recovery. The server decides every
 // time; the phone shows the server's clock as its own clock plus an offset
-// measured on each response (D132). No camera until P4.
+// measured on each response (D132). Section 7's photos are EvidenceSection's;
+// this section owns the view, and shows the submitted state (section 7.7).
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Text, View } from 'react-native';
@@ -17,7 +18,10 @@ import {
   type CaptureState,
   type StartFix,
 } from '../scout/capture';
+import { readSubmission, type SubmissionSummary } from '../scout/evidence';
+import type { WalletProvider } from '../wallet/types';
 import { Button } from './common';
+import { EvidenceSection } from './EvidenceSection';
 import { styles } from './styles';
 
 type Action = 'settings' | 'retry' | 'missions' | undefined;
@@ -38,7 +42,9 @@ const MESSAGES = {
   gone: 'This mission can no longer be captured.',
   unreachable: "Couldn't reach BountyCam. Check your connection and try again.",
   started: 'Capture started. Take your photos before the timer ends.',
-  ended: 'Capture time has ended. Start again to capture a new set.',
+  // Section 7.2: said before any session exists (POLICY.md 17.9, D138 ruling 1).
+  connection: 'Start needs a connection. After you start, photos can be taken with weak ' +
+    'signal; they upload when it returns, until the upload deadline.',
   warning: 'Starting again will discard the photos from your current capture.',
   // The server's own too-far answer carries no distance; it is rare, because
   // the server runs the same function on the same fix (section 4).
@@ -57,8 +63,15 @@ export function CaptureSection(props: {
   readonly lon: string;
   readonly radiusM: number;
   readonly onMissions: () => void;
+  readonly provider: WalletProvider;
+  readonly view: unknown;
+  readonly scoutWallet: string;
 }): ReactNode {
   const [capture, setCapture] = useState<CaptureState | undefined>(undefined);
+  const [view, setView] = useState<unknown>(props.view);
+  const [submission, setSubmission] = useState<SubmissionSummary | null>(
+    readSubmission(props.view),
+  );
   const offset = useRef(0);
   const [message, setMessage] = useState<Message | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -79,6 +92,8 @@ export function CaptureSection(props: {
     const result = await apiGet(props.token, '/bounties/' + props.bountyId);
     const received = Date.now();
     if (result.status !== 200) return undefined;
+    setView(result.body);
+    setSubmission(readSubmission(result.body));
     return adopt((result.body as { capture?: unknown } | undefined)?.capture, received);
   }, [adopt, props.bountyId, props.token]);
 
@@ -195,9 +210,24 @@ export function CaptureSection(props: {
     );
   }
 
+  // Section 7.7: after submission, only the submitted state.
+  if (submission !== null) {
+    const at = new Date(submission.submittedAt);
+    const hhmm = String(at.getHours()).padStart(2, '0') + ':' +
+      String(at.getMinutes()).padStart(2, '0');
+    return (
+      <View>
+        <Text style={styles.label}>Capture</Text>
+        <Text style={styles.value}>
+          {'Evidence submitted at ' + hhmm + ' · ' + String(submission.itemCount) + ' photos. ' +
+            "The requester's review comes next."}
+        </Text>
+      </View>
+    );
+  }
+
   const now = serverNow();
   const live = capture.nonce !== null && now < capture.nonce.expiresAt;
-  const ended = capture.nonce !== null && !live;
   const open = now <= capture.startClosesAt;
 
   return (
@@ -208,7 +238,9 @@ export function CaptureSection(props: {
           {MESSAGES.started + ' ' + mmss(capture.nonce.expiresAt - now) + ' left.'}
         </Text>
       ) : null}
-      {ended && message === undefined ? <Text style={styles.value}>{MESSAGES.ended}</Text> : null}
+      {capture.nonce === null && open ? (
+        <Text style={styles.muted}>{MESSAGES.connection}</Text>
+      ) : null}
       {!open ? <Text style={styles.notice}>{MESSAGES.tooLate}</Text> : null}
       {message !== undefined && message.text !== MESSAGES.started ? (
         <Text style={styles.notice}>{message.text}</Text>
@@ -240,6 +272,21 @@ export function CaptureSection(props: {
           <Button label="Back to My missions" secondary onPress={props.onMissions} />
         ) : null}
       </View>
+      <EvidenceSection
+        token={props.token}
+        provider={props.provider}
+        view={view}
+        scoutWallet={props.scoutWallet}
+        nonce={capture.nonce}
+        maxAccuracyM={capture.maxAccuracyM}
+        maxAgeS={capture.maxAgeS}
+        target={{ lat: props.lat, lon: props.lon }}
+        radiusM={props.radiusM}
+        serverNow={serverNow}
+        onReload={async () => {
+          await reload();
+        }}
+      />
     </View>
   );
 }

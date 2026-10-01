@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
 import { missionDetails, rewardText } from '../scout/views';
+import type { WalletProvider } from '../wallet/types';
 import { CaptureSection } from './CaptureSection';
 import { Button, Field } from './common';
 import { styles } from './styles';
@@ -15,6 +16,8 @@ export function MissionScreen(props: {
   readonly token: string;
   readonly onBack: () => void;
   readonly onMissions: () => void;
+  readonly provider: WalletProvider;
+  readonly scoutWallet: string;
 }): ReactNode {
   const m = missionDetails(props.view);
   const deadline = m.deadline === '' ? '' : new Date(m.deadline).toLocaleString();
@@ -39,6 +42,9 @@ export function MissionScreen(props: {
           lon={props.lon}
           radiusM={m.captureRadiusM}
           onMissions={props.onMissions}
+          provider={props.provider}
+          view={props.view}
+          scoutWallet={props.scoutWallet}
         />
       </ScrollView>
       <View style={styles.buttons}>

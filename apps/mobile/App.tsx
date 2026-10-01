@@ -373,6 +373,8 @@ export default function App() {
         token={session?.token ?? ''}
         onBack={() => setScreen('home')}
         onMissions={() => setScreen('missions')}
+        provider={provider}
+        scoutWallet={session.user.wallet_address}
       />
     );
   }

@@ -20,6 +20,7 @@ import type {
   WalletProvider,
   WalletSendResult,
   WalletSignInResult,
+  WalletSignMessageResult,
 } from './types';
 
 function fail(
@@ -238,6 +239,55 @@ export function createMwaWalletProvider(): WalletProvider {
         return fail('NO_SIGNATURE', 'wallet returned no signature for the transaction');
       }
       return { ok: true, signature };
+    },
+
+    async signMessage(message: Uint8Array): Promise<WalletSignMessageResult> {
+      const token = authToken;
+      const stored = account;
+      if (token === undefined || stored === undefined) {
+        return fail('NOT_AUTHORIZED', 'signMessage() before a successful authorize()');
+      }
+      let signed: Uint8Array | undefined;
+      try {
+        // The same reauthorize-then-act sequence as signAndSendTransaction, so a
+        // wallet that switched accounts signs nothing (CAPTURE.md 7.8).
+        signed = await transact(async (wallet) => {
+          const reauthorized = await wallet.authorize({
+            identity: APP_IDENTITY,
+            chain: MWA_CHAIN,
+            auth_token: token,
+          });
+          authToken = reauthorized.auth_token;
+          const first = reauthorized.accounts[0];
+          if (first === undefined || first.address !== stored.addressBase64) {
+            throw new AccountChanged(first === undefined ? '<none>' : first.address);
+          }
+          const payloads = await wallet.signMessages({
+            addresses: [stored.addressBase64],
+            payloads: [message],
+          });
+          return payloads[0];
+        });
+      } catch (error: unknown) {
+        if (error instanceof AccountChanged) {
+          return fail('ACCOUNT_CHANGED', 'wallet returned a different account; nothing signed',
+            'raw base64: ' + error.address);
+        }
+        return fail('WALLET_ERROR', 'signMessages threw: ' + describeThrown(error));
+      }
+      if (signed === undefined) {
+        return fail('NO_SIGNATURE', 'wallet returned no signed payload for the message');
+      }
+      // Solflare on the A30 returns the bare 64-byte signature (D139); other wallets
+      // return the message followed by it.
+      if (signed.length === 64) return { ok: true, signature: Uint8Array.from(signed) };
+      if (signed.length === message.length + 64 &&
+        signed.subarray(0, message.length).every((b, i) => b === message[i])) {
+        return { ok: true, signature: Uint8Array.from(signed.subarray(message.length)) };
+      }
+      return fail('SIGNATURE_SHAPE', 'signed payload has an unexpected shape',
+        'returned ' + String(signed.length) + ' bytes for a ' + String(message.length) +
+          '-byte message');
     },
 
     disconnect(): void {

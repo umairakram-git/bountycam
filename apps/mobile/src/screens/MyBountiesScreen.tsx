@@ -1,10 +1,13 @@
 // FUNDING.md 2.4: GET /me/bounties; on load, one report per DRAFT row so a
 // lost report is picked up when its requester looks; Fund and Cancel on DRAFT.
+// CAPTURE.md 7.9: an ACCEPTED bounty's owner view says whether evidence arrived,
+// and nothing else about it (D138 ruling 5).
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
 import { apiGet, apiPostEmpty } from '../api/client';
 import { formatUsdc } from '../create/createBounty';
+import { readSubmission, type SubmissionSummary } from '../scout/evidence';
 import { Button } from './common';
 import { styles } from './styles';
 
@@ -17,6 +20,11 @@ export interface ListItem {
 
 function rewardText(baseUnits: string): string {
   return /^[0-9]+$/.test(baseUnits) ? formatUsdc(BigInt(baseUnits)) : baseUnits;
+}
+
+function hhmm(ms: number): string {
+  const d = new Date(ms);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 }
 
 function asItems(body: unknown): ListItem[] {
@@ -40,6 +48,7 @@ export function MyBountiesScreen(props: {
   readonly onBack: () => void;
 }): ReactNode {
   const [items, setItems] = useState<readonly ListItem[] | undefined>(undefined);
+  const [received, setReceived] = useState<Record<string, SubmissionSummary>>({});
   const [error, setError] = useState<string | undefined>(undefined);
   const [cancelling, setCancelling] = useState(false);
   const { token } = props;
@@ -63,7 +72,20 @@ export function MyBountiesScreen(props: {
         }
       }
       const second = drafts.length === 0 ? first : await apiGet(token, '/me/bounties');
-      setItems(asItems(second.body));
+      const listed = asItems(second.body);
+      setItems(listed);
+      // Section 7.9: the owner view of each ACCEPTED bounty carries `submission`.
+      const found: Record<string, SubmissionSummary> = {};
+      for (const item of listed.filter((i) => i.state === 'ACCEPTED')) {
+        try {
+          const detail = await apiGet(token, '/bounties/' + item.id);
+          const summary = detail.status === 200 ? readSubmission(detail.body) : null;
+          if (summary !== null) found[item.id] = summary;
+        } catch {
+          // The list still shows; the next refresh asks again.
+        }
+      }
+      setReceived(found);
     } catch (error: unknown) {
       setError('Could not reach the server: ' + String(error));
     }
@@ -114,6 +136,15 @@ export function MyBountiesScreen(props: {
               <Text selectable style={styles.muted}>
                 {item.id}
               </Text>
+              {received[item.id] !== undefined ? (
+                <View>
+                  <Text style={styles.value}>Evidence received, being checked.</Text>
+                  <Text style={styles.muted}>
+                    {'Submitted ' + hhmm(received[item.id]!.submittedAt) + ' · ' +
+                      String(received[item.id]!.itemCount) + ' photos'}
+                  </Text>
+                </View>
+              ) : null}
               {item.state === 'DRAFT' ? (
                 <View style={styles.chipRow}>
                   <Button label="Fund" disabled={busy} onPress={() => props.onFund(item.id)} />

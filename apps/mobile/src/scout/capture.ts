@@ -11,6 +11,8 @@ export interface CaptureNonce {
   readonly value: string;
   readonly issuedAt: number;
   readonly expiresAt: number;
+  /** POLICY.md 18.7: the last moment to upload or submit (CAPTURE.md 7.4). */
+  readonly submitBy: number;
 }
 
 export interface CaptureState {
@@ -44,11 +46,14 @@ export function readCapture(value: unknown): CaptureState | undefined {
     const hex = get(rawNonce, 'value');
     const issuedAt = time(get(rawNonce, 'issued_at'));
     const expiresAt = time(get(rawNonce, 'expires_at'));
+    const submitBy = time(get(rawNonce, 'submit_by'));
     if (typeof id !== 'string' || typeof hex !== 'string' || !/^[0-9a-f]{64}$/.test(hex)) {
       return undefined;
     }
-    if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)) return undefined;
-    nonce = { id, value: hex, issuedAt, expiresAt };
+    if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) || !Number.isFinite(submitBy)) {
+      return undefined;
+    }
+    nonce = { id, value: hex, issuedAt, expiresAt, submitBy };
   }
   const state: CaptureState = {
     serverTime: time(get(value, 'server_time')),

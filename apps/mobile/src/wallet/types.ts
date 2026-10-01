@@ -57,8 +57,13 @@ export type WalletFailureKind =
   | 'WALLET_ERROR'
   /** The reauthorize inside a send returned a different account (FUNDING.md 3). */
   | 'ACCOUNT_CHANGED'
-  /** The wallet sent nothing back for the one transaction it was given. */
-  | 'NO_SIGNATURE';
+  /** The wallet sent nothing back for the one transaction or message it was given. */
+  | 'NO_SIGNATURE'
+  /**
+   * A signed message came back neither as 64 bytes nor as the message followed by 64
+   * bytes (CAPTURE.md 7.8). The detail carries the returned length.
+   */
+  | 'SIGNATURE_SHAPE';
 
 export interface WalletFailure {
   readonly ok: false;
@@ -101,6 +106,14 @@ export interface WalletSendSuccess {
 
 export type WalletSendResult = WalletSendSuccess | WalletFailure;
 
+export interface WalletSignMessageSuccess {
+  readonly ok: true;
+  /** The 64-byte ed25519 signature over the message, alone. */
+  readonly signature: Uint8Array;
+}
+
+export type WalletSignMessageResult = WalletSignMessageSuccess | WalletFailure;
+
 export interface WalletProvider {
   /**
    * Connect and select an account. Must succeed before `signIn`, because the
@@ -128,6 +141,13 @@ export interface WalletProvider {
    * still ask the server (FUNDING.md 2.3 step 8).
    */
   signAndSendTransaction(transaction: Uint8Array): Promise<WalletSendResult>;
+
+  /**
+   * Sign one off-chain message with the signed-in account (CAPTURE.md 7.8): the
+   * BOUNTYCAM_EVIDENCE_V1 statement. Returns the 64-byte signature alone, whichever of the
+   * two shapes the wallet used.
+   */
+  signMessage(message: Uint8Array): Promise<WalletSignMessageResult>;
 
   /** Drop local session state. Local only; talks to no wallet. */
   disconnect(): void;
