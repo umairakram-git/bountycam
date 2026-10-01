@@ -21,6 +21,25 @@ export interface CaptureConfig {
   readonly maxLocationAgeS: number;
 }
 
+// POLICY.md section 18.3 (D140): the evidence store and the photo limits. The four store keys
+// go together: all set is a store, none set is no store, anything else exits at startup.
+export interface EvidenceStoreConfig {
+  /** The origin, exactly: scheme, host and port, no path. */
+  readonly endpoint: string;
+  /** The endpoint's host and port, as signed into every request. */
+  readonly host: string;
+  readonly bucket: string;
+  readonly accessKeyId: string;
+  readonly secretAccessKey: string;
+  readonly region: string;
+}
+
+export interface EvidenceConfig {
+  readonly store: EvidenceStoreConfig | null;
+  readonly maxBytes: number;
+  readonly uploadUrlTtlS: number;
+}
+
 export interface Config {
   readonly siwsDomain: string;
   readonly allowedChains: ReadonlySet<string>;
@@ -30,6 +49,8 @@ export interface Config {
   readonly cluster: string;
   readonly settlementMint: string;
   readonly capture: CaptureConfig;
+  /** Optional in the type, so hand-built test configurations stay valid. */
+  readonly evidence?: EvidenceConfig;
 }
 
 const SECRET_HEX = /^[0-9a-f]{64}$/;
@@ -68,6 +89,56 @@ export function loadCaptureConfig(env: Record<string, string | undefined>): Capt
   return capture;
 }
 
+const STORE_KEYS = [
+  "EVIDENCE_STORE_ENDPOINT",
+  "EVIDENCE_STORE_BUCKET",
+  "EVIDENCE_STORE_ACCESS_KEY_ID",
+  "EVIDENCE_STORE_SECRET_PATH",
+] as const;
+const BUCKET = /^[a-z0-9-]{3,63}$/;
+const PRINTABLE = /^[\x21-\x7e]{1,128}$/;
+const REGION = /^[a-z0-9-]{1,32}$/;
+
+// Section 18.3. The secret's content never appears in an error message.
+export function loadEvidenceConfig(env: Record<string, string | undefined>): EvidenceConfig {
+  const set = STORE_KEYS.filter((k) => env[k] !== undefined && env[k] !== "");
+  if (set.length !== 0 && set.length !== STORE_KEYS.length) {
+    throw new Error(
+      "EVIDENCE_STORE_ENDPOINT, _BUCKET, _ACCESS_KEY_ID and _SECRET_PATH go together",
+    );
+  }
+  const uploadUrlTtlS = positiveInt(env, "EVIDENCE_UPLOAD_URL_TTL_S", 900);
+  if (uploadUrlTtlS > 900) throw new Error("EVIDENCE_UPLOAD_URL_TTL_S must be at most 900 (D4)");
+  const maxBytes = positiveInt(env, "EVIDENCE_MAX_BYTES", 10485760);
+  if (set.length === 0) return { store: null, maxBytes, uploadUrlTtlS };
+
+  const endpointText = env["EVIDENCE_STORE_ENDPOINT"] as string;
+  let url: URL;
+  try {
+    url = new URL(endpointText);
+  } catch {
+    throw new Error("EVIDENCE_STORE_ENDPOINT is not a URL");
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.origin !== endpointText) {
+    throw new Error("EVIDENCE_STORE_ENDPOINT must be an http or https origin with no path");
+  }
+  const bucket = env["EVIDENCE_STORE_BUCKET"] as string;
+  if (!BUCKET.test(bucket)) throw new Error("EVIDENCE_STORE_BUCKET is malformed");
+  const accessKeyId = env["EVIDENCE_STORE_ACCESS_KEY_ID"] as string;
+  if (!PRINTABLE.test(accessKeyId)) throw new Error("EVIDENCE_STORE_ACCESS_KEY_ID is malformed");
+  const secretAccessKey = readFileSync(env["EVIDENCE_STORE_SECRET_PATH"] as string, "utf8").trim();
+  if (!PRINTABLE.test(secretAccessKey)) {
+    throw new Error("the evidence store secret file must hold one printable line");
+  }
+  const region = env["EVIDENCE_STORE_REGION"] || "us-east-1";
+  if (!REGION.test(region)) throw new Error("EVIDENCE_STORE_REGION is malformed");
+  return {
+    store: { endpoint: url.origin, host: url.host, bucket, accessKeyId, secretAccessKey, region },
+    maxBytes,
+    uploadUrlTtlS,
+  };
+}
+
 export function loadConfig(env: Record<string, string | undefined>): Config {
   const secretPath = env["JWT_SECRET_PATH"];
   if (secretPath === undefined || secretPath === "") {
@@ -104,5 +175,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     cluster: env["SOLANA_CLUSTER"] ?? "devnet",
     settlementMint,
     capture: loadCaptureConfig(env),
+    evidence: loadEvidenceConfig(env),
   };
 }

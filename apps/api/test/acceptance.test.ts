@@ -398,7 +398,7 @@ test("05 the assigned-Scout view: public keys plus policy and assignment", async
   const view = (await report(scout.token)).json() as Record<string, unknown>;
   assert.deepEqual(
     Object.keys(view).sort(),
-    [...PUBLIC_KEYS, "assignment", "capture", "policy"].sort(),
+    [...PUBLIC_KEYS, "assignment", "capture", "policy", "submission"].sort(),
   );
   const policy = view["policy"] as Record<string, unknown>;
   const hash = Buffer.from(sha256(new TextEncoder().encode(canonicalise(policy)))).toString("hex");

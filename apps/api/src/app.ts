@@ -10,6 +10,8 @@ import { registerVoucherRoutes } from "./eligibility/routes.ts";
 import { registerFundingRoutes } from "./funding/routes.ts";
 import { registerAcceptanceRoutes } from "./acceptance/routes.ts";
 import { registerCaptureRoutes } from "./capture/routes.ts";
+import { registerEvidenceRoutes } from "./evidence/routes.ts";
+import type { EvidenceStore } from "./evidence/store.ts";
 
 export interface AppDeps {
   config: Config;
@@ -19,6 +21,8 @@ export interface AppDeps {
   // ELIGIBILITY.md: the voucher route registers only when its dependencies
   // are supplied; suites that never sign build the app without them.
   eligibility?: EligibilityDeps;
+  // POLICY.md section 18.3: the evidence routes register only with a store.
+  evidenceStore?: EvidenceStore;
   // A stream lets a test capture log output and scan it (POLICY.md test 10);
   // Fastify passes the object to pino unchanged.
   logger?: boolean | { level: string; stream: { write: (msg: string) => void } };
@@ -86,6 +90,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       randomness: deps.randomness,
       deploymentId: deps.eligibility.deployment.deploymentId,
     });
+    // POLICY.md sections 18.5 and 18.6: with the chain for deployment_id and a store.
+    if (deps.evidenceStore !== undefined && deps.config.evidence?.store != null) {
+      registerEvidenceRoutes(app, {
+        pool: deps.pool,
+        config: deps.config,
+        clock: deps.clock,
+        deploymentId: deps.eligibility.deployment.deploymentId,
+        store: deps.evidenceStore,
+      });
+    }
   }
   return app;
 }

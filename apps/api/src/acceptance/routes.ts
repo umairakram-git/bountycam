@@ -9,6 +9,7 @@ import { UUID_FORM } from "../bounties/extract.ts";
 import { bytesToHex } from "../bounties/policy.ts";
 import { assignedView, ownerView } from "../bounties/views.ts";
 import { captureObject, liveNonce } from "../capture/nonce.ts";
+import { ownerSubmission, scoutSubmission } from "../evidence/routes.ts";
 import type { ChainReader } from "../chain/rpc.ts";
 import type { Clock } from "../clock.ts";
 import type { Config } from "../config.ts";
@@ -115,10 +116,16 @@ export function registerAcceptanceRoutes(app: FastifyInstance, deps: AcceptanceR
                 now,
                 await liveNonce(pool, acceptance.id, now),
               ),
+              submission: await scoutSubmission(pool, acceptance.id),
             }),
           );
         }
-        if (isRequester) return reply.status(200).send(ownerView(fields));
+        if (isRequester) {
+          // Section 18.7: an ACCEPTED bounty's owner view carries the submission.
+          return reply
+            .status(200)
+            .send(ownerView({ ...fields, submission: await ownerSubmission(pool, id) }));
+        }
         return fail(reply, 409, "ACCEPTED_BY_OTHER");
       }
       if (fresh.state === "AVAILABLE") {

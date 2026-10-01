@@ -22,6 +22,9 @@ export interface OwnerViewInput {
   createdAt: Date;
   policyHashHex: string;
   canonicalJson: string;
+  // POLICY.md section 18.7 (D138 ruling 5): passed for an ACCEPTED bounty only; the key
+  // exists exactly when this is given.
+  submission?: Record<string, unknown> | null;
 }
 
 // Section 8.2 owner view: eight keys, requester only. The policy is produced
@@ -38,6 +41,7 @@ export function ownerView(input: OwnerViewInput): Record<string, unknown> {
     created_at: input.createdAt.toISOString(),
     policy_hash: input.policyHashHex,
     policy: JSON.parse(input.canonicalJson) as unknown,
+    ...(input.submission === undefined ? {} : { submission: input.submission }),
   };
 }
 
@@ -150,6 +154,8 @@ export interface AssignedViewInput extends PublicViewInput {
   deadline: Date;
   // POLICY.md section 17.7 (D134): built by captureObject in capture/nonce.ts.
   capture: Record<string, unknown>;
+  // POLICY.md section 18.7: null, or the submission's four keys.
+  submission: Record<string, unknown> | null;
 }
 
 // POLICY.md section 16.4 (D127): the assigned-Scout view. The public view plus
@@ -166,5 +172,6 @@ export function assignedView(input: AssignedViewInput): Record<string, unknown> 
       deadline: input.deadline.toISOString(),
     },
     capture: input.capture,
+    submission: input.submission,
   };
 }

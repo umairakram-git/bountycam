@@ -38,6 +38,18 @@ echo "rpc host:    $(echo "$SOLANA_RPC_URL" | sed 's|^https://\([^/?]*\).*|\1|')
 echo "seeker rpc:  $(echo "$SEEKER_RPC_URL" | sed 's|^https://\([^/?]*\).*|\1|') (rest not printed)"
 echo "elig key:    $ELIGIBILITY_KEY_PATH (contents not printed)"
 echo "jwt:         iss=$JWT_ISSUER aud=$JWT_AUDIENCE (secret not printed)"
+if [ -n "${EVIDENCE_STORE_SECRET_PATH:-}" ]; then
+  [ -f "$EVIDENCE_STORE_SECRET_PATH" ] || {
+    echo "evidence store secret file not found" >&2
+    exit 1
+  }
+  EMODE=$(stat -f '%OLp' "$EVIDENCE_STORE_SECRET_PATH")
+  [ "$EMODE" = "600" ] || { echo "evidence store secret mode $EMODE, expected 600" >&2; exit 1; }
+  echo "evidence:    ${EVIDENCE_STORE_ENDPOINT:-} bucket ${EVIDENCE_STORE_BUCKET:-}" \
+    "(secret not printed)"
+else
+  echo "evidence:    store not configured; upload and submission routes off"
+fi
 psql "$DATABASE_URL" -tAc "select 1" >/dev/null 2>&1 || {
   echo "database unreachable: $(echo "$DATABASE_URL" | sed 's|.*/||')" >&2
   exit 1

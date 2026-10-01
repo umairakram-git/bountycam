@@ -398,10 +398,12 @@ test("01 the holder starts: 201, the injected value, expiry after 1200 s, the ro
   assert.deepEqual(Object.keys(res.json() as object), ["capture"]);
   assert.deepEqual(Object.keys(cap).sort(), CAPTURE_KEYS);
   const n = cap["capture_nonce"] as Record<string, string>;
-  assert.deepEqual(Object.keys(n).sort(), ["expires_at", "id", "issued_at", "value"]);
+  assert.deepEqual(Object.keys(n).sort(), ["expires_at", "id", "issued_at", "submit_by", "value"]);
   assert.equal(n["value"], "ab".repeat(32));
   assert.equal(n["issued_at"], BASE.toISOString());
   assert.equal(n["expires_at"], new Date(BASE.getTime() + 1_200_000).toISOString());
+  // POLICY.md section 18.7: submit_by is expires_at plus the 480 s grace.
+  assert.equal(n["submit_by"], new Date(BASE.getTime() + 1_680_000).toISOString());
   const rows = await nonces();
   assert.equal(rows.length, 1);
   const r = rows[0]!;
@@ -616,6 +618,10 @@ test("17 the assigned-Scout view's capture key follows the session", async () =>
   const issued = (await start(a.scout.token)).json().capture.capture_nonce;
   const during = (await view(a.scout.token)).json() as Record<string, any>;
   assert.deepEqual(during["capture"]["capture_nonce"], issued);
+  assert.equal(
+    during["capture"]["capture_nonce"]["submit_by"],
+    new Date(Date.parse(issued.expires_at as string) + 480_000).toISOString(),
+  );
   nowMs = Date.parse(issued.expires_at as string);
   const after = (await view(a.scout.token)).json() as Record<string, any>;
   assert.equal(after["capture"]["capture_nonce"], null);

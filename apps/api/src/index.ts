@@ -16,6 +16,7 @@ import { assertMainnet, heliusSeekerCheck } from "./eligibility/seeker.ts";
 import { SWEEP_INTERVAL_MS, startReservationSweeper } from "./eligibility/sweeper.ts";
 import { projectAcceptance } from "./acceptance/project.ts";
 import { startFundingSweeper } from "./funding/sweeper.ts";
+import { s3EvidenceStore } from "./evidence/store.ts";
 
 let config: Config;
 try {
@@ -68,6 +69,19 @@ try {
 }
 const seeker = heliusSeekerCheck(seekerRpcUrl, fetch, systemClock);
 
+// POLICY.md section 18.3: the evidence store, when configured. Only the origin and bucket
+// are logged; the keys never are.
+const storeConfig = config.evidence?.store ?? null;
+const evidenceStore =
+  storeConfig === null
+    ? undefined
+    : s3EvidenceStore(storeConfig, config.evidence?.uploadUrlTtlS ?? 900, fetch);
+console.log(
+  storeConfig === null
+    ? "evidence store: not configured; upload and submission routes off"
+    : `evidence store: ${storeConfig.endpoint} bucket ${storeConfig.bucket}`,
+);
+
 const pool = new pg.Pool({ connectionString: process.env["DATABASE_URL"] });
 const app = buildApp({
   config,
@@ -76,6 +90,7 @@ const app = buildApp({
   randomness: systemRandomness,
   logger: true,
   eligibility: { config: eligibility, deployment, chain, signer, seeker },
+  ...(evidenceStore === undefined ? {} : { evidenceStore }),
 });
 
 const port = Number(process.env["PORT"] ?? 3000);

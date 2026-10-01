@@ -23,6 +23,7 @@ import {
 import { snapLat, snapLon } from "./snap.ts";
 import { assignedView, listItem, ownerView, publicView } from "./views.ts";
 import { captureObject, liveNonce } from "../capture/nonce.ts";
+import { ownerSubmission, scoutSubmission } from "../evidence/routes.ts";
 import type { EligibilityDeps } from "../eligibility/deps.ts";
 import { projectFunding, type ProjectionDeps } from "../funding/project.ts";
 
@@ -571,6 +572,10 @@ export function registerBountyRoutes(
             createdAt: row.created_at,
             policyHashHex: bytesToHex(row.policy_hash),
             canonicalJson: row.canonical_json,
+            // Section 18.7: an ACCEPTED bounty's owner view carries the submission.
+            ...(row.state === "ACCEPTED"
+              ? { submission: await ownerSubmission(pool, row.id) }
+              : {}),
           }),
         );
       }
@@ -607,6 +612,7 @@ export function registerBountyRoutes(
               acceptedAt: acceptance.accepted_at,
               deadline: acceptance.deadline,
               capture,
+              submission: await scoutSubmission(pool, acceptance.id),
             }),
           );
         }

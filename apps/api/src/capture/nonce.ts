@@ -33,6 +33,11 @@ export function captureObject(
             value: nonce.value.toString("hex"),
             issued_at: nonce.issued_at.toISOString(),
             expires_at: nonce.expires_at.toISOString(),
+            // Section 18.7 (D142): the last moment an upload URL is issued or a
+            // submission can consume the nonce.
+            submit_by: new Date(
+              nonce.expires_at.getTime() + config.submissionGraceS * 1000,
+            ).toISOString(),
           },
   };
 }

@@ -4,7 +4,7 @@
 // logged (section 17.5). Registered only when the chain dependencies exist,
 // because deployment_id comes from them; nothing here reads the chain.
 import type { FastifyInstance, FastifyReply } from "fastify";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { checkCaptureStart, isValidLat, isValidLon } from "@hackathon/shared";
 import { authUser, makeRequireAuth } from "../auth/middleware.ts";
 import { UUID_FORM } from "../bounties/extract.ts";
@@ -33,6 +33,11 @@ const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 
 function fail(reply: FastifyReply, status: number, code: string): FastifyReply {
   return reply.status(status).send({ error: code });
+}
+
+async function submitted(db: Pool | PoolClient, assignmentId: string): Promise<boolean> {
+  const r = await db.query("SELECT 1 FROM submissions WHERE assignment_id = $1", [assignmentId]);
+  return r.rowCount !== 0;
 }
 
 // Step 2: exactly four keys, each of its type; accuracy finite and 0 or more.
@@ -97,6 +102,8 @@ export function registerCaptureRoutes(app: FastifyInstance, deps: CaptureRouteDe
       );
       const assignment = held.rows[0];
       if (assignment === undefined) return fail(reply, 403, "NOT_ASSIGNED");
+      // Step 8a (section 18.7, D142): a submitted mission starts no new session.
+      if (await submitted(pool, assignment.id)) return fail(reply, 409, "ALREADY_SUBMITTED");
       // Step 9. Start is allowed at equality.
       const now = clock.now();
       const deadlineMs = assignment.deadline.getTime();
@@ -147,6 +154,10 @@ export function registerCaptureRoutes(app: FastifyInstance, deps: CaptureRouteDe
         if (still.rowCount !== 1) {
           await client.query("ROLLBACK");
           return fail(reply, 403, "NOT_ASSIGNED");
+        }
+        if (await submitted(client, assignment.id)) {
+          await client.query("ROLLBACK");
+          return fail(reply, 409, "ALREADY_SUBMITTED");
         }
         // 11.2: reissue always supersedes.
         await client.query(
