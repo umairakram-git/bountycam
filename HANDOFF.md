@@ -6,10 +6,11 @@ spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specificatio
 Session 10; Session 11 escrow initialisation; Session 12 mobile sign-in; Session 13
 eligibility specification; Sessions 14 and 15 eligibility build; Session 16 Seeker check;
 Session 17 P1 — create and fund from the device, the funding projection; Session 18 P2 —
-discovery, accept from the device, the acceptance projection; Session 19 P3 — the capture nonce
-**Next session:** P4 in BACKLOG.md's Remaining plan — guided live capture, evidence upload,
-manifest and signed submission, calling `consumeCaptureNonce` (POLICY.md 17.8, 17.9). Its first
-live run also carries P3's live items (D136). Specification first; D116's order stands.
+discovery, accept from the device, the acceptance projection; Session 19 P3 — the capture nonce;
+Session 20 P4 — evidence capture, upload and signed submission
+**Next session:** P5 in BACKLOG.md's Remaining plan — the verifier: policy evaluation, assurance
+grading from A0 and A1, the signed attestation (MESSAGES.md 3) over P4's `evidence_root`, and
+`submit_attestation`. Specification first; D116's order stands.
 **Deadline:** 8 October 2026 (7 days remaining)
 
 **Repo:** https://github.com/umairakram-git/bountycam (public)
@@ -53,6 +54,7 @@ sufficient for truth.
 | PostgreSQL | 17.11 | Homebrew, native — no Docker |
 | PostGIS | 3.6.4 | |
 | Device | Seeker, API 36, StrongBox present | |
+| versitygw | 1.8.0 | Homebrew; the development evidence store (D140) |
 
 **Keys** — `~/bountycam-keys/`, mode 600, outside the repo:
 `upgrade-authority.json`, `relayer.json`, `attester.json`, `escrow-keypair.json`,
@@ -83,11 +85,11 @@ authority the upgrade authority, no freeze authority.
 ```
 hackathon202609/
 ├── apps/
-│   ├── api/          Fastify + TS, SIWS auth, bounty, acceptance and capture-nonce endpoints,
-│   │                 12 migrations
-│   └── mobile/       Expo + TS: sign-in, create and fund, find and accept, start capture
+│   ├── api/          Fastify + TS, SIWS auth, bounty, acceptance, capture-nonce and evidence
+│   │                 endpoints, 13 migrations
+│   └── mobile/       Expo + TS: sign-in, create and fund, find and accept, capture and submit
 ├── packages/
-│   └── shared/       SPEC.md (normative) + implementation, 130 passing tests
+│   └── shared/       SPEC.md (normative) + implementation, 138 passing tests
 ├── programs/
 │   └── escrow/       Anchor 1.1.2, SPEC.md, eleven instructions, 140 tests, on devnet
 └── scripts/          devnet_fund_requester.py — test USDC and SOL; --sol-only for Scouts
@@ -1584,6 +1586,75 @@ shared, 10 migration and configuration, 17 endpoint) all matched there before th
 Every apply script pinned its bases and printed its hashes; every commit script re-ran its gate.
 
 **Still open.** BACKLOG.md's Session 19 section.
+
+---
+
+## Session 20 — P4: evidence capture, upload and signed submission (1 October)
+
+Six commits: `9556467` (specification, D138 to D144), `d21b3f4` (shared: the evidence manifest),
+`91ab295` (POLICY.md 18.10 amendment A1), `0798806` (API: evidence upload and submission),
+`f6c46e2` (mobile: capture, upload and submission), and this records commit. Session 19's six
+commits were pushed at the start of this session; they had been committed but not pushed.
+
+**What landed.** The whole of P4.
+
+- **Specification:** `apps/api/POLICY.md` section 18, `packages/shared/SPEC.md` section 11 and
+  6.7, `apps/mobile/CAPTURE.md` section 7, SECURITY.md section 5's wording and the store secret.
+  One amendment while building, A1: test 16's accuracy values, whole metres (SPEC.md 11.3).
+- **Spike, reverted, D139:** versitygw passed nine storage checks; on the A30,
+  `expo-file-system`'s native module is in the installed APK, a camera photo was hashed and
+  uploaded through `adb reverse`, and Solflare's `signMessages` returned a bare 64-byte
+  signature that verified.
+- **Shared:** `src/evidence.ts`: `checkEvidenceManifest`, `evidenceLeaves`, `evidenceRoot`,
+  `evidenceStatement`, `manifestAccuracy`, `sha256Chunked`; vectors V6 and V7 from
+  `vectors/gen_evidence_vectors.py`, independent of the package. Tests 131 to 138, gate 138.
+- **API:** migration 13 (`submissions` and `evidence_items` reshaped); the evidence store
+  configuration; `src/evidence/sigv4.ts` (no SDK, pinned by AWS's published example),
+  `store.ts`, `routes.ts`: `POST /bounties/:id/evidence/upload-url` and `/submission`; the views'
+  `submission`, `submit_by`, capture-nonce step 8a. `test/evidence.test.ts` (26); capture tests
+  1 and 17 and acceptance test 5 amended. Gate 1 / 38 / 81 / 8 / 7 / 26 / 24 / 16 / 25 / 26.
+  Scripts: `evidence-store.sh`, `evidence-store-check.mjs`, `submission-check.mjs`; `dev.sh`.
+- **Mobile:** `WalletProvider.signMessage` (MWA), `src/scout/evidence.ts`,
+  `src/screens/EvidenceSection.tsx`, the capture section's connection line and submitted state,
+  the requester's line on My bounties, `expo-file-system ~57.0.6` (JavaScript only). Gate: mobile
+  `tsc` and a Metro Android bundle. No native rebuild.
+- **Decisions:** D138 to D145. Umair ruled D138 and D145 point 1; the rest is technical.
+
+**Live, 1 October.** Store keys in `~/bountycam-env/api.env`, the secret in
+`evidence-store.secret` (mode 600); `evidence-store-check` 10 of 10; migration 13 applied to
+`bountycam_dev`, only `id` carrying a default on either table. Bounty
+`3591bf4c-6acc-4196-8d07-0ca4c49f8ad0` ("P4 live run 1", 5 USDC, two required photo prompts)
+funded from the Seeker (`3ycF43W4…Eia6iHb3`), accepted on the A30 at 10:50 (deadline 12:50:06).
+At the spot: a first Start at 11:01 inside a car, with no data, refused on the phone with no fix;
+Start at 11:09:40 issued a nonce; a second Start at 11:18:25 superseded it; two photos (1672426
+and 1486270 bytes) hashed in 5587 and 7186 ms in the development build, uploaded, and were
+submitted at 11:19:39 (201). The first signing attempt failed as "Local association cancelled by
+user" and nothing was sent; the second signed. `submission-check` 10 of 10: canonical manifest,
+root `1160813b…4fd24f7c` recomputed, Solflare's signature verified, nonce `CONSUMED`, bounty
+`ACCEPTED`, assignment `ACTIVE`, both photos downloaded with their sha256. The Seeker showed
+"Evidence received, being checked. Submitted 05:19 · 2 photos" (its clock is set to UTC+4).
+Every API log line for the run carries the path only. The full record is D145.
+
+**Facts worth not rediscovering.**
+
+- One phone connects to the laptop at a time; a live run sequences the Seeker and the A30, and
+  the laptop goes to the spot on battery with the A30 plugged in. Re-run `adb reverse` after
+  every replug; the A30 needs 3000, 8081 and 7070.
+- The A30 has no mobile data. Everything it does runs over the cable; only the GPS fix is slow
+  without it, and the first Start may answer "Couldn't get your location".
+- Leaving the Mission screen drops photos held in memory (CAPTURE.md 7.4); the session survives.
+- `hunks.py`'s first version checked anchor uniqueness against the original text, not the text
+  as edited so far; the generator now anchors each hunk in the text as it stands then.
+- The bounty `3591bf4c` cannot be paid: P5 does not exist, and its deadline is 12:50:06 on
+  1 October. After that only CLI `expire_accepted` returns its 5 USDC (D123 ruling 6).
+
+**Process.** Specification first. Every apply script ran in the architect's sandbox (Postgres 16
+with PostGIS, versitygw 1.8.0) before it ran here, and printed the same hashes. Red phases: 8
+shared mutations and 26 API mutations, each turning exactly its named tests red. The commit
+scripts made each staged set exactly its own list; the API's made two commits, the amendment
+ahead of the code.
+
+**Still open.** BACKLOG.md's Session 20 section.
 
 ---
 

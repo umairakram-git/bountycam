@@ -2895,3 +2895,26 @@ to the screen between them; the Scout can frame the next shot while the previous
 its upload starts when its hash is done. Resolution is unchanged. Rejected: a native hashing
 module, which forces an APK rebuild on both phones; smaller photos, which trade evidence quality
 for CPU time.
+
+**D145 — P4's live run, 1 October, and two rulings on it (Umair).**
+
+Record. Bounty `3591bf4c-6acc-4196-8d07-0ca4c49f8ad0`, funded from the Seeker, accepted on the
+A30 at 10:50 (deadline 12:50:06), two required photo prompts, a 150 m radius. The Start at
+11:09:40 stored its fix as sent (about 10 m from the spot, accuracy 34.7 m) and issued a nonce
+expiring at 11:29:40; at 11:11 the countdown read 18:13. The Start at 11:18:25 superseded it
+(`SUPERSEDED`, then `CONSUMED` at 11:19:39). Two photos of 1672426 and 1486270 bytes hashed in
+5587 and 7186 ms in the development build, uploaded through presigned URLs, and the submission
+answered 201. `submission-check` passed 10 of 10, including Solflare's signature over the
+`BOUNTYCAM_EVIDENCE_V1` statement and both photos re-hashed after download. The bounty stayed
+`ACCEPTED` and the assignment `ACTIVE` (D142). The Seeker showed the requester's line. Every API
+log line carried the path only. POLICY.md 17.12 checks 1, 2, 3 and 5 and 18.11 items 2 to 6 are
+met.
+
+1. **Check 4 is half met, and left for now (Umair).** The phone's own refusal was seen at 11:01
+   with no fix and nothing sent; the distance refusal with its numbers was not. Getting it would
+   have meant accepting a second bounty and locking its funds until expiry. The distance rule is
+   covered by API evidence test 16 and capture test 15 and shared test 129.
+2. **Two required prompts instead of two plus one optional (technical, accepted).** The Create
+   form makes every prompt required, so 18.11's optional requirement could not be created from
+   the device. Skipping an optional requirement is covered by API evidence test 9 and is the
+   same submit rule on the phone.

@@ -826,6 +826,42 @@ open.
 - `[workspace] exclude` in Anchor.toml keeps a test program out of Anchor's build and key
   check; build it with `cargo build-sbf`, which writes to the same `target/deploy`.
 
+## Session 20 (1 October)
+
+**Closed.**
+
+- **P4** — guided live capture, evidence upload, manifest and Merkle root, signed submission;
+  live on devnet (D145). P3's live items rode on the run (D136), check 4 in part.
+- **MESSAGES.md still lists `CAPTURE_START_DEADLINE_BUFFER_SECS` as open** — it now points at
+  D132 (`9556467`).
+
+**Still open.**
+
+- **The API type check never sees its tests** — unchanged; `evidence.test.ts` ran in the
+  architect's sandbox.
+- **The bottom buttons sit under the A30's navigation bar** — seen on every A30 screen of the
+  run (O8).
+- **The require cycle in `packages/shared`** — now also through `evidence.js`; same safety
+  argument.
+
+**New.**
+
+- **P3's check 4 is half met** (D145 point 1, Umair: ignored for now) — a refusal decided on the
+  phone was seen (no fix); the distance refusal with its numbers was not.
+- **The Create form cannot mark a requirement optional** — every prompt is required; the live
+  run used two required prompts (D145 point 2). An optional toggle is a requester-side change.
+- **Hashing takes 5.6 to 7.2 s per photo in the development build** (D145) — chunked, so the
+  screen stays usable; a release build is unmeasured.
+- **What Solflare displays for the signed statement was not recorded.**
+- **The first signing attempt was cancelled** ("Local association cancelled by user") — cause
+  not established; the retry signed.
+- **Retaken photos leave unused objects in the store** — content-addressed, never referenced;
+  their deletion is O6's retention rule.
+- **Bounty `3591bf4c` will expire unpaid** at 12:50:06 on 1 October; CLI `expire_accepted`
+  returns its 5 USDC, as for `17e419ff` and `802997ff`.
+- **The local evidence store must be running for the two P4 routes to answer** — start
+  `apps/api/scripts/evidence-store.sh` before the API in each live session.
+
 ---
 
 ## Remaining plan
@@ -840,7 +876,8 @@ HANDOFF.md; this section lists only what remains, in build order.
   private storage, manifest and Merkle root, wallet-signed submission. The manifest carries
   POLICY.md 17.9's keys and the submission calls `consumeCaptureNonce`; the first live run
   carries 17.12's items (D136). P3 is done (Session 19). Specified in Session 20: POLICY.md
-  section 18, SPEC.md section 11, CAPTURE.md section 7 (D138 to D144).
+  section 18, SPEC.md section 11, CAPTURE.md section 7 (D138 to D144). **Done, Session 20**:
+  live on devnet 1 October (D145).
 - **P5** — Verifier service: policy evaluation, assurance grading from A0 and A1, signed
   attestation per MESSAGES.md, `submit_attestation`.
 - **P6** — Requester review, `approve`, and `reject` with a named requirement; payout confirmed
