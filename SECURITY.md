@@ -79,6 +79,7 @@ do not snapshot it; the currently configured key governs at submission.
 May: attest that a specific policy was met at a specific level for a specific bounty.
 May not: choose the recipient; change the reward or the bounty; refund; release escrow.
 An attestation is evidence for a payout decision, not authority to move funds.
+Its key is held only by the verifier process; the API process never loads it (D147).
 
 **Eligibility service** — dedicated key, program-level (D68).
 May: attest that a named Scout satisfies a bounty's precommitted off-chain
@@ -105,6 +106,8 @@ timing from stored state.
 Any other fee payer may submit the same three instructions under the same limits; doing so
 requires no trust. Every money-moving instruction must remain safe if the relayer, or any
 fee payer, is malicious.
+In the MVP the verifier process holds the relayer key beside the attester key: two keys, one
+process (D147).
 
 **Arbiter** — dedicated protocol-level administrative key, held as program or config
 state, never per-bounty and never caller-supplied (D9, D74).
@@ -429,7 +432,8 @@ These rules keep later expansion cheap without building any of it now.
 - Endpoints that create or transition state are idempotent on a client-supplied key,
   so retries never duplicate a bounty, an assignment or a submission.
 - Evidence bytes never pass through the API process; clients upload directly to object
-  storage via presigned URLs.
+  storage via presigned URLs. The verifier, a separate process, reads them back to re-hash
+  them (D147).
 - Polling is the MVP (D7); moving to push must not change any state rule.
 
 **More chains.**

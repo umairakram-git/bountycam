@@ -8,6 +8,8 @@
 (D127).
 **Amended:** Session 20 — section 11, the evidence manifest; section 6.7; section 10's opening
 note (D141, D143, D144).
+**Amended:** Session 21 — section 12, the attestation message; section 6.4's closing note
+(D150).
 **Scope:** `canonicalise`, `sha256`, `merkleRoot` as exported from
 `packages/shared/src/index.ts`.
 
@@ -555,8 +557,8 @@ normative.
 `MAX_ASSURANCE_LEVEL` (4), and `expiresAt` that is not a `bigint` within `i64`.
 
 `eligibilityMessage` checks fields in MESSAGES.md §4 offset order, each fully before the
-next; the first failure wins. It builds `BOUNTYCAM_ELIGIBILITY_V1` only; the attestation
-message has no producer in this package until the attester exists.
+next; the first failure wins. `attestationMessage` (section 12) uses the same three codes and
+the same order rule.
 
 ### 6.5 Funding-path helper codes
 
@@ -1395,3 +1397,63 @@ negative test is shown red before the gate by a scripted mutation of the check i
      equal to `sha256`, with `pause` called 0, 0, 1 and 3 times; `CHUNK_INVALID` for 0 and 1.5;
      `NOT_BYTES` for an array of numbers.
 138. `STATEMENT_INPUT_INVALID`: an uppercase `bountyId`; a 31-byte root.
+
+---
+
+## 12. The attestation message
+
+Session 21 (P5). The verifier builds `BOUNTYCAM_ATTESTATION_V1` (MESSAGES.md section 3) here,
+beside `eligibilityMessage`, so the published vectors bind it (D150). Signing is the caller's.
+
+### 12.1 Constants
+
+`ATTESTATION_DOMAIN_TAG` (`BOUNTYCAM_ATTESTATION_V1`, 24 ASCII bytes),
+`ATTESTATION_SCHEMA_VERSION` (1), `ATTESTATION_MESSAGE_LENGTH` (261). `MAX_ASSURANCE_LEVEL` (4)
+is shared with section 6.4.
+
+### 12.2 `attestationMessage(fields: AttestationMessageFields): Uint8Array`
+
+The fields, in MESSAGES.md section 3's offset order:
+
+| Field | Type | Rule |
+|---|---|---|
+| `deploymentId` | number | integer, 0 to 255 |
+| `programId` | `Uint8Array` | 32 bytes |
+| `bountyId` | `Uint8Array` | 16 bytes |
+| `requester` | `Uint8Array` | 32 bytes |
+| `scout` | `Uint8Array` | 32 bytes |
+| `policyHash` | `Uint8Array` | 32 bytes |
+| `eligibilityProfileHash` | `Uint8Array` | 32 bytes |
+| `requiredAssurance` | number | integer, 0 to `MAX_ASSURANCE_LEVEL` |
+| `deadline` | bigint | within `i64` |
+| `reviewWindowSecs` | bigint | within `i64` |
+| `evidenceRoot` | `Uint8Array` | 32 bytes |
+| `achievedAssurance` | number | integer, 0 to `MAX_ASSURANCE_LEVEL` |
+| `issuedAt` | bigint | within `i64` |
+
+It writes the domain tag at 0, the schema version as little-endian `u16` at 24, and each field
+at its offset, little-endian throughout, and returns the 261 bytes. Fields are checked in that
+order, each fully before the next; the first failure wins. The codes are section 6.4's:
+`MESSAGE_FIELD_NOT_BYTES` for a byte field that is not a `Uint8Array`, `MESSAGE_FIELD_LENGTH`
+for one at the wrong width, `MESSAGE_FIELD_RANGE` for a number or bigint out of its range or of
+the wrong type. Negative `deadline` and `reviewWindowSecs` are accepted, as the vectors require;
+the program bounds them, not this function.
+
+### 12.3 Tests
+
+The package's existing test file, beside section 6.4's eligibility tests, reading
+`vectors/vectors.json`. The D36 gate becomes `tests 143, pass 143, fail 0`. Each negative test is
+shown red before the gate by a scripted mutation of the check it names.
+
+139. Constants: the tag is 24 bytes; length 261; schema version 1; 13 vectors of 261 bytes.
+140. Every 261-byte vector is reproduced byte for byte by `attestationMessage` from its parsed
+     fields.
+141. Every 261-byte vector's signature verifies under the published attester key, and that key
+     derives from the published attester seed.
+142. Mutations: for each of the 13 mutation vectors on an input field, `attestationMessage` of
+     its parsed fields reproduces it; for `domain_tag` and `schema_version`, the rebuilt message
+     equals the nominal one, since the function cannot produce either change.
+143. Codes: `evidenceRoot` of 31 bytes is `MESSAGE_FIELD_LENGTH`; `scout` as an array of numbers
+     is `MESSAGE_FIELD_NOT_BYTES`; `achievedAssurance` 5, `issuedAt` 2 to the 63rd, and
+     `deadline` as the number 0 are `MESSAGE_FIELD_RANGE`; `deploymentId` 256 together with
+     `achievedAssurance` 5 reports `deploymentId` (six asserts).

@@ -12,6 +12,8 @@ section 16: discovery, acceptance and the acceptance projection (D124 to D127).
 **Amended:** Session 20 (P4) — sections 8.2, 17.6 and 17.7, and the new section 18: evidence
 upload and submission (D138 to D144).
 **Amended:** Session 20 build — section 18.10 test 16, amendment A1.
+**Amended:** Session 21 (P5) — the new section 19: the verifier and the attestation (D146 to
+D153); it extends sections 7.2, 16.4 and 18.7 in place.
 
 Policies and bounties share this document deliberately: the hashed policy object and the
 bounty row that references it must not drift, and a split document is how they would.
@@ -2846,3 +2848,359 @@ the default 7200-second completion window; accepted from the A30. From raw outpu
 5. The Seeker's bounty screen reads "Evidence received, being checked." with the time and count.
 6. The API's log lines for the upload URLs and the submission carry paths only: no URL, no
    coordinates, no signature.
+
+---
+
+## 19. The verifier and the attestation
+
+Session 21 (P5). Normative; written before implementation. Rulings: D146 (Umair) and D147 to
+D153. The message is `packages/shared/MESSAGES.md` section 3, built by `attestationMessage`
+(`packages/shared/SPEC.md` section 12); the instruction is `programs/escrow/SPEC.md` section 7.5.
+What the phones show is `apps/mobile/CAPTURE.md` section 8.
+
+### 19.1 What P5 adds
+
+Migration 14 (section 19.2); the verifier's configuration and process (19.3, 19.4); its loop
+(19.5); the checks and the grade (19.6, 19.7); signing (19.8); the transaction (19.9);
+confirmation and the projection (19.10); views (19.11); logging (19.12); stated limits (19.13);
+tests and a script (19.14); the live run (19.15).
+
+### 19.2 Migration 14
+
+Up, in order:
+
+1. `CREATE TYPE attestation_status AS ENUM ('PENDING', 'SIGNED', 'SUBMITTED', 'REFUSED',
+   'SHORTFALL', 'LAPSED')`.
+2. The table `attestations`, one row per submission (D148):
+
+| Column | Type | Rule |
+|---|---|---|
+| `submission_id` | `uuid` | primary key, references `submissions (id)` |
+| `status` | `attestation_status` | not null |
+| `achieved_assurance` | `smallint` | 0 to 4; the grade, once graded |
+| `message` | `bytea` | exactly 261 bytes; the signed `BOUNTYCAM_ATTESTATION_V1` |
+| `signature` | `bytea` | exactly 64 bytes |
+| `reason` | `text` | the refusal or lapse code of section 19.6 |
+| `tries` | `integer` | not null, 0 or more; consecutive transient failures |
+| `sends` | `integer` | not null, 0 or more; transactions sent |
+| `next_attempt_at` | `timestamptz` | not null |
+| `tx_signature` | `text` | base58; the last transaction sent |
+| `created_at` | `timestamptz` | not null |
+| `updated_at` | `timestamptz` | not null |
+
+   Constraints: `attestations_signed`, `(status IN ('SIGNED', 'SUBMITTED')) = (message IS NOT
+   NULL)`; `attestations_signature_pair`, `(message IS NULL) = (signature IS NULL)`;
+   `attestations_graded`, `status NOT IN ('SIGNED', 'SUBMITTED', 'SHORTFALL') OR
+   achieved_assurance IS NOT NULL`; `attestations_reason`, `(status IN ('REFUSED', 'LAPSED')) =
+   (reason IS NOT NULL)`; `attestations_submitted_tx`, `status <> 'SUBMITTED' OR tx_signature IS
+   NOT NULL`; the two length checks and the assurance range. The partial index
+   `attestations_due_idx` on `(next_attempt_at) WHERE status IN ('PENDING', 'SIGNED')`.
+
+No column has a default. Down drops the table and the type; valid against any table state.
+
+Non-test gate, from raw output: `\d attestations` shows the columns and constraints above and
+no default.
+
+### 19.3 Configuration
+
+The verifier reads the API's environment file through its own loader. It requires
+`DATABASE_URL`, `SOLANA_RPC_URL`, `ESCROW_PROGRAM_ID`, `ESCROW_CONFIG_ACCOUNT` and the four store
+keys of section 18.3; it reads section 17.3's capture keys and `EVIDENCE_MAX_BYTES` with their
+defaults; and it adds:
+
+| Key | Default | Rule |
+|---|---|---|
+| `ATTESTER_KEY_PATH` | required | a Solana keypair file, a JSON array of 64 bytes, mode 600 |
+| `RELAYER_KEY_PATH` | required | the same form |
+| `VERIFIER_POLL_S` | 5 | positive integer; seconds between ticks |
+| `VERIFIER_DEADLINE_MARGIN_S` | 30 | positive integer; no send this close to the deadline |
+| `VERIFIER_CONFIRM_S` | 60 | positive integer; how long one send waits for confirmation |
+
+Startup, each failure exiting non-zero before the first tick: each key file parses and its
+public half matches its seed, as `loadEligibilityConfig` checks; the attester's public key
+equals the configuration account's `attester_authority`, read from the chain at `confirmed`;
+the relayer key differs from the attester key; and `VERIFIER_DEADLINE_MARGIN_S <
+CAPTURE_DEADLINE_BUFFER_S - CAPTURE_SUBMISSION_GRACE_S` (D152). `deployment_id` comes from the
+configuration account, as the API's does.
+
+The API's `loadConfig` never reads `ATTESTER_KEY_PATH` or `RELAYER_KEY_PATH`, and the API
+process never holds either key (D147).
+
+### 19.4 The process
+
+`apps/api/src/verifier/main.ts`, started by `apps/api/scripts/verifier.sh`, which loads
+`~/bountycam-env/api.env` and checks that it and both key files are mode 600, as `dev.sh` does,
+printing paths but never contents. The process listens on no port. One instance runs.
+
+`EvidenceStore` (section 18.4) gains one method, used by the verifier only:
+
+```ts
+get(key: string, maxBytes: number): Promise<Uint8Array | null>;
+```
+
+A header-signed `GET`, signed as `head` is but without `x-amz-checksum-mode`. 404 is null. It
+stops reading after `maxBytes + 1` bytes and returns what it read, so an oversized object fails
+the length comparison of section 19.6 step 8 rather than filling memory. It throws as `head`
+does. No API route calls it.
+
+### 19.5 The loop
+
+Every `VERIFIER_POLL_S`, with `now` from the injectable clock:
+
+1. **Enqueue.** For each `submissions` row with no `attestations` row, insert one: `PENDING`,
+   `tries` and `sends` 0, `next_attempt_at`, `created_at` and `updated_at` `now`. A conflict on
+   the key inserts nothing.
+2. **Select** rows in `PENDING` or `SIGNED` whose `next_attempt_at` is at or before `now`,
+   oldest `created_at` first.
+3. **Run** each in turn: a `PENDING` row through sections 19.6 to 19.10, a `SIGNED` row through
+   section 19.6 steps 1 to 3 and then 19.9.
+
+**Outcomes.** *Refuse*: status `REFUSED`, the code as `reason`; final. *Lapse*: status
+`LAPSED`, reason `DEADLINE`; final. *Retry*: the status is kept, `tries` increases by one, and
+`next_attempt_at` is `now` plus 5, 10, 20, 40 or 60 seconds for `tries` 1, 2, 3, 4 and 5 or
+more. Signing (section 19.8) sets `tries` to 0. Every write sets `updated_at`.
+
+### 19.6 The checks
+
+For a `PENDING` row. Steps in order; the first that decides ends the run. Nothing is written
+before step 8 passes except an outcome.
+
+1. **Load** the submission, its `evidence_items`, its `capture_nonces` row by
+   `capture_nonce_id`, its assignment, the bounty with `program_account`, the policy's
+   `canonical_json` and `policy_hash`, and the requester's and Scout's wallets.
+2. **Deadline.** `now` later than the assignment's `deadline` minus
+   `VERIFIER_DEADLINE_MARGIN_S`: lapse.
+3. **Chain.** Read `program_account` at `confirmed`. A reader failure: retry. No account, or
+   one `decodeBountyAccount` rejects: refuse, `CHAIN_STATE`. For a `SIGNED` row, `Submitted`
+   goes to section 19.10's projection; for a `PENDING` row it is refused, `CHAIN_STATE`, since
+   no attestation was signed. `Accepted` continues with `readAcceptance`, whose `BAD_TAIL` is
+   `CHAIN_STATE`; every other state is refused, `CHAIN_STATE`.
+4. **Bindings** (D77, D84). `sha256` of the UTF-8 `canonical_json` equals `policy_hash`, and
+   every row of section 2.6 agrees exactly as section 15.3 step 6 checks it, by the same
+   function; otherwise refuse, `BINDING_MISMATCH`.
+5. **Parties.** The account's `scout` is the Scout's wallet decoded, and its `deadline` is the
+   assignment's `deadline` in whole seconds; otherwise refuse, `PARTY_MISMATCH`.
+6. **Submission.** All of: the stored `manifest` equals `canonicalise` of
+   `checkEvidenceManifest` applied to its parse; `evidenceRoot` of it equals `evidence_root`; the
+   header's `bounty_id`, `assignment_id`, `scout`, `policy_hash` and `deployment_id` are the
+   bounty's, the assignment's, the Scout's wallet, the policy hash in hex and the configured
+   deployment; `statement_signature` verifies under the Scout's wallet over
+   `evidenceStatement(bounty id, evidence_root)`; and the items and the `evidence_items` rows
+   correspond one to one by `requirement_id`, with equal digest, length, `captured_at`, `lat`,
+   `lon`, `horizontal_accuracy_m` and `fixed_at`. Otherwise refuse, `SUBMISSION_INVALID`.
+7. **Requirements**, as section 18.6 step 11 against the policy: every item's requirement in
+   the policy, in its order, and every requirement with `required` true present. Otherwise
+   refuse, `REQUIREMENTS_INCOMPLETE`.
+8. **Photos.** For each item, `get(storage_key, EVIDENCE_MAX_BYTES)`. A throw: retry. Null, a
+   length other than `byte_length`, or a `sha256` other than the item's digest: refuse,
+   `EVIDENCE_MISSING` (D146 ruling 1).
+
+### 19.7 The grade
+
+**A1** when all of these hold; otherwise **A0** (D149):
+
+- the nonce row is the submission's `capture_nonce_id`, its status is `CONSUMED`, its `value` in
+  lowercase hex is the manifest's `capture_nonce`, and its assignment, bounty, Scout and
+  `deployment_id` are the submission's;
+- every item's `captured_at` lies in `[issued_at, expires_at)` of that row;
+- every item passes `checkCaptureStart` with its own `lat`, `lon` and `horizontal_accuracy_m`,
+  the policy's `lat`, `lon` and `capture_radius_m`, and `LOCATION_MAX_ACCURACY_M` (D143).
+
+The thresholds are P4's; P5 does not tighten them. Levels above A1 wait for A2 and A3.
+
+**Shortfall.** When the grade is below the account's `required_assurance`: status
+`SHORTFALL`, `achieved_assurance` the grade; nothing is signed or sent (D85, D149).
+
+### 19.8 Signing
+
+`issued_at` is the clock's `now` in whole seconds, rounded down, as an `i64`. The message is
+`attestationMessage` with `deploymentId` from the configuration account; `programId` the
+escrow's; `bountyId`, `requester`, `scout`, `policyHash`, `eligibilityProfileHash`,
+`requiredAssurance`, `deadline` and `reviewWindowSecs` from the account read in step 3;
+`evidenceRoot` the submission's; `achievedAssurance` the grade; `issuedAt` as above. The
+signature is ed25519 over the message with the attester's seed, and is verified under the
+attester's public key before it is stored.
+
+Write: status `SIGNED`, the grade, the message and the signature, `next_attempt_at` `now`. The
+row is never signed again: every send uses the stored bytes (D150).
+
+### 19.9 The transaction
+
+Built in `apps/api/src/chain/tx.ts` as a legacy message (D151):
+
+| Index | Account key | Signer | Writable |
+|---|---|---|---|
+| 0 | the relayer, fee payer | yes | yes |
+| 1 | the bounty account | no | yes |
+| 2 | the configuration account | no | no |
+| 3 | `Sysvar1nstructions1111111111111111111111111` | no | no |
+| 4 | `Ed25519SigVerify111111111111111111111111111` | no | no |
+| 5 | the escrow program | no | no |
+
+The header is 1, 0, 4. Instruction 0: program index 4, no accounts, data
+`ed25519InstructionData(attester public key, signature, message)` (SPEC.md section 9.2), 373
+bytes. Instruction 1: program index 5, accounts 2, 1 and 3 in that order, data the 8 bytes
+`eedcff69b7d32853` (the first eight of `sha256` of `global:submit_attestation`), then
+`evidence_root`, `achieved_assurance` as `u8`, `issued_at` as little-endian `i64` and
+`verification_instruction_index` 0 as little-endian `u16`: 51 bytes. The recent blockhash comes
+from `getLatestBlockhash` at `confirmed`; the relayer signs. Total 728 bytes.
+
+The JSON-RPC reader gains `getLatestBlockhash`, `sendTransaction` (base64, preflight at
+`confirmed`) and `getSignatureStatuses`, with section 15's error handling: no response body or
+URL in any error.
+
+**A send.** Step 2 runs first: past the margin, lapse. Then send, increase `sends`, store
+`tx_signature`, and poll `getSignatureStatuses` every 2 seconds for up to `VERIFIER_CONFIRM_S`.
+Confirmed or finalized without an error: section 19.10. An error, no confirmation in time, or a
+reader failure: read the account. `Submitted` with this submission's root: section 19.10.
+`Accepted`: retry, and the next send carries the same message and signature with a fresh
+blockhash. Anything else: refuse, `CHAIN_STATE`.
+
+### 19.10 Confirmation and the projection
+
+Read the account at `confirmed`. It must be `Submitted`, with `evidence_root` the submission's
+and `achieved_assurance` the row's; while it is still `Accepted`, retry; anything else is
+refused, `CHAIN_STATE`. Then one transaction:
+
+1. Lock the bounty row. `ACCEPTED`: set `SUBMITTED`. Already `SUBMITTED`: change nothing. Any
+   other state: roll back and refuse, `CHAIN_STATE`.
+2. Set the submission's `achieved_assurance` to the grade and `attester_signature` to the
+   stored signature.
+3. Set the row's status to `SUBMITTED`.
+
+The assignment stays `ACTIVE` until P6. This projection is section 7.2's only writer of
+`SUBMITTED` (D153).
+
+### 19.11 Views
+
+A submission's `verification` is `VERIFIED` when the bounty's state is `SUBMITTED` or any later
+state; `NOT_VERIFIED` when its `attestations` row is `REFUSED`, `SHORTFALL` or `LAPSED`; and
+`CHECKING` otherwise.
+
+- **Assigned-Scout view.** Section 16.4 step 4a also serves a bounty in state `SUBMITTED`. Its
+  `submission` object (section 18.7) gains `verification`.
+- **Owner view.** A bounty in state `ACCEPTED` or `SUBMITTED` carries `submission` with exactly
+  `submitted_at`, `item_count` and `verification`. Still no photo, key, coordinate, root, grade
+  or Scout detail (D138 ruling 5, D146 ruling 3).
+- **`GET /me/missions`** is unchanged: the assignment stays `ACTIVE`, so the mission stays
+  listed.
+- **Public view** is unchanged.
+
+### 19.12 Logging
+
+One line per outcome: the submission id, the status, the reason and the transaction
+signature. `CHAIN_STATE`, `BINDING_MISMATCH`, `PARTY_MISMATCH`, `SUBMISSION_INVALID` and
+`EVIDENCE_MISSING` are error-level. No line carries a URL, a store key, a coordinate, a message,
+a signature other than the transaction's, or any key material.
+
+### 19.13 Stated limits
+
+- One verifier instance. A second would race to send; the chain takes one and the other's
+  transaction fails, after which it reads the account and projects. Correct, but untested.
+- A0 is reachable only if the database stops agreeing with what P4 checked (D149).
+- After `REFUSED`, `SHORTFALL` or `LAPSED` the USDC returns only by CLI `expire_accepted` after
+  the deadline (D146 ruling 2).
+- The verifier's clock gives `issued_at`, which nothing compares (D82).
+- A submission resent after the bounty became `SUBMITTED` answers `BOUNTY_NOT_CAPTURABLE` from
+  section 18.6 step 7 rather than step 9's 200; the phone reloads the view, which shows the
+  submission.
+- The attester and relayer keys share one process in development. Production custody is
+  SECURITY-PRODUCTION.md section 1's.
+
+### 19.14 Tests and a script
+
+A new file, `apps/api/test/verifier.test.ts`, named in the test script after
+`evidence.test.ts`. The bounty, policy and submission are seeded by SQL from the recorded
+Session 20 rows, re-signed with the SPEC.md section 11.8 test Scout key where a test needs a
+manifest of its own. Clock, store, chain reader and sender are injected. The account is the
+recorded `Accepted` account of bounty `3591bf4c`, with its `bounty_id`, `scout` and `deadline`
+overwritten at section 16.6's offsets where a test needs others: harness setup, stated in the
+test. Each negative test is shown red before the gate by a scripted mutation of the check it
+names. D36 gate: `tests 20, pass 20, fail 0`.
+
+1. **The valid job.** One tick after a submission: A1, `SIGNED`; the message equals
+   `attestationMessage` of the account's fields, the root and grade 1; the signature verifies
+   under the attester key; the sender received exactly `tx.ts`'s bytes. Confirmed: the bounty
+   `SUBMITTED`, the submission's grade and signature set, the row `SUBMITTED` with the
+   transaction signature, the assignment `ACTIVE`.
+2. **Recorded data.** The `3591bf4c` manifest, root and statement signature pass step 6
+   unchanged.
+3. **Enqueue.** A submission without a row gets one `PENDING` row; a second tick adds none.
+4. **Deadline.** At `deadline - 30 s` the job proceeds; one second later it is `LAPSED`, with no
+   store read and no send (two asserts).
+5. **Retry.** The reader throws: status kept, `tries` 1, due in 5 s; then 10, 20, 40, 60 and 60
+   (six asserts).
+6. **Chain state.** No account, `Funded`, `Refunded`, and `Submitted` for a `PENDING` row:
+   `CHAIN_STATE` (four asserts).
+7. **Bindings.** Each of reward, profile hash, required assurance, the three windows and the
+   policy hash mismatched alone, and the canonical text altered by one byte:
+   `BINDING_MISMATCH` (eight asserts).
+8. **Parties.** Another Scout on the account; another deadline: `PARTY_MISMATCH`.
+9. **Submission.** A non-canonical manifest text; the stored root altered; the signature with
+   one bit flipped; an `evidence_items` digest differing from its item; the header's deployment
+   id 3, re-signed: `SUBMISSION_INVALID` (five asserts).
+10. **Requirements.** A required requirement without an item: `REQUIREMENTS_INCOMPLETE`.
+11. **Photos.** `get` null; one byte longer; equal length, other bytes: `EVIDENCE_MISSING`. `get`
+    throws: retry. The double saw `GET` on each item's key (five asserts).
+12. **A0.** On a bounty requiring 0: the nonce row `SUPERSEDED` by SQL; an item's
+    `captured_at` at `expires_at`, re-signed; an item 0.002 north with accuracy `floor(distance
+    - 151)`, re-signed. Each `SIGNED` at 0 (three asserts).
+13. **Shortfall.** The first case of test 12 on a bounty requiring 1: `SHORTFALL`, grade 0, no
+    message, no send.
+14. **A failed send.** The sender reports an error and the account is still `Accepted`: `SIGNED`,
+    `sends` 1, `tries` 1; the next tick's transaction carries the identical message and
+    signature (byte comparison).
+15. **Unconfirmed, then found.** No confirmation within the window and the account `Submitted`
+    with this root: projected.
+16. **Restart.** A `SIGNED` row whose account is already `Submitted` with this root: projected
+    with no send. With another root: `CHAIN_STATE` (two asserts).
+17. **Projection.** The account `Submitted` with another grade: retry, nothing projected. The
+    bounty row already `SUBMITTED`: the row `SUBMITTED`, nothing else changed (two asserts).
+18. **Views.** `verification` is `CHECKING` before and `VERIFIED` after in both views; it is
+    `NOT_VERIFIED` for `REFUSED`, `SHORTFALL` and `LAPSED`; the owner view of a `SUBMITTED`
+    bounty has `submission` with exactly section 19.11's keys; the assigned-Scout view is served
+    in `SUBMITTED`.
+19. **The transaction.** For a fixed blockhash, relayer seed and attestation, `tx.ts`'s bytes
+    equal the vector produced by `@solana/web3.js` in the architect's sandbox; the length is 728;
+    instruction 1's data begins `eedcff69b7d32853`. After the live run the recorded transaction's
+    message joins as a second vector.
+20. **Configuration and logs.** The verifier's loader refuses: no attester key; a key file whose
+    public half mismatches; the relayer key equal to the attester's; an attester other than the
+    recorded configuration account's; a margin of 120 with the default buffer and grace (five
+    asserts). The API's `loadConfig` starts with neither key path set. No log line from tests 1
+    and 11 carries a store key, a coordinate, the message or the attestation signature in hex.
+
+Other suites:
+
+- **Migrations.** The expected table list gains `attestations`. Gate 1.
+- **Evidence.** Tests 7 and 23: the `submission` objects gain `verification`, `CHECKING`. Gate 26.
+
+Every other suite keeps its count.
+
+**Script**, run by hand: `apps/api/scripts/attestation-check.mjs <bounty_id>` reads the
+`attestations` row and the account, rebuilds the message from the account and the row's grade
+and `issued_at`, compares it with the stored message, verifies the signature under the
+configuration account's attester, confirms the account is `Submitted` with the submission's root
+and grade, and confirms the transaction at `confirmed`. Each result prints as one PASS or FAIL
+line.
+
+### 19.15 The live run
+
+On the A30 and the Seeker, with versitygw, the API, the verifier and Metro on the laptop. Setup as
+section 18.11, plus `verifier.sh` running. A fresh bounty funded from the Seeker, two required
+photo requirements, the default 7200-second completion window and `required_assurance` 1,
+accepted from the A30. Every step happens between the accept and its deadline. From raw output:
+
+1. Section 18.11 items 2 to 4.
+2. The verifier's log shows the job `SIGNED` then `SUBMITTED` with its transaction signature;
+   the time from submission to `SUBMITTED` is recorded.
+3. `attestation-check` passes every line.
+4. The bounty is `SUBMITTED`; the submission carries grade 1 and the attester signature.
+5. The A30's Mission screen and the Seeker's bounty screen show CAPTURE.md section 8's verified
+   lines.
+6. The transaction is fetched and recorded; its message becomes section 19.14 test 19's
+   second vector.
+7. The verifier's log lines carry no URL, store key or coordinate.
+
+The laptop needs a connection for the verifier to reach devnet. If it has none at the spot, the
+job retries until it does, and the deadline still bounds it.

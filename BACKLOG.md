@@ -879,7 +879,8 @@ HANDOFF.md; this section lists only what remains, in build order.
   section 18, SPEC.md section 11, CAPTURE.md section 7 (D138 to D144). **Done, Session 20**:
   live on devnet 1 October (D145).
 - **P5** — Verifier service: policy evaluation, assurance grading from A0 and A1, signed
-  attestation per MESSAGES.md, `submit_attestation`.
+  attestation per MESSAGES.md, `submit_attestation`. Specified in Session 21: POLICY.md section
+  19, SPEC.md section 12, CAPTURE.md section 8 (D146 to D153).
 - **P6** — Requester review, `approve`, and `reject` with a named requirement; payout confirmed
   on the explorer.
 

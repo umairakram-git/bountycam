@@ -1,7 +1,7 @@
 # `apps/mobile` — Start a Capture Session
 
-**Status:** normative for Session 19 (P3), and from section 7 for Session 20 (P4). Each part
-written before its implementation.
+**Status:** normative for Session 19 (P3), from section 7 for Session 20 (P4), and section 8 for
+Session 21 (P5). Each part written before its implementation.
 **Scope:** the Mission screen's Start capture button: the location gate, the capture nonce
 request, the countdown, and restarting (sections 2 to 6); the camera, evidence upload and the
 signed submission (section 7).
@@ -278,3 +278,43 @@ the evidence reaches the requester before P6 (D138 ruling 5).
 
 Mobile `tsc` and a Metro Android bundle, as in P3. The device evidence is POLICY.md section
 18.11's live run.
+
+---
+
+## 8. Verification (P5)
+
+Session 21. The server side is `apps/api/POLICY.md` section 19.11: the `submission` object in
+the assigned-Scout and owner views carries `verification`, one of `CHECKING`, `VERIFIED` and
+`NOT_VERIFIED`. The lines record Umair's ruling D146 point 3. Neither side is shown the
+assurance level.
+
+### 8.1 The Scout's Mission screen
+
+Section 7.7's submitted state, by `verification`:
+
+| `verification` | Line |
+|---|---|
+| `CHECKING` | section 7.7's line, unchanged |
+| `VERIFIED` | "Evidence verified. Waiting for the requester's review." |
+| `NOT_VERIFIED` | "Your evidence couldn't be verified, so this bounty won't pay." |
+
+The view is served in `SUBMITTED` as in `ACCEPTED`, so a verified mission keeps its screen.
+
+### 8.2 The requester's bounty screen
+
+Section 7.9's lines, for a bounty in `ACCEPTED` or `SUBMITTED` whose owner view carries
+`submission`:
+
+| `verification` | Lines |
+|---|---|
+| `CHECKING` | section 7.9's two lines, unchanged |
+| `VERIFIED` | "Evidence verified." and "Submitted HH:MM · N photos." |
+| `NOT_VERIFIED` | "Evidence couldn't be verified. Your USDC returns after the deadline." |
+
+### 8.3 Refresh
+
+Both screens read the view when they load it, as now. No new polling.
+
+### 8.4 Gate
+
+Mobile `tsc` and a Metro Android bundle. The device evidence is POLICY.md section 19.15.

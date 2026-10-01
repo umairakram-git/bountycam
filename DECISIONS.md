@@ -2918,3 +2918,103 @@ met.
    form makes every prompt required, so 18.11's optional requirement could not be created from
    the device. Skipping an optional requirement is covered by API evidence test 9 and is the
    same submit rule on the phone.
+
+**D146 — Session 21 product rulings for P5 (Umair, 1 October).**
+
+1. **A photo missing or altered at verification refuses the attestation.** P4 checked every
+   photo at submission, so a failure now means the store lost or changed it. Nothing is signed
+   and the bounty cannot pay. Rejected: grading A0, under which an A0 bounty could reach
+   `Submitted` and be released by the requester's silence with a photo the requester cannot
+   see. A store that cannot be reached is retried, not refused.
+2. **After a refusal, a shortfall or a lapse, the USDC returns by CLI `expire_accepted`** once
+   the deadline has passed, as for every stuck bounty so far (D123 ruling 6). Automating it is
+   O1's.
+3. **What each side sees** is `apps/mobile/CAPTURE.md` section 8: "Evidence verified. Waiting
+   for the requester's review." and "Your evidence couldn't be verified, so this bounty won't
+   pay." for the Scout; "Evidence verified." and "Evidence couldn't be verified. Your USDC
+   returns after the deadline." for the requester. While checking, both keep P4's lines.
+   Neither side is shown the assurance level.
+
+**D147 — The verifier is a separate process in `apps/api`, holding the attester and relayer
+keys.**
+
+Context. SECURITY.md section 2 forbids the API server to manufacture an attestation, and
+section 14 keeps evidence bytes out of the API process, while the verifier must re-read and
+re-hash every photo and sign with the attester key.
+
+Ruling, technical. The verifier is its own long-running process, `src/verifier/main.ts`,
+started by `scripts/verifier.sh`, listening on no port. It alone loads `attester.json` and
+`relayer.json`; the API's configuration loader never reads either path. It lives in the
+`apps/api` package so the database, store and chain modules stay single-sourced: the
+separation the invariants need is between processes, not packages. Photos reach it through a
+header-signed `GET` added to `EvidenceStore`, which no API route calls. Rejected: a new
+workspace package, which would duplicate or re-export those modules six days before the
+deadline; signing inside the API process, which section 2 forbids. POLICY.md section 19.
+
+**D148 — The verifier polls a job table; transient failures back off until the deadline.**
+
+Ruling, technical. Migration 14 adds `attestations`, one row per submission, holding the job's
+status, grade, stored message and signature, retry state and last transaction signature. Every
+`VERIFIER_POLL_S` (5 s) the verifier inserts a row for each submission that has none, then runs
+the rows that are due. A store or RPC that cannot be reached, or a send not confirmed in time,
+retries after 5, 10, 20, 40, then 60 seconds; every other outcome is final. Reasons: the
+submission request runs in another process, so inline triggering is impossible; polling is the
+MVP's pattern (D7); the table lets a restart resume exactly where it stopped. Rejected:
+`LISTEN`/`NOTIFY`, which adds a second trigger path and still needs the table for retries.
+
+**D149 — What the verifier refuses, how it grades, and what it does with a shortfall.**
+
+Ruling, technical. Refused, finally, with nothing signed: the account is not `Accepted`; any
+D84 binding or the recomputed policy hash disagrees (D77); the chain's Scout or deadline differs
+from the submission's; the stored manifest, its root, its header bindings or the statement
+signature fails a re-check; a required requirement has no item; a photo is missing or differs
+(D146 ruling 1). Graded A1 when the submission's nonce is `CONSUMED` and matches the manifest,
+every capture time lies in the session, and every item passes D143's location rule with P4's
+ceiling; otherwise A0. P5 does not tighten D143's thresholds: P4 refuses at submission what
+P5 would grade down, so A0 arises only if the database later disagrees with what P4 checked.
+When the grade is below the chain's `required_assurance`, the verifier signs nothing and sends
+nothing, and records `SHORTFALL`: the program would reject the transaction with
+`InsufficientAssurance` (D85), so sending would pay a fee for a known failure.
+
+**D150 — `attestationMessage` joins `packages/shared`; `issued_at` is the verifier's clock,
+signed once.**
+
+Ruling, technical. The 261-byte message is built by one function beside `eligibilityMessage`,
+bound by the 13 published attestation vectors and the 15 mutation vectors (D78), with the same
+error codes and check order. Every state field comes from the account the verifier has just
+read, so the message is the program's own reconstruction whenever the checks passed.
+`issued_at` is the verifier's clock in whole seconds when it signs; the program compares it
+with nothing (D82). The message and signature are stored, and every later send carries those
+exact bytes, so a retry never produces a second, different attestation for one submission.
+
+**D151 — The `submit_attestation` transaction is built by hand; no compute-budget
+instructions.**
+
+Ruling, technical. `apps/api/src/chain/tx.ts` serialises a legacy message: the relayer as fee
+payer, the native ed25519 instruction at index 0 and `submit_attestation` at index 1, six
+account keys in a fixed order, 728 bytes. The API has avoided `@solana/web3.js` since Session 15
+because its websocket dependency trips pnpm's build-script block; three JSON-RPC methods join
+the existing reader. The serialisation is pinned by a vector produced with web3.js in the
+architect's sandbox, then by the live run's recorded transaction. No compute-budget
+instruction: devnet needs no priority fee and the default limit covers both instructions;
+priority fees are O1's.
+
+**D152 — The verifier stops sending 30 seconds before the deadline.**
+
+Ruling, technical. A job whose assignment deadline is less than `VERIFIER_DEADLINE_MARGIN_S`
+(30) away is `LAPSED`. The margin absorbs drift between the laptop's clock and the chain's.
+Startup requires the margin to be under `CAPTURE_DEADLINE_BUFFER_S - CAPTURE_SUBMISSION_GRACE_S`
+(120 s by default), so a submission accepted at the very end of its grace still leaves the
+verifier time to act (D132).
+
+**D153 — The verifier projects `Submitted`; both views gain `verification`.**
+
+Ruling, technical. After a confirmed send the verifier re-reads the account and requires
+`Submitted` with the submission's root and the signed level; then one transaction sets the
+bounty `SUBMITTED`, writes `achieved_assurance` and `attester_signature` on the submission, and
+closes the job. After a restart, a signed job reads the chain before sending, so a transaction
+that landed while the verifier was down is projected rather than resent. The assignment stays
+`ACTIVE` until P6. The assigned-Scout view is served in `SUBMITTED` as in `ACCEPTED`, and the
+owner and assigned-Scout views' `submission` object gains `verification`: `CHECKING`,
+`VERIFIED` or `NOT_VERIFIED`, which CAPTURE.md section 8 turns into D146 ruling 3's lines.
+POLICY.md sections 19.10 and 19.11.
