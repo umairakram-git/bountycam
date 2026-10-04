@@ -23,9 +23,13 @@ export interface Requirement {
   readonly required: boolean;
 }
 
+/** POLICY.md 19.11: the verifier's outcome, as the view reports it. */
+export type Verification = 'CHECKING' | 'VERIFIED' | 'NOT_VERIFIED';
+
 export interface SubmissionSummary {
   readonly submittedAt: number;
   readonly itemCount: number;
+  readonly verification: Verification;
 }
 
 function get(value: unknown, key: string): unknown {
@@ -44,13 +48,18 @@ export function readRequirements(view: unknown): Requirement[] {
   }));
 }
 
-/** The view's `submission` (POLICY.md 18.7): null before, a summary after. */
+/** The view's `submission` (POLICY.md 18.7, 19.11): null before, a summary after. */
 export function readSubmission(view: unknown): SubmissionSummary | null {
   const raw = get(view, 'submission');
   if (raw === null || raw === undefined) return null;
   const at = Date.parse(String(get(raw, 'submitted_at')));
   const count = get(raw, 'item_count');
-  return { submittedAt: at, itemCount: typeof count === 'number' ? count : 0 };
+  const v = get(raw, 'verification');
+  return {
+    submittedAt: at,
+    itemCount: typeof count === 'number' ? count : 0,
+    verification: v === 'VERIFIED' || v === 'NOT_VERIFIED' ? v : 'CHECKING',
+  };
 }
 
 export interface HeaderParts {

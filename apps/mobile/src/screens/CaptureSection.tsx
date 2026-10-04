@@ -210,18 +210,22 @@ export function CaptureSection(props: {
     );
   }
 
-  // Section 7.7: after submission, only the submitted state.
+  // Section 7.7: after submission, only the submitted state; section 8.1 by verification.
   if (submission !== null) {
     const at = new Date(submission.submittedAt);
     const hhmm = String(at.getHours()).padStart(2, '0') + ':' +
       String(at.getMinutes()).padStart(2, '0');
+    const line =
+      submission.verification === 'VERIFIED'
+        ? "Evidence verified. Waiting for the requester's review."
+        : submission.verification === 'NOT_VERIFIED'
+          ? "Your evidence couldn't be verified, so this bounty won't pay."
+          : 'Evidence submitted at ' + hhmm + ' · ' + String(submission.itemCount) +
+            " photos. The requester's review comes next.";
     return (
       <View>
         <Text style={styles.label}>Capture</Text>
-        <Text style={styles.value}>
-          {'Evidence submitted at ' + hhmm + ' · ' + String(submission.itemCount) + ' photos. ' +
-            "The requester's review comes next."}
-        </Text>
+        <Text style={styles.value}>{line}</Text>
       </View>
     );
   }

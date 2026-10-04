@@ -74,9 +74,9 @@ export function MyBountiesScreen(props: {
       const second = drafts.length === 0 ? first : await apiGet(token, '/me/bounties');
       const listed = asItems(second.body);
       setItems(listed);
-      // Section 7.9: the owner view of each ACCEPTED bounty carries `submission`.
+      // Sections 7.9 and 8.2: ACCEPTED and SUBMITTED owner views carry `submission`.
       const found: Record<string, SubmissionSummary> = {};
-      for (const item of listed.filter((i) => i.state === 'ACCEPTED')) {
+      for (const item of listed.filter((i) => i.state === 'ACCEPTED' || i.state === 'SUBMITTED')) {
         try {
           const detail = await apiGet(token, '/bounties/' + item.id);
           const summary = detail.status === 200 ? readSubmission(detail.body) : null;
@@ -136,15 +136,24 @@ export function MyBountiesScreen(props: {
               <Text selectable style={styles.muted}>
                 {item.id}
               </Text>
-              {received[item.id] !== undefined ? (
+              {received[item.id] === undefined ? null : received[item.id]!.verification ===
+                'NOT_VERIFIED' ? (
+                <Text style={styles.value}>
+                  {"Evidence couldn't be verified. Your USDC returns after the deadline."}
+                </Text>
+              ) : (
                 <View>
-                  <Text style={styles.value}>Evidence received, being checked.</Text>
+                  <Text style={styles.value}>
+                    {received[item.id]!.verification === 'VERIFIED'
+                      ? 'Evidence verified.'
+                      : 'Evidence received, being checked.'}
+                  </Text>
                   <Text style={styles.muted}>
                     {'Submitted ' + hhmm(received[item.id]!.submittedAt) + ' · ' +
                       String(received[item.id]!.itemCount) + ' photos'}
                   </Text>
                 </View>
-              ) : null}
+              )}
               {item.state === 'DRAFT' ? (
                 <View style={styles.chipRow}>
                   <Button label="Fund" disabled={busy} onPress={() => props.onFund(item.id)} />
