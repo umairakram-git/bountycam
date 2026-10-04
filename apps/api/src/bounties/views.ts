@@ -154,7 +154,7 @@ export interface AssignedViewInput extends PublicViewInput {
   deadline: Date;
   // POLICY.md section 17.7 (D134): built by captureObject in capture/nonce.ts.
   capture: Record<string, unknown>;
-  // POLICY.md section 18.7: null, or the submission's four keys.
+  // POLICY.md sections 18.7 and 19.11: null, or the submission's five keys.
   submission: Record<string, unknown> | null;
 }
 

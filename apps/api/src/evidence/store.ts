@@ -20,6 +20,12 @@ export interface EvidenceStore {
   presignPut(key: string, sha256: Uint8Array, byteLength: number, now: Date): PresignedPut;
   /** Null for 404; throws when the store cannot be reached or answers otherwise. */
   head(key: string): Promise<StoredObject | null>;
+  /**
+   * POLICY.md 19.4: the object's bytes, for the verifier only; no API route calls it.
+   * Null for 404. Reads at most maxBytes + 1 bytes, so an oversized object fails the
+   * caller's length comparison rather than filling memory. Throws as head does.
+   */
+  get(key: string, maxBytes: number): Promise<Uint8Array | null>;
 }
 
 /** Section 18.4's object key, all lowercase. */
@@ -88,6 +94,46 @@ export function s3EvidenceStore(
         throw new Error("evidence store HEAD lacked length or checksum");
       }
       return { byteLength: length, sha256Base64: checksum };
+    },
+    async get(objectName, maxBytes) {
+      const path = objectPath(config.bucket, objectName);
+      const headers = signHeaders({
+        method: "GET",
+        host: config.host,
+        path,
+        headers: {},
+        body: new Uint8Array(0),
+        now: now(),
+        key,
+      });
+      const response = await fetchFn(config.endpoint + path, { method: "GET", headers });
+      if (response.status === 404) {
+        await response.body?.cancel();
+        return null;
+      }
+      if (response.status !== 200 || response.body === null) {
+        await response.body?.cancel();
+        throw new Error(`evidence store GET answered ${response.status}`);
+      }
+      const limit = maxBytes + 1;
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      const reader = response.body.getReader();
+      while (total < limit) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const take = value.subarray(0, Math.min(value.length, limit - total));
+        chunks.push(take);
+        total += take.length;
+      }
+      await reader.cancel();
+      const out = new Uint8Array(total);
+      let at = 0;
+      for (const c of chunks) {
+        out.set(c, at);
+        at += c.length;
+      }
+      return out;
     },
   };
 }

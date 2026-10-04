@@ -520,7 +520,9 @@ test("07 the valid submission: 201, the rows, the nonce consumed, no state moved
   assert.equal(res.statusCode, 201, res.body);
   assert.deepEqual(Object.keys(res.json() as object), ["submission"]);
   const sub = res.json().submission as Record<string, unknown>;
-  assert.deepEqual(Object.keys(sub).sort(), ["evidence_root", "id", "item_count", "submitted_at"]);
+  assert.deepEqual(Object.keys(sub).sort(),
+    ["evidence_root", "id", "item_count", "submitted_at", "verification"]);
+  assert.equal(sub["verification"], "CHECKING"); // POLICY.md 19.11
   assert.equal(sub["evidence_root"], rootHex(manifest));
   assert.equal(sub["item_count"], 2);
   assert.equal(sub["submitted_at"], new Date(nowMs).toISOString());
@@ -774,7 +776,7 @@ async function view(m: Mission, token: string) {
   return res.json() as Record<string, any>;
 }
 
-test("23 views: the Scout's submission, submit_by, the owner's two keys, a closed Start", async () => {
+test("23 views: the Scout's submission, submit_by, the owner's three keys, a closed Start", async () => {
   const { m, s, body } = await ready();
   const before = await view(m, m.scout.token);
   assert.equal(before["submission"], null);
@@ -788,7 +790,9 @@ test("23 views: the Scout's submission, submit_by, the owner's two keys, a close
   assert.deepEqual(after["submission"], res.json().submission);
   assert.equal(after["capture"]["capture_nonce"], null);
   const owner = await view(m, m.requester.token);
-  assert.deepEqual(Object.keys(owner["submission"]).sort(), ["item_count", "submitted_at"]);
+  assert.deepEqual(Object.keys(owner["submission"]).sort(),
+    ["item_count", "submitted_at", "verification"]);
+  assert.equal(owner["submission"]["verification"], "CHECKING"); // POLICY.md 19.11
   assert.equal(owner["submission"]["item_count"], 2);
   const stranger = await view(m, (await seedUser()).token);
   assert.equal("submission" in stranger, false);

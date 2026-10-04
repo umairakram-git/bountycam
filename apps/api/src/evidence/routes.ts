@@ -59,6 +59,8 @@ interface SubmissionRow {
   evidence_root: Buffer;
   statement_signature: Buffer;
   item_count: number;
+  /** POLICY.md 19.11: CHECKING, VERIFIED or NOT_VERIFIED. */
+  verification: string;
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -120,8 +122,18 @@ async function loadSubmission(
   const r = await db.query<SubmissionRow>(
     `SELECT s.id, s.submitted_at, s.evidence_root, s.statement_signature,
             (SELECT count(*)::int FROM evidence_items e WHERE e.submission_id = s.id)
-              AS item_count
-     FROM submissions s WHERE s.assignment_id = $1`,
+              AS item_count,
+            CASE
+              WHEN a.status = 'SUBMITTED' OR b.state IN
+                ('SUBMITTED', 'IN_REVIEW', 'APPROVED', 'REJECTED', 'DISPUTED', 'PAID')
+                THEN 'VERIFIED'
+              WHEN a.status IN ('REFUSED', 'SHORTFALL', 'LAPSED') THEN 'NOT_VERIFIED'
+              ELSE 'CHECKING'
+            END AS verification
+     FROM submissions s
+     JOIN bounties b ON b.id = s.bounty_id
+     LEFT JOIN attestations a ON a.submission_id = s.id
+     WHERE s.assignment_id = $1`,
     [assignmentId],
   );
   return r.rows[0] ?? null;
@@ -135,6 +147,7 @@ function submissionBody(row: SubmissionRow): Record<string, unknown> {
       submitted_at: row.submitted_at.toISOString(),
       evidence_root: row.evidence_root.toString("hex"),
       item_count: row.item_count,
+      verification: row.verification,
     },
   };
 }
@@ -419,6 +432,7 @@ export function registerEvidenceRoutes(app: FastifyInstance, deps: EvidenceRoute
         await client.query("COMMIT");
         // Step 17.
         return reply.status(201).send(submissionBody({
+          verification: "CHECKING",
           id: submissionId,
           submitted_at: now,
           evidence_root: Buffer.from(root),
@@ -444,7 +458,7 @@ export async function scoutSubmission(
   return row === null ? null : (submissionBody(row)["submission"] as Record<string, unknown>);
 }
 
-/** Section 18.7: the owner view's `submission` for an ACCEPTED bounty; two keys only. */
+/** Sections 18.7 and 19.11: the owner view's `submission`; three keys only. */
 export async function ownerSubmission(
   pool: Pool,
   bountyId: string,
@@ -458,5 +472,9 @@ export async function ownerSubmission(
   const row = await loadSubmission(pool, assignment.id);
   return row === null
     ? null
-    : { submitted_at: row.submitted_at.toISOString(), item_count: row.item_count };
+    : {
+        submitted_at: row.submitted_at.toISOString(),
+        item_count: row.item_count,
+        verification: row.verification,
+      };
 }

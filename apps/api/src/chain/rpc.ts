@@ -3,6 +3,7 @@
 // rpc-websockets dependency trips pnpm's build-script block). The endpoint URL
 // may carry a provider key in its path, so no error message ever contains it,
 // and nothing here logs.
+import { base58 } from "@scure/base";
 
 export interface AccountInfo {
   readonly owner: string; // base58, as the RPC returns it
@@ -88,6 +89,108 @@ export function jsonRpcChainReader(url: string, fetchImpl: FetchLike): ChainRead
         throw malformed("value lacks a base58 owner and base64 data pair");
       }
       return { owner: v.owner, data: Uint8Array.from(Buffer.from(v.data[0], "base64")) };
+    },
+  };
+}
+
+// POLICY.md 19.9 (D151): the three calls the verifier makes to send and confirm a
+// transaction, with the reader's error handling: no response body or URL in any error.
+export interface SignatureStatus {
+  readonly confirmationStatus: string | null;
+  readonly failed: boolean;
+}
+
+export interface ChainWriter {
+  getLatestBlockhash(): Promise<Uint8Array>;
+  /** The transaction's signature, base58, as the RPC returns it. */
+  sendTransaction(wire: Uint8Array): Promise<string>;
+  /** One entry per signature; null where the RPC knows none. */
+  getSignatureStatuses(signatures: readonly string[]): Promise<(SignatureStatus | null)[]>;
+}
+
+async function rpcResult(
+  url: string,
+  fetchImpl: FetchLike,
+  method: string,
+  params: unknown[],
+): Promise<unknown> {
+  let response: { ok: boolean; status: number; text(): Promise<string> };
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+  } catch {
+    throw new ChainError("RPC_UNREACHABLE", "RPC request failed before a response");
+  }
+  if (!response.ok) {
+    throw new ChainError("RPC_HTTP", "RPC responded with HTTP " + response.status);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await response.text());
+  } catch {
+    throw malformed("is not JSON");
+  }
+  if (parsed === null || typeof parsed !== "object") throw malformed("is not an object");
+  const body = parsed as { error?: unknown; result?: unknown };
+  if (body.error !== undefined) {
+    throw new ChainError("RPC_ERROR", "RPC returned an error object");
+  }
+  if (!("result" in body)) throw malformed("has no result");
+  return body.result;
+}
+
+function decodeBlockhash(text: string): Uint8Array | null {
+  try {
+    const bytes = base58.decode(text);
+    return bytes.length === 32 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+export function jsonRpcChainWriter(url: string, fetchImpl: FetchLike): ChainWriter {
+  return {
+    async getLatestBlockhash(): Promise<Uint8Array> {
+      const result = await rpcResult(url, fetchImpl, "getLatestBlockhash", [
+        { commitment: "confirmed" },
+      ]);
+      const value = (result as { value?: { blockhash?: unknown } } | null)?.value;
+      const hash = typeof value?.blockhash === "string" ? decodeBlockhash(value.blockhash) : null;
+      if (hash === null) throw malformed("value lacks a base58 blockhash");
+      return hash;
+    },
+    async sendTransaction(wire: Uint8Array): Promise<string> {
+      const result = await rpcResult(url, fetchImpl, "sendTransaction", [
+        Buffer.from(wire).toString("base64"),
+        { encoding: "base64", preflightCommitment: "confirmed" },
+      ]);
+      if (typeof result !== "string" || result.length === 0) {
+        throw malformed("result is not a signature");
+      }
+      return result;
+    },
+    async getSignatureStatuses(signatures: readonly string[]) {
+      const result = await rpcResult(url, fetchImpl, "getSignatureStatuses", [
+        [...signatures],
+        { searchTransactionHistory: true },
+      ]);
+      const value = (result as { value?: unknown } | null)?.value;
+      if (!Array.isArray(value) || value.length !== signatures.length) {
+        throw malformed("value is not one entry per signature");
+      }
+      return value.map((entry): SignatureStatus | null => {
+        if (entry === null) return null;
+        if (typeof entry !== "object") throw malformed("status is not an object");
+        const e = entry as { confirmationStatus?: unknown; err?: unknown };
+        return {
+          confirmationStatus:
+            typeof e.confirmationStatus === "string" ? e.confirmationStatus : null,
+          failed: e.err !== null && e.err !== undefined,
+        };
+      });
     },
   };
 }

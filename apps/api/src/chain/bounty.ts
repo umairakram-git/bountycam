@@ -104,3 +104,39 @@ export function readAcceptance(info: AccountInfo): AcceptanceRead {
   const view = new DataView(d.buffer, d.byteOffset, d.byteLength);
   return { ok: true, scout: d.slice(172, 204), deadline: view.getBigInt64(205, true) };
 }
+
+// POLICY.md 19.10 (D153): the fields `submit_attestation` writes, read only from a
+// Submitted account. After deadline (204..212) come submitted_at (tag 213, value
+// 214..221), evidence_root (tag 222, value 223..254) and achieved_assurance (tag 255,
+// value 256), each Some.
+export type SubmissionRead =
+  | {
+      readonly ok: true;
+      readonly scout: Uint8Array;
+      readonly deadline: bigint;
+      readonly submittedAt: bigint;
+      readonly evidenceRoot: Uint8Array;
+      readonly achievedAssurance: number;
+    }
+  | { readonly ok: false; readonly error: "BAD_TAIL" };
+
+export const SUBMITTED_TAIL_END = 257;
+
+export function readSubmission(info: AccountInfo): SubmissionRead {
+  const d = info.data;
+  if (
+    d.length < SUBMITTED_TAIL_END || d[169] !== 2 || d[171] !== 1 || d[204] !== 1 ||
+    d[213] !== 1 || d[222] !== 1 || d[255] !== 1
+  ) {
+    return { ok: false, error: "BAD_TAIL" };
+  }
+  const view = new DataView(d.buffer, d.byteOffset, d.byteLength);
+  return {
+    ok: true,
+    scout: d.slice(172, 204),
+    deadline: view.getBigInt64(205, true),
+    submittedAt: view.getBigInt64(214, true),
+    evidenceRoot: d.slice(223, 255),
+    achievedAssurance: view.getUint8(256),
+  };
+}

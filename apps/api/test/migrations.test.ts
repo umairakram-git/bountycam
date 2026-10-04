@@ -22,6 +22,7 @@ function migrate(...args: string[]): string {
 
 const expectedTables = [
   "assignments",
+  "attestations",
   "bounties",
   "capture_nonces",
   "decisions",

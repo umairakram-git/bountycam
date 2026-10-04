@@ -572,8 +572,8 @@ export function registerBountyRoutes(
             createdAt: row.created_at,
             policyHashHex: bytesToHex(row.policy_hash),
             canonicalJson: row.canonical_json,
-            // Section 18.7: an ACCEPTED bounty's owner view carries the submission.
-            ...(row.state === "ACCEPTED"
+            // Sections 18.7 and 19.11: ACCEPTED and SUBMITTED carry the submission.
+            ...(row.state === "ACCEPTED" || row.state === "SUBMITTED"
               ? { submission: await ownerSubmission(pool, row.id) }
               : {}),
           }),
@@ -581,8 +581,9 @@ export function registerBountyRoutes(
       }
 
       // Step 4a (POLICY.md 16.4, D127): the Scout holding the acceptance gets
-      // the assigned-Scout view, with the exact location inside the policy.
-      if (row.state === "ACCEPTED") {
+      // the assigned-Scout view, with the exact location inside the policy. Section 19.11:
+      // also in SUBMITTED.
+      if (row.state === "ACCEPTED" || row.state === "SUBMITTED") {
         const held = await pool.query<{ id: string; accepted_at: Date; deadline: Date }>(
           "SELECT id, accepted_at, deadline FROM assignments WHERE bounty_id = $1 " +
             "AND scout_id = $2 AND status = 'ACTIVE' AND accepted_at IS NOT NULL",

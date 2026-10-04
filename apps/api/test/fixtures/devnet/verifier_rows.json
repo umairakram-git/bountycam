@@ -1,0 +1,136 @@
+{
+ "_note": "Recorded from bountycam_dev on 4 October 2026 (Session 21): bounty 3591bf4c, the P4 live run. Timestamps as psql printed them (UTC+10); bytea as \\\\x hex.",
+ "policy": {
+  "id": "271b711a-ff08-44fb-8cfe-01e20b28e904",
+  "requester_id": "188b1a6a-b401-419c-a16f-b150418df598",
+  "canonical_json": "{\"acceptance_window_seconds\":86400,\"capture_radius_m\":150,\"chain\":\"solana\",\"challenge_window_seconds\":3600,\"cluster\":\"devnet\",\"completion_window_seconds\":7200,\"domain_tag\":\"BOUNTYCAM_POLICY_V1\",\"eligibility_profile_id\":\"BASE_V1\",\"evidence_requirements\":[{\"id\":\"0ee4180a-8d87-44fb-99f3-0f1e8884bb0e\",\"prompt\":\"Wide shot of spot\",\"required\":true,\"type\":\"PHOTO\"},{\"id\":\"617883a8-78e0-46af-aea0-b30429f31f5f\",\"prompt\":\"Closeup of any sign or marker\",\"required\":true,\"type\":\"PHOTO\"}],\"fee_amount\":\"0\",\"lat\":\"-33.7118240\",\"lon\":\"150.9654106\",\"required_assurance\":1,\"reward_amount\":\"5000000\",\"salt\":\"ac143105a2f55487e55b2fa65f6316095c6482b7d2ab50e3595f2aea4e505af2\",\"settlement_mint\":\"ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR\"}",
+  "policy_hash": "\\xcb29420f48f6349c7d0a4b0474aba3ad4a5d4b7dccb256f33e1d044bcf75f7c9",
+  "required_assurance": "1",
+  "created_at": "2026-10-01 10:44:10.544125+10",
+  "eligibility_profile_id": "BASE_V1"
+ },
+ "bounty": {
+  "id": "3591bf4c-6acc-4196-8d07-0ca4c49f8ad0",
+  "requester_id": "188b1a6a-b401-419c-a16f-b150418df598",
+  "policy_id": "271b711a-ff08-44fb-8cfe-01e20b28e904",
+  "title": "P4 live run 1",
+  "category": "Infrastructure",
+  "capture_radius_m": "150",
+  "reward_amount": "5000000",
+  "state": "ACCEPTED",
+  "program_account": "AfZgWdPwrhf8brJBiRKrse4kB1qaKow33hEkzXxA4FkT",
+  "created_at": "2026-10-01 10:44:10.544125+10",
+  "location": "0101000020E6100000C746C5A4E4DE62400341800C1DDB40C0",
+  "location_public": "0101000020E61000007B14AE47E1DE6240EC51B81E85DB40C0",
+  "idempotency_key": "f9ae2b6a-3cc5-423a-8b2f-5d82ea3d8af1",
+  "request_digest": "\\x942fd8a1bc506cbcbdf4780e93f902d827244d20309726ae27df98294453c9da",
+  "acceptance_cutoff": "2026-10-02 10:44:27+10",
+  "location_wkt": "POINT(150.9654106 -33.711824)"
+ },
+ "assignment": {
+  "id": "941dcc5c-1a28-45f7-8950-d47c488248e5",
+  "bounty_id": "3591bf4c-6acc-4196-8d07-0ca4c49f8ad0",
+  "scout_id": "cda7b66f-0707-4062-b3f7-4decd04b8dcb",
+  "accepted_at": "2026-10-01 10:50:06+10",
+  "deadline": "2026-10-01 12:50:06+10",
+  "status": "ACTIVE",
+  "expires_at": "2026-10-01 10:54:45+10"
+ },
+ "users": [
+  {
+   "id": "188b1a6a-b401-419c-a16f-b150418df598",
+   "wallet_address": "9BZ17sUdF2matCurxmdmUpD3BNabBTFmsmAVu5oY9qP3",
+   "display_name": "",
+   "trust_level": "0",
+   "seeker_verified": "f",
+   "created_at": "2026-09-20 08:34:09.353748+10",
+   "status": "ACTIVE"
+  },
+  {
+   "id": "cda7b66f-0707-4062-b3f7-4decd04b8dcb",
+   "wallet_address": "7oSUM9a2PgNbFwYhFFXU5p1mrZr1hTykFWVqosNmT7vW",
+   "display_name": "",
+   "trust_level": "0",
+   "seeker_verified": "f",
+   "created_at": "2026-09-28 21:27:21.899268+10",
+   "status": "ACTIVE"
+  }
+ ],
+ "capture_nonces": [
+  {
+   "id": "ae55344f-bc4a-4492-add7-107047249bc8",
+   "assignment_id": "941dcc5c-1a28-45f7-8950-d47c488248e5",
+   "bounty_id": "3591bf4c-6acc-4196-8d07-0ca4c49f8ad0",
+   "scout_id": "cda7b66f-0707-4062-b3f7-4decd04b8dcb",
+   "deployment_id": "2",
+   "value": "\\x50c33e95234103a70ec0a3c509eeb5add4dfe8eda14b3521853f443db58408c2",
+   "status": "SUPERSEDED",
+   "issued_at": "2026-10-01 11:09:40.589+10",
+   "expires_at": "2026-10-01 11:29:40.589+10",
+   "consumed_at": "",
+   "start_lat": "-33.7119135",
+   "start_lon": "150.9654362",
+   "start_accuracy_m": "34.715999603271484",
+   "start_fixed_at": "2026-10-01 11:09:40.193+10"
+  },
+  {
+   "id": "8e15a091-15f0-4616-aff7-d3e004860aa6",
+   "assignment_id": "941dcc5c-1a28-45f7-8950-d47c488248e5",
+   "bounty_id": "3591bf4c-6acc-4196-8d07-0ca4c49f8ad0",
+   "scout_id": "cda7b66f-0707-4062-b3f7-4decd04b8dcb",
+   "deployment_id": "2",
+   "value": "\\x6e065027f6d258be3b5d966dc0472c34be37bde2975fcd513c0fe207ca9b1c3b",
+   "status": "CONSUMED",
+   "issued_at": "2026-10-01 11:18:25.456+10",
+   "expires_at": "2026-10-01 11:38:25.456+10",
+   "consumed_at": "2026-10-01 11:19:39.313+10",
+   "start_lat": "-33.7116643",
+   "start_lon": "150.9655046",
+   "start_accuracy_m": "22.66900062561035",
+   "start_fixed_at": "2026-10-01 11:18:12.847+10"
+  }
+ ],
+ "submission": {
+  "id": "411208b5-e05d-4b49-8885-254801faa685",
+  "assignment_id": "941dcc5c-1a28-45f7-8950-d47c488248e5",
+  "evidence_root": "\\x1160813b64c791dcd01330c7cc4440d5c2c1c884e505454152095bfb4fd24f7c",
+  "achieved_assurance": "",
+  "attester_signature": "",
+  "submitted_at": "2026-10-01 11:19:39.313+10",
+  "bounty_id": "3591bf4c-6acc-4196-8d07-0ca4c49f8ad0",
+  "scout_id": "cda7b66f-0707-4062-b3f7-4decd04b8dcb",
+  "capture_nonce_id": "8e15a091-15f0-4616-aff7-d3e004860aa6",
+  "manifest": "{\"header\":{\"assignment_id\":\"941dcc5c-1a28-45f7-8950-d47c488248e5\",\"bounty_id\":\"3591bf4c-6acc-4196-8d07-0ca4c49f8ad0\",\"capture_nonce\":\"6e065027f6d258be3b5d966dc0472c34be37bde2975fcd513c0fe207ca9b1c3b\",\"deployment_id\":2,\"manifest_version\":1,\"policy_hash\":\"cb29420f48f6349c7d0a4b0474aba3ad4a5d4b7dccb256f33e1d044bcf75f7c9\",\"scout\":\"7oSUM9a2PgNbFwYhFFXU5p1mrZr1hTykFWVqosNmT7vW\"},\"items\":[{\"byte_length\":1672426,\"captured_at\":\"2026-10-01T01:18:40.969Z\",\"fixed_at\":\"2026-10-01T01:18:43.867Z\",\"horizontal_accuracy_m\":12,\"lat\":\"-33.7117223\",\"lon\":\"150.9654763\",\"photo_sha256\":\"849ffc1ef093e317e7c78e1a6fdda559b78d585414708cbc0a7323aff390a4d4\",\"requirement_id\":\"0ee4180a-8d87-44fb-99f3-0f1e8884bb0e\"},{\"byte_length\":1486270,\"captured_at\":\"2026-10-01T01:18:56.487Z\",\"fixed_at\":\"2026-10-01T01:18:59.874Z\",\"horizontal_accuracy_m\":13,\"lat\":\"-33.7117755\",\"lon\":\"150.9655182\",\"photo_sha256\":\"59f1f0ad1fe4d22a3a51b7345baadf04f5000cb2edcc229b6fec609dc3e88c97\",\"requirement_id\":\"617883a8-78e0-46af-aea0-b30429f31f5f\"}]}",
+  "statement_signature": "\\x4563086811ec6758d6f4feb127dbb5122408cb4ca2ed5f8523e3e43b3358ffea3f76ddc5a34b60176ead7a49b200cf8c80e553085580773486ea1540378b4808"
+ },
+ "evidence_items": [
+  {
+   "id": "2275860b-d74e-4288-9029-34595efdc91a",
+   "submission_id": "411208b5-e05d-4b49-8885-254801faa685",
+   "requirement_id": "0ee4180a-8d87-44fb-99f3-0f1e8884bb0e",
+   "storage_key": "evidence/3591bf4c-6acc-4196-8d07-0ca4c49f8ad0/8e15a091-15f0-4616-aff7-d3e004860aa6/0ee4180a-8d87-44fb-99f3-0f1e8884bb0e/849ffc1ef093e317e7c78e1a6fdda559b78d585414708cbc0a7323aff390a4d4.jpg",
+   "hash": "\\x849ffc1ef093e317e7c78e1a6fdda559b78d585414708cbc0a7323aff390a4d4",
+   "c2pa_present": "f",
+   "captured_at": "2026-10-01 11:18:40.969+10",
+   "byte_length": "1672426",
+   "lat": "-33.7117223",
+   "lon": "150.9654763",
+   "horizontal_accuracy_m": "12",
+   "fixed_at": "2026-10-01 11:18:43.867+10"
+  },
+  {
+   "id": "1109a6c5-3bec-49eb-82df-69a6567cffaf",
+   "submission_id": "411208b5-e05d-4b49-8885-254801faa685",
+   "requirement_id": "617883a8-78e0-46af-aea0-b30429f31f5f",
+   "storage_key": "evidence/3591bf4c-6acc-4196-8d07-0ca4c49f8ad0/8e15a091-15f0-4616-aff7-d3e004860aa6/617883a8-78e0-46af-aea0-b30429f31f5f/59f1f0ad1fe4d22a3a51b7345baadf04f5000cb2edcc229b6fec609dc3e88c97.jpg",
+   "hash": "\\x59f1f0ad1fe4d22a3a51b7345baadf04f5000cb2edcc229b6fec609dc3e88c97",
+   "c2pa_present": "f",
+   "captured_at": "2026-10-01 11:18:56.487+10",
+   "byte_length": "1486270",
+   "lat": "-33.7117755",
+   "lon": "150.9655182",
+   "horizontal_accuracy_m": "13",
+   "fixed_at": "2026-10-01 11:18:59.874+10"
+  }
+ ]
+}

@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","error":{"code":-32602,"message":"failed to deserialize solana_transaction::versioned::VersionedTransaction: Attempting to read 2 bytes"},"id":1}

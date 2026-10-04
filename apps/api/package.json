@@ -7,7 +7,7 @@
     "dev": "node --watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test test/migrations.test.ts && node --test test/auth.test.ts && node --test test/bounties.test.ts && node --test test/chain.test.ts && node --test test/deployment.test.ts && node --test test/eligibility.test.ts && node --test test/funding.test.ts && node --test test/acceptance.test.ts && node --test test/capture.test.ts && node --test test/evidence.test.ts",
+    "test": "node --test test/migrations.test.ts && node --test test/auth.test.ts && node --test test/bounties.test.ts && node --test test/chain.test.ts && node --test test/deployment.test.ts && node --test test/eligibility.test.ts && node --test test/funding.test.ts && node --test test/acceptance.test.ts && node --test test/capture.test.ts && node --test test/evidence.test.ts && node --test test/verifier.test.ts",
     "migrate": "node-pg-migrate --migrations-dir migrations"
   },
   "dependencies": {

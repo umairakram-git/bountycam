@@ -68,7 +68,7 @@ async function loadRow(pool: Pool, bountyId: string): Promise<ProjectionRow | un
 
 // Step 6: every row of both POLICY.md 2.6 tables. Policy values come from the
 // stored canonical text, never from read-model columns.
-function bindingsAgree(row: ProjectionRow, bounty: DecodedBounty): boolean {
+export function bindingsAgree(row: ProjectionRow, bounty: DecodedBounty): boolean {
   const policy = JSON.parse(row.canonical_json) as StoredPolicy;
   const profile = ELIGIBILITY_PROFILES.get(policy.eligibility_profile_id);
   if (profile === undefined) return false;
