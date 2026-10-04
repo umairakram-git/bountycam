@@ -14,6 +14,7 @@ upload and submission (D138 to D144).
 **Amended:** Session 20 build — section 18.10 test 16, amendment A1.
 **Amended:** Session 21 (P5) — the new section 19: the verifier and the attestation (D146 to
 D153); it extends sections 7.2, 16.4 and 18.7 in place.
+**Amended:** Session 21 build — section 19.2, amendment A1.
 
 Policies and bounties share this document deliberately: the hashed policy object and the
 bounty row that references it must not drift, and a split document is how they would.
@@ -2888,8 +2889,8 @@ Up, in order:
 | `created_at` | `timestamptz` | not null |
 | `updated_at` | `timestamptz` | not null |
 
-   Constraints: `attestations_signed`, `(status IN ('SIGNED', 'SUBMITTED')) = (message IS NOT
-   NULL)`; `attestations_signature_pair`, `(message IS NULL) = (signature IS NULL)`;
+   Constraints: `attestations_signed`, `status NOT IN ('SIGNED', 'SUBMITTED') OR message IS NOT
+   NULL` (amendment A1); `attestations_signature_pair`, `(message IS NULL) = (signature IS NULL)`;
    `attestations_graded`, `status NOT IN ('SIGNED', 'SUBMITTED', 'SHORTFALL') OR
    achieved_assurance IS NOT NULL`; `attestations_reason`, `(status IN ('REFUSED', 'LAPSED')) =
    (reason IS NOT NULL)`; `attestations_submitted_tx`, `status <> 'SUBMITTED' OR tx_signature IS
@@ -2900,6 +2901,13 @@ No column has a default. Down drops the table and the type; valid against any ta
 
 Non-test gate, from raw output: `\d attestations` shows the columns and constraints above and
 no default.
+
+**Amendment A1 (Session 21 build).** `attestations_signed` was first written as an equality,
+which forbade a row that had been signed from ever leaving `SIGNED` or `SUBMITTED` with its
+message: section 19.10's `CHAIN_STATE` refusal and section 19.9's lapse of a `SIGNED` row both
+violate it. The rule is now one-way: `SIGNED` and `SUBMITTED` require the signed bytes, and a
+row refused or lapsed after signing keeps them, so the record of what was signed survives.
+Section 19.14 test 16 checks that a refused row keeps its message.
 
 ### 19.3 Configuration
 
