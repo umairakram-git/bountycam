@@ -3018,3 +3018,22 @@ that landed while the verifier was down is projected rather than resent. The ass
 owner and assigned-Scout views' `submission` object gains `verification`: `CHECKING`,
 `VERIFIED` or `NOT_VERIFIED`, which CAPTURE.md section 8 turns into D146 ruling 3's lines.
 POLICY.md sections 19.10 and 19.11.
+
+**D154 — P5's live run, 4 October.**
+
+Record. Bounty `d649d6f4-f2f7-4337-88f5-10809f664c7d` ("P5 live run 1", 5 USDC, two required
+photo prompts, a 150 m radius, A1), created and funded from the Seeker, accepted on the A30 at
+22:46:52 (deadline 00:46:52 on 5 October; NSW daylight saving began that day). At its first tick
+(22:26:05) the verifier marked P4's submission on `3591bf4c` `LAPSED`, reason `DEADLINE`, with no
+store read and no send. Capture started at 22:49. Both photos (1538589 and 1620005 bytes, hashed
+in 5695 and 6050 ms) showed "Waiting for signal": the local evidence store was no longer
+listening on 7070 (curl answered `000`, no listener). Restarted with `evidence-store.sh`, it
+answered 403; both photos uploaded on the phone's retry and were submitted at 22:55:06 (201).
+The verifier enqueued the submission, re-read and re-hashed both photos, graded A1, signed and
+sent `submit_attestation`: 728 bytes, 10,000 lamports for two signatures, 8,626 compute units,
+one send and no retry. It confirmed and projected at 22:55:11; chain `submitted_at` 22:55:07,
+transaction `3pMzGVWg…CNPGdnt`, finalized. `attestation-check` passed 10 of 10. The A30 showed
+"Evidence verified. Waiting for the requester's review."; the Seeker, once reloaded through
+Metro, "Evidence verified." with "Submitted 15:55 · 2 photos" (its clock is UTC+4) and, for
+`3591bf4c`, "Evidence couldn't be verified. Your USDC returns after the deadline." The
+transaction and the `Submitted` account are POLICY.md 19.14 test 19's second vector and fixture.

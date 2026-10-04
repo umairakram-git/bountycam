@@ -1,17 +1,18 @@
 # BountyCam — Handoff
 
-**Date:** 1 October 2026
+**Date:** 4 October 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
 spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification and build;
 Session 10; Session 11 escrow initialisation; Session 12 mobile sign-in; Session 13
 eligibility specification; Sessions 14 and 15 eligibility build; Session 16 Seeker check;
 Session 17 P1 — create and fund from the device, the funding projection; Session 18 P2 —
 discovery, accept from the device, the acceptance projection; Session 19 P3 — the capture nonce;
-Session 20 P4 — evidence capture, upload and signed submission
-**Next session:** P5 in BACKLOG.md's Remaining plan — the verifier: policy evaluation, assurance
-grading from A0 and A1, the signed attestation (MESSAGES.md 3) over P4's `evidence_root`, and
-`submit_attestation`. Specification first; D116's order stands.
-**Deadline:** 8 October 2026 (7 days remaining)
+Session 20 P4 — evidence capture, upload and signed submission; Session 21 P5 — the verifier
+and the attestation
+**Next session:** P6 in BACKLOG.md's Remaining plan — requester review, `approve`, and `reject`
+with a named requirement; payout confirmed on the explorer. Specification first; D116's order
+stands.
+**Deadline:** 8 October 2026 (4 days remaining)
 
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
@@ -1655,6 +1656,65 @@ scripts made each staged set exactly its own list; the API's made two commits, t
 ahead of the code.
 
 **Still open.** BACKLOG.md's Session 20 section.
+
+---
+
+## Session 21 — P5: the verifier and the attestation (4 October)
+
+Six commits: `4cb6c10` (specification, D146 to D153), `182b5d2` (shared: the attestation
+message), `5bc4cdf` (POLICY.md 19.2 amendment A1), `d111824` (API: the verifier), `ba4253c`
+(mobile: the verification lines), and this records commit, which also adds the live run's
+transaction as test 19's second vector.
+
+**What landed.** The whole of P5.
+
+- **Specification:** `apps/api/POLICY.md` section 19, `packages/shared/SPEC.md` section 12,
+  `apps/mobile/CAPTURE.md` section 8, three lines in SECURITY.md. Umair's rulings are D146: a
+  photo missing at verification refuses; after a refusal, shortfall or lapse the USDC returns
+  by CLI `expire_accepted`; the lines each side sees. One amendment while building, A1:
+  `attestations_signed` made one-way, so a row refused or lapsed after signing keeps its bytes.
+- **Shared:** `attestationMessage` and its constants, bound by the 13 published attestation
+  vectors and the 15 mutation vectors. Tests 139 to 143, gate 143.
+- **API:** migration 14 (`attestations`); the verifier, a separate process
+  (`src/verifier/config.ts`, `run.ts`, `main.ts`, `scripts/verifier.sh`) holding the attester
+  and relayer keys, which the API process never loads; `src/chain/tx.ts`, the hand-built
+  728-byte transaction, equal byte for byte to `@solana/web3.js` 1.98.4's; `readSubmission`;
+  the RPC writer; `EvidenceStore.get`; `verification` in both views and the submission body;
+  `scripts/attestation-check.mjs`. `test/verifier.test.ts` (20); migrations test and evidence
+  tests 7 and 23 amended. Gate 1 / 38 / 81 / 8 / 7 / 26 / 24 / 16 / 25 / 26 / 20.
+- **Mobile:** the Scout's and the requester's lines by `verification`; `SUBMITTED` bounties
+  load their submission. Gate: mobile `tsc` and a Metro Android bundle. No native rebuild.
+- **Decisions:** D146 to D154. Umair ruled D146; the rest is technical, and D154 is the record.
+
+**Live, 4 October.** `api.env` gained `ATTESTER_KEY_PATH` and `RELAYER_KEY_PATH` (backup
+`api.env.bak-s21`); the verifier's startup checks passed against the chain (attester
+`2KAuf8…`, relayer `6Wv1pz…` with 4.55 SOL, deployment 2). Migration 14 applied to
+`bountycam_dev`. Bounty `d649d6f4-f2f7-4337-88f5-10809f664c7d` went from accept to `Submitted`
+on chain within its window: submitted at 22:55:06, attested and projected at 22:55:11, one
+send, transaction `3pMzGVWg…CNPGdnt`, `attestation-check` 10 of 10, both phones showing the
+verified lines. The full record is D154.
+
+**Facts worth not rediscovering.**
+
+- Start order for a live session, each in its own window from the repo root:
+  `evidence-store.sh`, `dev.sh`, `verifier.sh`, then Metro. Before a run, check the store
+  answers: `curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:7070/` must print 403.
+  In this run a versitygw left from an earlier session was listening at 22:19 and gone by
+  22:50; the phone showed "Waiting for signal" until the store was restarted.
+- A phone keeps its old JavaScript until Metro reloads it: press `r` in Metro with that phone
+  connected after any mobile commit.
+- The verifier needs the laptop online to reach devnet; from submission to `Submitted` took
+  about 5 seconds. Each attestation costs the relayer 10,000 lamports.
+- `bountycam_dev` is at migration 14.
+- Bounty `d649d6f4` is `Submitted` with a 3,600-second review window from 22:55:07; it waits
+  for P6.
+
+**Process.** Specification first. Every apply script ran in the architect's sandbox (Postgres 16
+with PostGIS, pnpm 11.22.0, Node 22.22.2, Expo 57) before it ran here, and printed the same
+hashes. Red phases: 7 shared mutations, 21 API mutations, and 3 for this records commit's
+vector, each turning exactly its named tests red.
+
+**Still open.** BACKLOG.md's Session 21 section.
 
 ---
 

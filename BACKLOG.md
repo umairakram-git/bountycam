@@ -864,6 +864,36 @@ open.
 
 ---
 
+## Session 21 (4 October)
+
+**Closed.**
+
+- **P5** — the verifier, the signed attestation and `submit_attestation`; live on devnet
+  (D154). The verifier's deadline path ran on real data: P4's submission was marked `LAPSED`.
+
+**Still open.**
+
+- **The bottom buttons sit under the A30's navigation bar** — seen again on its Detail and
+  Mission screens (O8).
+- **The API type check never sees its tests** — unchanged; `verifier.test.ts` ran in the
+  architect's sandbox.
+- **P3's check 4 is half met; the Create form has no optional-requirement toggle; hashing takes
+  5.7 to 6.1 s per photo in the development build** — unchanged from Session 20.
+- **Bounties `3591bf4c`, `17e419ff` and `802997ff` return their USDC only by CLI
+  `expire_accepted`.**
+
+**New.**
+
+- **The local evidence store stopped listening mid-session** — a versitygw process from an
+  earlier session answered at 22:19 and was gone by 22:50; cause not established. The phone's
+  retry recovered once the store was restarted. A pre-run check is in HANDOFF.md.
+- **After a refusal, shortfall or lapse the USDC waits for CLI `expire_accepted`** (D146
+  ruling 2); automating it is O1's.
+- **One verifier instance only** (POLICY.md 19.13) — two would race to send; correct but
+  untested.
+
+---
+
 ## Remaining plan
 
 Reordered 28 September under D116: nothing is cut, and the payment path is built first. Items
@@ -880,7 +910,8 @@ HANDOFF.md; this section lists only what remains, in build order.
   live on devnet 1 October (D145).
 - **P5** — Verifier service: policy evaluation, assurance grading from A0 and A1, signed
   attestation per MESSAGES.md, `submit_attestation`. Specified in Session 21: POLICY.md section
-  19, SPEC.md section 12, CAPTURE.md section 8 (D146 to D153).
+  19, SPEC.md section 12, CAPTURE.md section 8 (D146 to D153). **Done, Session 21**: live on
+  devnet 4 October (D154).
 - **P6** — Requester review, `approve`, and `reject` with a named requirement; payout confirmed
   on the explorer.
 

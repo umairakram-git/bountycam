@@ -23,7 +23,12 @@ import type { EligibilityConfig } from "../src/chain/config.ts";
 import type { Deployment } from "../src/chain/deployment.ts";
 import { jsonRpcChainWriter, type ChainReader, type ChainWriter } from "../src/chain/rpc.ts";
 import { eligibilitySigner } from "../src/chain/signer.ts";
-import { attestationTransaction, ATTESTATION_TX_LENGTH } from "../src/chain/tx.ts";
+import {
+  attestationTransaction,
+  attestationTxMessageFor,
+  ATTESTATION_TX_LENGTH,
+} from "../src/chain/tx.ts";
+import { decodeBountyAccount, readSubmission } from "../src/chain/bounty.ts";
 import type { Clock } from "../src/clock.ts";
 import { loadConfig } from "../src/config.ts";
 import { systemRandomness } from "../src/randomness.ts";
@@ -816,7 +821,7 @@ test("18 views: CHECKING, VERIFIED, NOT_VERIFIED; SUBMITTED serves both views", 
   }
 });
 
-test("19 the transaction: the web3.js vector, 728 bytes, the discriminator; RPC replies",
+test("19 the transaction: the web3.js vector, the live one, 728 bytes; RPC replies",
   async () => {
     const att = messageVectors.vectors.find((v: { name: string }) => v.name === "ATT-01");
     const tx = attestationTransaction({
@@ -856,6 +861,46 @@ test("19 the transaction: the web3.js vector, 728 bytes, the discriminator; RPC 
         .sendTransaction(new Uint8Array(3)),
       (e: unknown) => (e as { code?: string }).code === "RPC_ERROR",
     );
+    // The second vector: the live run's transaction, recorded from devnet on 4 October
+    // (bounty d649d6f4). Rebuilt from its recorded inputs, the message is the one on chain,
+    // and the relayer's signature over it verifies.
+    const live = json("devnet/live_attestation.json");
+    const recorded = json("devnet/attestation_transaction.json").result;
+    assert.equal(recorded.meta.err, null);
+    const wire = Uint8Array.from(Buffer.from(recorded.transaction[0], "base64"));
+    assert.equal(wire.length, 728);
+    const onChain = wire.slice(65);
+    const relayer = onChain.slice(4, 36);
+    const rebuilt = attestationTxMessageFor(relayer, {
+      bountyAccount: base58.decode(live.bounty_account),
+      configAccount: base58.decode(CONFIG_ACCOUNT),
+      programId: base58.decode(PROGRAM),
+      attesterPubkey: base58.decode("2KAuf8WWHGDm4rA1MCCQ9UciEAiqyTHaKeyBHZFF3wZ5"),
+      message: Buffer.from(live.message_hex, "hex"),
+      signature: Buffer.from(live.signature_hex, "hex"),
+      blockhash: onChain.slice(196, 228),
+    });
+    assert.deepEqual(rebuilt, onChain);
+    assert.ok(ed25519.verify(wire.slice(1, 65), onChain, relayer));
+    assert.equal(base58.encode(wire.slice(1, 65)), live.tx_signature);
+    // The recorded Submitted account reads back the attested root, grade and Scout.
+    const submitted = json("devnet/submitted_account.json").result.value;
+    const info = {
+      owner: submitted.owner as string,
+      data: Uint8Array.from(Buffer.from(submitted.data[0], "base64")),
+    };
+    const decoded = decodeBountyAccount(info, PROGRAM);
+    assert.ok(decoded.ok && decoded.bounty.state === "Submitted");
+    const read = readSubmission(info);
+    assert.ok(read.ok);
+    if (read.ok) {
+      const msg = Buffer.from(live.message_hex, "hex");
+      assert.deepEqual(Buffer.from(read.evidenceRoot), msg.subarray(220, 252));
+      assert.equal(read.achievedAssurance, live.achieved_assurance);
+      assert.equal(base58.encode(read.scout), "7oSUM9a2PgNbFwYhFFXU5p1mrZr1hTykFWVqosNmT7vW");
+      assert.equal(read.deadline, 1791121612n);
+      assert.equal(read.submittedAt, 1791114907n);
+    }
   });
 
 test("20 configuration and logs", async () => {

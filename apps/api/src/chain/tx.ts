@@ -51,7 +51,17 @@ function concat(parts: (Uint8Array | number[])[]): Uint8Array {
 
 /** The message the relayer signs (legacy format). */
 export function attestationTxMessage(input: AttestationTxInput): Uint8Array {
-  const relayer = ed25519.getPublicKey(input.relayerSeed);
+  return attestationTxMessageFor(ed25519.getPublicKey(input.relayerSeed), input);
+}
+
+/**
+ * The same message for a relayer named by its public key, so a recorded transaction can be
+ * rebuilt without the relayer's seed (POLICY.md 19.14 test 19).
+ */
+export function attestationTxMessageFor(
+  relayer: Uint8Array,
+  input: Omit<AttestationTxInput, "relayerSeed">,
+): Uint8Array {
   const keys = [
     relayer,
     input.bountyAccount,

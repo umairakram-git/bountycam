@@ -1,0 +1,10 @@
+{
+ "_note": "Recorded from bountycam_dev on 4 October 2026 (Session 21): the attestations row of the P5 live run, bounty d649d6f4. Message and signature as stored; the transaction is attestation_transaction.json.",
+ "bounty_id": "d649d6f4-f2f7-4337-88f5-10809f664c7d",
+ "bounty_account": "6oHbEFdoimdkF3sv2r18AnyYyD3SYxoNqAFR2WWj8exs",
+ "submission_id": "785b7e93-0dac-45cc-aa86-b997f014dfbf",
+ "achieved_assurance": 1,
+ "message_hex": "424f554e545943414d5f4154544553544154494f4e5f56310100025342ad625c0024d2730d76c54ea40074d4403ccf16c2ca331ac70077196813f7d649d6f4f2f7433788f510809f664c7d79917d02f1531c839cb3667dbfa2700d75eca3196fc2578d286383478f7f05ae650ba3b641572f47d72b869f7302ec480a825ed65fb38f9044533c6ccd297f6743cb966c637cd63bb727bd78897876db780eb6130140cbe894ba8c446955aead0d2a8920d85f17637cff555ef00869418767b4de9cb72cc553c8944ccfd0deb901cc58c26a00000000100e0000000000002dd1e3a5291af1acb376545648e84039bd14558446c7c529ffa48642136f7251019b3ec26a00000000",
+ "signature_hex": "ee83addacbbe00fdbc161cba2aa263bfa951209624388e1c456a51a25405a24da4b5b017d3a495bb4b85a6493c458137c8ac9a81794d5f08c0ba28e3df46e50e",
+ "tx_signature": "3pMzGVWgvSd8c3HJfPHwzN1GzzpLF4ckFWei1ztWLBTca4xtyTNLkKxVefmBszYajwNxQwei949e2p267CNPGdnt"
+}
