@@ -15,6 +15,10 @@ import {
   ELIGIBILITY_SCHEMA_VERSION,
   ELIGIBILITY_MESSAGE_LENGTH,
   MAX_ASSURANCE_LEVEL,
+  attestationMessage,
+  ATTESTATION_DOMAIN_TAG,
+  ATTESTATION_SCHEMA_VERSION,
+  ATTESTATION_MESSAGE_LENGTH,
   isValidLat,
   isValidLon,
   gpsToScaled,
@@ -48,6 +52,7 @@ import {
   sha256Chunked,
 } from "./index.js";
 import type {
+  AttestationMessageFields,
   CreatedBountyExpectation,
   EligibilityMessageFields,
   EligibilityProfile,
@@ -1831,5 +1836,111 @@ describe("evidence manifest (SPEC.md 11)", () => {
       "STATEMENT_INPUT_INVALID");
     rejectsWith(() => evidenceStatement(bountyOf(V6), root.subarray(0, 31)),
       "STATEMENT_INPUT_INVALID");
+  });
+});
+
+// SPEC.md section 12 - the attestation message (Session 21, D150).
+describe("attestation message (SPEC.md section 12)", () => {
+  const vectors = JSON.parse(
+    readFileSync(join(process.cwd(), "vectors", "vectors.json"), "utf8"),
+  ) as {
+    authorities: { attester_seed_ascii: string; attester_pubkey_hex: string };
+    vectors: { name: string; message_len: number; message_hex: string; signature_hex: string }[];
+    mutations_attestation: { field: string; message_hex: string }[];
+  };
+  const attVectors = vectors.vectors.filter((v) => v.message_len === 261);
+  const hex = (h: string): Uint8Array => Uint8Array.from(Buffer.from(h, "hex"));
+  const toHex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
+
+  function fieldsOf(m: Uint8Array): AttestationMessageFields {
+    const dv = new DataView(m.buffer, m.byteOffset, m.byteLength);
+    return {
+      deploymentId: dv.getUint8(26),
+      programId: m.slice(27, 59),
+      bountyId: m.slice(59, 75),
+      requester: m.slice(75, 107),
+      scout: m.slice(107, 139),
+      policyHash: m.slice(139, 171),
+      eligibilityProfileHash: m.slice(171, 203),
+      requiredAssurance: dv.getUint8(203),
+      deadline: dv.getBigInt64(204, true),
+      reviewWindowSecs: dv.getBigInt64(212, true),
+      evidenceRoot: m.slice(220, 252),
+      achievedAssurance: dv.getUint8(252),
+      issuedAt: dv.getBigInt64(253, true),
+    };
+  }
+  const nominalHex = (): string => attVectors.find((v) => v.name === "ATT-01")!.message_hex;
+  const nominal = (): AttestationMessageFields => fieldsOf(hex(nominalHex()));
+
+  test("139 constants: 24-byte tag, length 261, schema version 1, 13 vectors", () => {
+    assert.equal(new TextEncoder().encode(ATTESTATION_DOMAIN_TAG).length, 24);
+    assert.equal(ATTESTATION_DOMAIN_TAG, "BOUNTYCAM_ATTESTATION_V1");
+    assert.equal(ATTESTATION_MESSAGE_LENGTH, 261);
+    assert.equal(ATTESTATION_SCHEMA_VERSION, 1);
+    assert.equal(attVectors.length, 13);
+  });
+
+  test("140 every 261-byte vector reproduces byte for byte from its parsed fields", () => {
+    for (const v of attVectors) {
+      const rebuilt = attestationMessage(fieldsOf(hex(v.message_hex)));
+      assert.equal(rebuilt.length, 261, v.name);
+      assert.equal(toHex(rebuilt), v.message_hex, v.name);
+    }
+  });
+
+  test("141 every attestation signature verifies under the published attester key", () => {
+    const pub = createPublicKey({
+      key: Buffer.from("302a300506032b6570032100" + vectors.authorities.attester_pubkey_hex, "hex"),
+      format: "der",
+      type: "spki",
+    });
+    for (const v of attVectors) {
+      assert.ok(verify(null, hex(v.message_hex), pub, hex(v.signature_hex)), v.name);
+    }
+    const seed = Buffer.from(vectors.authorities.attester_seed_ascii, "ascii");
+    assert.equal(seed.length, 32);
+    const priv = createPrivateKey({
+      key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]),
+      format: "der",
+      type: "pkcs8",
+    });
+    const derived = createPublicKey(priv).export({ format: "der", type: "spki" });
+    assert.equal(
+      Buffer.from(derived).subarray(-32).toString("hex"),
+      vectors.authorities.attester_pubkey_hex,
+    );
+  });
+
+  test("142 mutation vectors: input fields reproduce, tag and version cannot", () => {
+    assert.equal(vectors.mutations_attestation.length, 15);
+    for (const mu of vectors.mutations_attestation) {
+      const rebuilt = toHex(attestationMessage(fieldsOf(hex(mu.message_hex))));
+      if (mu.field === "domain_tag" || mu.field === "schema_version") {
+        assert.equal(rebuilt, nominalHex(), mu.field);
+      } else {
+        assert.equal(rebuilt, mu.message_hex, mu.field);
+      }
+    }
+  });
+
+  test("143 MESSAGE_FIELD_LENGTH, NOT_BYTES and RANGE, first failure in offset order", () => {
+    rejectsWith(() => attestationMessage({ ...nominal(), evidenceRoot: new Uint8Array(31) }),
+      "MESSAGE_FIELD_LENGTH");
+    rejectsWith(() => attestationMessage({
+      ...nominal(), scout: Array.from(new Uint8Array(32)) as unknown as Uint8Array,
+    }), "MESSAGE_FIELD_NOT_BYTES");
+    rejectsWith(() => attestationMessage({ ...nominal(), achievedAssurance: 5 }),
+      "MESSAGE_FIELD_RANGE");
+    rejectsWith(() => attestationMessage({ ...nominal(), issuedAt: 1n << 63n }),
+      "MESSAGE_FIELD_RANGE");
+    rejectsWith(() => attestationMessage({
+      ...nominal(), deadline: 0 as unknown as bigint,
+    }), "MESSAGE_FIELD_RANGE");
+    assert.throws(
+      () => attestationMessage({ ...nominal(), deploymentId: 256, achievedAssurance: 5 }),
+      (e: unknown) => e instanceof SpecError && e.code === "MESSAGE_FIELD_RANGE" &&
+        e.message.startsWith("deploymentId"),
+    );
   });
 });

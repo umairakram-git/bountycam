@@ -386,23 +386,28 @@ export interface EligibilityMessageFields {
   readonly expiresAt: bigint;
 }
 
-function requireBytes(value: unknown, width: number, name: string): Uint8Array {
+function requireBytes(
+  value: unknown,
+  width: number,
+  name: string,
+  section = "4",
+): Uint8Array {
   if (!(value instanceof Uint8Array)) {
     throw new SpecError(
       "MESSAGE_FIELD_NOT_BYTES",
-      name + " must be a Uint8Array (MESSAGES.md 4)",
+      name + " must be a Uint8Array (MESSAGES.md " + section + ")",
     );
   }
   if (value.length !== width) {
     throw new SpecError(
       "MESSAGE_FIELD_LENGTH",
-      name + " must be exactly " + width + " bytes (MESSAGES.md 4)",
+      name + " must be exactly " + width + " bytes (MESSAGES.md " + section + ")",
     );
   }
   return value;
 }
 
-function requireU8(value: unknown, max: number, name: string): number {
+function requireU8(value: unknown, max: number, name: string, section = "4"): number {
   if (
     typeof value !== "number" ||
     !Number.isInteger(value) ||
@@ -411,7 +416,7 @@ function requireU8(value: unknown, max: number, name: string): number {
   ) {
     throw new SpecError(
       "MESSAGE_FIELD_RANGE",
-      name + " must be an integer from 0 to " + max + " (MESSAGES.md 4)",
+      name + " must be an integer from 0 to " + max + " (MESSAGES.md " + section + ")",
     );
   }
   return value;
@@ -460,6 +465,99 @@ export function eligibilityMessage(fields: EligibilityMessageFields): Uint8Array
   out.set(profileHash, 171);
   view.setUint8(203, requiredAssurance);
   view.setBigInt64(204, expiresAt, true);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Attestation message (MESSAGES.md section 3; SPEC.md section 12, D150)
+
+export const ATTESTATION_DOMAIN_TAG = "BOUNTYCAM_ATTESTATION_V1";
+export const ATTESTATION_SCHEMA_VERSION = 1;
+export const ATTESTATION_MESSAGE_LENGTH = 261;
+
+/**
+ * The fields of a BOUNTYCAM_ATTESTATION_V1 message (MESSAGES.md sections 3 and
+ * 5), in offset order. The verifier takes every state field from the bounty
+ * account it has just read and supplies the last three itself.
+ */
+export interface AttestationMessageFields {
+  readonly deploymentId: number;
+  readonly programId: Uint8Array;
+  readonly bountyId: Uint8Array;
+  readonly requester: Uint8Array;
+  readonly scout: Uint8Array;
+  readonly policyHash: Uint8Array;
+  readonly eligibilityProfileHash: Uint8Array;
+  readonly requiredAssurance: number;
+  readonly deadline: bigint;
+  readonly reviewWindowSecs: bigint;
+  readonly evidenceRoot: Uint8Array;
+  readonly achievedAssurance: number;
+  readonly issuedAt: bigint;
+}
+
+function requireI64(value: unknown, name: string, section: string): bigint {
+  if (typeof value !== "bigint" || value < I64_MIN || value > I64_MAX) {
+    throw new SpecError(
+      "MESSAGE_FIELD_RANGE",
+      name + " must be a bigint within i64 (MESSAGES.md " + section + ")",
+    );
+  }
+  return value;
+}
+
+/**
+ * Build the 261-byte BOUNTYCAM_ATTESTATION_V1 message (MESSAGES.md section 3).
+ * Little-endian throughout. Fields are checked in offset order; the first
+ * failure wins (SPEC.md section 12.2). Signing is the caller's concern.
+ */
+export function attestationMessage(fields: AttestationMessageFields): Uint8Array {
+  const deploymentId = requireU8(fields.deploymentId, 255, "deploymentId", "3");
+  const programId = requireBytes(fields.programId, 32, "programId", "3");
+  const bountyId = requireBytes(fields.bountyId, 16, "bountyId", "3");
+  const requester = requireBytes(fields.requester, 32, "requester", "3");
+  const scout = requireBytes(fields.scout, 32, "scout", "3");
+  const policyHash = requireBytes(fields.policyHash, 32, "policyHash", "3");
+  const profileHash = requireBytes(
+    fields.eligibilityProfileHash,
+    32,
+    "eligibilityProfileHash",
+    "3",
+  );
+  const requiredAssurance = requireU8(
+    fields.requiredAssurance,
+    MAX_ASSURANCE_LEVEL,
+    "requiredAssurance",
+    "3",
+  );
+  const deadline = requireI64(fields.deadline, "deadline", "3");
+  const reviewWindowSecs = requireI64(fields.reviewWindowSecs, "reviewWindowSecs", "3");
+  const evidenceRoot = requireBytes(fields.evidenceRoot, 32, "evidenceRoot", "3");
+  const achievedAssurance = requireU8(
+    fields.achievedAssurance,
+    MAX_ASSURANCE_LEVEL,
+    "achievedAssurance",
+    "3",
+  );
+  const issuedAt = requireI64(fields.issuedAt, "issuedAt", "3");
+
+  const out = new Uint8Array(ATTESTATION_MESSAGE_LENGTH);
+  const view = new DataView(out.buffer);
+  out.set(new TextEncoder().encode(ATTESTATION_DOMAIN_TAG), 0);
+  view.setUint16(24, ATTESTATION_SCHEMA_VERSION, true);
+  view.setUint8(26, deploymentId);
+  out.set(programId, 27);
+  out.set(bountyId, 59);
+  out.set(requester, 75);
+  out.set(scout, 107);
+  out.set(policyHash, 139);
+  out.set(profileHash, 171);
+  view.setUint8(203, requiredAssurance);
+  view.setBigInt64(204, deadline, true);
+  view.setBigInt64(212, reviewWindowSecs, true);
+  out.set(evidenceRoot, 220);
+  view.setUint8(252, achievedAssurance);
+  view.setBigInt64(253, issuedAt, true);
   return out;
 }
 
