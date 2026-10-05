@@ -3162,3 +3162,34 @@ The rows of those bounties stay as they are until the build lands, then `settle.
 projects them. `approve`, `reject` and `resolve` cannot be recorded before the live runs: their
 tests start from the recorded transactions with the instruction data changed, stated in each test
 as harness setup, and the records commit adds the real ones.
+
+
+**D164 — P6's live runs, 5 and 6 October.**
+
+Record. Sydney times (AEDT, UTC+11); the Seeker's clock is UTC+4.
+
+- **The D163 sends, 5 October, 12:37 onward.** The relayer released bounty `d649d6f4` (5 USDC to
+  the A30, `4BusUw3c…`) and expired `3591bf4c`, `17e419ff` and `802997ff` (25 test USDC back to
+  the Seeker, `5WTgMzcF…`, `4wfMwWBN…`, `35E6UBhg…`). All four were simulated first and
+  confirmed. After build 1 and migration 15, the restarted verifier projected `d649d6f4` to `PAID
+  RELEASED` on its first ticks, and `settle.mjs project` projected the three expiries to
+  `REFUNDED EXPIRED_REFUNDED`.
+- **Run A, approve, 6 October.** Bounty `2c92c434-0db1-4b5c-9b01-8422c1160cb7` ("BountyTest", 5
+  USDC, two photo prompts, A1), funded from the Seeker at 09:06:52, accepted on the A30 at
+  09:13:39, submitted and attested at 09:17:08 (grade 1, `2LfBL7rz…`, `attestation-check` 10 of
+  10; `submission-check` 9 of 10, its C7 predating the verifier). On the Seeker the bounty screen
+  showed both photos through presigned `GET` URLs and "Reject by 03:17". Approve, the confirm
+  step and Seed Vault sent `approve` at 09:20:44 (`ZNAq2ECe…`, 22,886 compute units). The
+  Seeker showed "Paid 5 USDC to the Scout." with the explorer link; the database `PAID APPROVED`
+  with an `APPROVE` decision; the A30 "Paid 5 USDC." with the link.
+- **Run B, reject and resolve, 6 October.** Bounty `70af9c0f-3a6c-48f5-963e-b479a5e28304`
+  ("RejectTest"), funded at 09:28:16, accepted at 09:30:53, attested at 09:32:01. The Seeker
+  rejected naming "PhotoMouse" at 09:35:40 (`ugAuKoxb…`), inside the window: `DISPUTED` with a
+  `REJECT` decision naming requirement `3090641a…`. `settle.mjs resolve … pay` printed the
+  requirement, downloaded both photos with their hashes checked, and the arbiter (`6YPX1o…`)
+  signed `resolve` paying the Scout at 09:39:47 (`f9QZhRY1…`, the relayer paying the fee). The
+  database showed `PAID RESOLVED_PAID`; the Seeker "Arbiter paid the Scout."; the A30 "Paid 5
+  USDC."; both with the explorer link.
+
+The approve, reject and resolve transactions, both settled accounts and both bounties' rows are
+the settlement suite's fixtures from the records commit (POLICY.md 20.15, A9).

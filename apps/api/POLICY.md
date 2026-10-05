@@ -3612,3 +3612,12 @@ Committed before the code they govern.
   removed, leaving only the Associated Token instruction.
 - **A7, section 20.10.** `settle.mjs` reads `ARBITER_KEY_PATH` from `api.env`, defaulting
   to `~/bountycam-keys/arbiter.json` when unset.
+- **A9, tests 3, 5, 6 and 8 (records commit).** The live runs (D164) replace the harness
+  transactions D163 expected. Test 3 also rebuilds Run B's landed `resolve` byte for byte, signed
+  by the live relayer and arbiter. Test 5 projects Run A's recorded `approve`. Test 6 projects
+  Run B's recorded `reject`, but its account is Run B's recorded `Paid` account with the state
+  byte set to 3: the chain holds only the current state, and the `Disputed` account it held
+  between reject and resolve cannot be read back; the tail, the failed requirement id included,
+  is as recorded. Test 8 projects Run B's recorded `resolve` paying the Scout; the refund and the
+  disagreeing outcome byte remain harness edits of it, since no refund was sent. The suite stays
+  at 18 tests.
