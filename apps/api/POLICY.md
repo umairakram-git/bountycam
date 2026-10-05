@@ -3575,3 +3575,40 @@ arbiter's line and the link.
 
 The release of `d649d6f4` and the three expiries (D163) precede both runs; their projection by
 `settle.mjs project` follows the build.
+
+### 20.15 Amendments found while implementing (Session 22)
+
+Committed before the code they govern.
+
+- **A1, tests 2 and 3.** `@solana/web3.js` sorts account keys within each signer and
+  writable class, so no hand-built message equals its bytes unless it copies that sort.
+  `tx.ts` keeps D163's order instead (section 20.7). Release and expire are pinned to the
+  recorded messages, both as the recording script built them and as the landed transactions
+  carry them. Resolve, which has no recording yet, is compared instruction by instruction
+  (program, keys with their signer and writable flags, data), decoded from `tx.ts`'s bytes,
+  with `test/fixtures/vectors/resolve_web3.json`, which web3.js 1.98.4 compiled from the same
+  inputs.
+- **A2, section 20.8.** `dispute` and `settlement` are keys of the owner view and the
+  assigned-Scout view in `DISPUTED`, `PAID` and `REFUNDED` only. In `ACCEPTED` and `SUBMITTED`
+  both views keep their keys, the requester's `submission` gaining `review_ends_at`. Reason:
+  existing tests pin the assigned-Scout view's keys in `ACCEPTED`, and neither key can be
+  non-null before settlement or a dispute.
+- **A3, section 20.9 and test 16.** `presignGet(key, ttlS, now)` takes its lifetime as an
+  argument; the API reads `EVIDENCE_READ_URL_TTL_S` into the configuration's own
+  `evidenceReadUrlTtlS`, outside `EvidenceConfig`, whose shape a test pins. AWS's published
+  presigned `GET` example is virtual-hosted and the store is path style, so test 16 cannot
+  reproduce it: it checks that `presignGet` equals section 18.4's `presignQuery` over the
+  path-style object path, and evidence test 25 already pins `presignQuery` to that example.
+- **A4, existing tests.** The requester's `submission` key list in evidence test 23 and
+  verifier test 18 gains `review_ends_at`; the migrations test's table list gains
+  `settlements`. No count changes.
+- **A5, section 20.6 and test 18.** Before sending, the release step reads the account again
+  and builds `release` only from a `Submitted` one. A `DISPUTED` bounty is therefore refused
+  twice, by the pass and by the send, and no single mutation turns test 18 red for that case;
+  the apply script's mutation list leaves it out and says so.
+- **A6, test 12.** The skipped entries are: an errored entry whose transaction would
+  otherwise match; the recorded `expire_accepted` of `3591bf4c`, an escrow instruction of
+  another kind on another account; and the recorded release with its escrow instruction
+  removed, leaving only the Associated Token instruction.
+- **A7, section 20.10.** `settle.mjs` reads `ARBITER_KEY_PATH` from `api.env`, defaulting
+  to `~/bountycam-keys/arbiter.json` when unset.
