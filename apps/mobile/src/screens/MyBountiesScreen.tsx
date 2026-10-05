@@ -18,6 +18,9 @@ export interface ListItem {
   readonly reward_amount: string;
 }
 
+// REVIEW.md section 2: the states with a review, a dispute or a settlement to show.
+const OPENABLE: ReadonlySet<string> = new Set(['SUBMITTED', 'DISPUTED', 'PAID', 'REFUNDED']);
+
 function rewardText(baseUnits: string): string {
   return /^[0-9]+$/.test(baseUnits) ? formatUsdc(BigInt(baseUnits)) : baseUnits;
 }
@@ -45,6 +48,8 @@ export function MyBountiesScreen(props: {
   readonly token: string;
   readonly busy: boolean;
   readonly onFund: (id: string) => void;
+  /** REVIEW.md section 2: the bounty screen, for SUBMITTED onward. */
+  readonly onOpen: (id: string) => void;
   readonly onBack: () => void;
 }): ReactNode {
   const [items, setItems] = useState<readonly ListItem[] | undefined>(undefined);
@@ -154,6 +159,11 @@ export function MyBountiesScreen(props: {
                   </Text>
                 </View>
               )}
+              {OPENABLE.has(item.state) ? (
+                <View style={styles.chipRow}>
+                  <Button label="Open" disabled={busy} onPress={() => props.onOpen(item.id)} />
+                </View>
+              ) : null}
               {item.state === 'DRAFT' ? (
                 <View style={styles.chipRow}>
                   <Button label="Fund" disabled={busy} onPress={() => props.onFund(item.id)} />

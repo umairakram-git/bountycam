@@ -572,3 +572,6 @@ export * from "./location.js";
 
 // SPEC.md section 11: the evidence manifest (Session 20, D141, D144).
 export * from "./evidence.js";
+
+// SPEC.md section 13: the settlement-path helpers.
+export * from "./settlement.js";

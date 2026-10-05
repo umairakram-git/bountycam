@@ -50,8 +50,16 @@ import {
   evidenceStatement,
   manifestAccuracy,
   sha256Chunked,
+  approveData,
+  rejectData,
+  checkApproveInstructions,
+  checkRejectInstructions,
+  submittedScout,
+  TOKEN_PROGRAM_ID,
 } from "./index.js";
 import type {
+  ExpectedApprove,
+  ExpectedReject,
   AttestationMessageFields,
   CreatedBountyExpectation,
   EligibilityMessageFields,
@@ -1942,5 +1950,134 @@ describe("attestation message (SPEC.md section 12)", () => {
       (e: unknown) => e instanceof SpecError && e.code === "MESSAGE_FIELD_RANGE" &&
         e.message.startsWith("deploymentId"),
     );
+  });
+});
+
+// SPEC.md section 13 (D160): the settlement-path helpers. Vectors: vectors/settlement.json,
+// an approve and a reject built with @solana/web3.js 1.98.4 over bounty d649d6f4's
+// addresses, and that bounty's recorded Submitted account (D163).
+describe("settlement helpers (SPEC.md 13)", () => {
+  const sv = JSON.parse(
+    readFileSync(join(process.cwd(), "vectors", "settlement.json"), "utf8"),
+  ) as Record<string, any>;
+  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const b58 = (s: string): Uint8Array => {
+    let n = 0n;
+    for (const c of s) n = n * 58n + BigInt(ALPHABET.indexOf(c));
+    const out = new Uint8Array(32);
+    for (let i = 31; i >= 0; i--) {
+      out[i] = Number(n & 0xffn);
+      n >>= 8n;
+    }
+    return out;
+  };
+  const unhex = (h: string): Uint8Array => Uint8Array.from(Buffer.from(h, "hex"));
+  const plain = (ixs: any[]): PlainInstruction[] =>
+    ixs.map((ix) => ({
+      programId: b58(ix.program),
+      keys: ix.keys.map((k: any) => ({ pubkey: b58(k.pubkey), isSigner: k.signer,
+        isWritable: k.writable })),
+      data: unhex(ix.data_hex),
+    }));
+  const reqId = unhex(sv["requirement_id"].replace(/-/g, ""));
+  const approveExpected = (): ExpectedApprove => ({
+    programId: b58(sv["program"]),
+    requester: b58(sv["requester"]),
+    config: b58(sv["config"]),
+    bounty: b58(sv["bounty"]),
+    usdcMint: b58(sv["mint"]),
+    bountyVault: b58(sv["bounty_vault"]),
+    scout: b58(sv["scout"]),
+    scoutPayout: b58(sv["scout_payout"]),
+  });
+  const rejectExpected = (): ExpectedReject => ({
+    programId: b58(sv["program"]),
+    requester: b58(sv["requester"]),
+    bounty: b58(sv["bounty"]),
+    requirementId: reqId,
+  });
+  const account = (): Uint8Array =>
+    Uint8Array.from(Buffer.from(sv["submitted_account_base64"], "base64"));
+
+  test("144 approveData and rejectData", () => {
+    assert.equal(hex(approveData()), "454ad9247375614c");
+    const r = rejectData(reqId);
+    assert.equal(r.length, 24);
+    assert.equal(hex(r), "87073f5583726fe0" + hex(reqId));
+    rejectsWith(() => rejectData(new Uint8Array(15)), "REQUIREMENT_ID_INVALID");
+    rejectsWith(() => rejectData(new Uint8Array(16)), "REQUIREMENT_ID_INVALID");
+    rejectsWith(() => rejectData(Array.from(reqId) as unknown as Uint8Array), "NOT_BYTES");
+  });
+
+  test("145 checkApproveInstructions accepts the web3.js vector", () => {
+    checkApproveInstructions(plain(sv["approve"]), approveExpected());
+  });
+
+  test("146 approve mutations report their codes", () => {
+    const good = () => plain(sv["approve"]);
+    const run = (ixs: PlainInstruction[], code: string) =>
+      rejectsWith(() => checkApproveInstructions(ixs, approveExpected()), code);
+    run(good().slice(0, 1), "TX_INSTRUCTION_COUNT");
+    run([...good(), good()[1]!], "TX_INSTRUCTION_COUNT");
+    const p = good();
+    run([{ ...p[0]!, programId: TOKEN_PROGRAM_ID }, p[1]!], "TX_PROGRAM");
+    const swapped = good();
+    const k = [...swapped[1]!.keys];
+    [k[4], k[6]] = [k[6]!, k[4]!];
+    run([swapped[0]!, { ...swapped[1]!, keys: k }], "TX_ACCOUNTS");
+    const ro = good();
+    const k2 = ro[1]!.keys.map((x, i) => (i === 6 ? { ...x, isWritable: false } : x));
+    run([ro[0]!, { ...ro[1]!, keys: k2 }], "TX_ACCOUNTS");
+    const ns = good();
+    const k3 = ns[1]!.keys.map((x, i) => (i === 0 ? { ...x, isSigner: false } : x));
+    run([ns[0]!, { ...ns[1]!, keys: k3 }], "TX_ACCOUNTS");
+    const extra = good();
+    run([extra[0]!, { ...extra[1]!, keys: [...extra[1]!.keys, extra[1]!.keys[1]!] }],
+      "TX_ACCOUNTS");
+    const d0 = good();
+    run([{ ...d0[0]!, data: Uint8Array.from([0]) }, d0[1]!], "TX_DATA");
+    const d1 = good();
+    const flipped = Uint8Array.from(d1[1]!.data);
+    flipped[3] = flipped[3]! ^ 1;
+    run([d1[0]!, { ...d1[1]!, data: flipped }], "TX_DATA");
+  });
+
+  test("147 checkRejectInstructions accepts the web3.js vector", () => {
+    checkRejectInstructions(plain(sv["reject"]), rejectExpected());
+  });
+
+  test("148 reject mutations report their codes", () => {
+    const good = () => plain(sv["reject"]);
+    const run = (ixs: PlainInstruction[], code: string, e = rejectExpected()) =>
+      rejectsWith(() => checkRejectInstructions(ixs, e), code);
+    run([...good(), ...good()], "TX_INSTRUCTION_COUNT");
+    run([{ ...good()[0]!, programId: TOKEN_PROGRAM_ID }], "TX_PROGRAM");
+    const g = good()[0]!;
+    run([{ ...g, keys: [g.keys[0]!, { ...g.keys[1]!, isWritable: false }] }], "TX_ACCOUNTS");
+    run([{ ...g, keys: [...g.keys, g.keys[1]!] }], "TX_ACCOUNTS");
+    const other = Uint8Array.from(reqId);
+    other[15] = other[15]! ^ 1;
+    run(good(), "TX_DATA", { ...rejectExpected(), requirementId: other });
+    const disc = Uint8Array.from(g.data);
+    disc[0] = disc[0]! ^ 1;
+    run([{ ...g, data: disc }], "TX_DATA");
+  });
+
+  test("149 submittedScout reads the recorded account's Scout", () => {
+    assert.equal(hex(submittedScout(account())), hex(b58(sv["scout"])));
+    assert.equal(sv["scout"], "7oSUM9a2PgNbFwYhFFXU5p1mrZr1hTykFWVqosNmT7vW");
+  });
+
+  test("150 submittedScout refuses other states and shapes", () => {
+    const with_ = (i: number, v: number) => {
+      const d = account();
+      d[i] = v;
+      return d;
+    };
+    rejectsWith(() => submittedScout(with_(169, 1)), "ACCOUNT_NOT_SUBMITTED");
+    rejectsWith(() => submittedScout(with_(169, 4)), "ACCOUNT_NOT_SUBMITTED");
+    rejectsWith(() => submittedScout(with_(213, 0)), "ACCOUNT_NOT_SUBMITTED");
+    rejectsWith(() => submittedScout(account().slice(0, 256)), "ACCOUNT_NOT_SUBMITTED");
+    rejectsWith(() => submittedScout(with_(0, 0)), "ACCOUNT_NOT_SUBMITTED");
   });
 });

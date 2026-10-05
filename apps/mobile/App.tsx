@@ -33,6 +33,7 @@ import { DetailScreen } from './src/screens/DetailScreen';
 import { FindScreen } from './src/screens/FindScreen';
 import { MissionScreen } from './src/screens/MissionScreen';
 import { MyMissionsScreen } from './src/screens/MyMissionsScreen';
+import { BountyReviewScreen } from './src/screens/BountyReviewScreen';
 
 type Screen =
   | 'signin'
@@ -45,7 +46,8 @@ type Screen =
   | 'detail'
   | 'accepting'
   | 'mission'
-  | 'missions';
+  | 'missions'
+  | 'bounty';
 
 interface Session {
   /** A bearer credential. Never logged, never shown. */
@@ -319,7 +321,24 @@ export default function App() {
         token={session.token}
         busy={busy}
         onFund={onResume}
+        onOpen={(id) => {
+          setDetailId(id);
+          setScreen('bounty');
+        }}
         onBack={() => setScreen('home')}
+      />
+    );
+  }
+
+  // REVIEW.md section 2: the requester's review, approve and reject.
+  if (screen === 'bounty' && detailId !== undefined) {
+    return (
+      <BountyReviewScreen
+        token={session.token}
+        id={detailId}
+        provider={provider}
+        sessionWallet={session.user.wallet_address}
+        onBack={() => setScreen('mine')}
       />
     );
   }

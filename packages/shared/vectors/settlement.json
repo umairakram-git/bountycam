@@ -1,0 +1,115 @@
+{
+  "_note": "SPEC.md 13.6. Built with @solana/web3.js 1.98.4 and @solana/spl-token 0.4.9 in the architect's sandbox over bounty d649d6f4's addresses; instructions read back from the compiled message, so flags are the message's (the requester, as fee payer, is writable in reject). submitted_account_base64 is the recorded Submitted account of d649d6f4 (D163).",
+  "program": "6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS",
+  "config": "DqHBCi3KYaZSSgMGcPY8QftYnns8k2vcg9GCJejKBaAb",
+  "mint": "ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR",
+  "bounty": "6oHbEFdoimdkF3sv2r18AnyYyD3SYxoNqAFR2WWj8exs",
+  "requester": "9BZ17sUdF2matCurxmdmUpD3BNabBTFmsmAVu5oY9qP3",
+  "scout": "7oSUM9a2PgNbFwYhFFXU5p1mrZr1hTykFWVqosNmT7vW",
+  "bounty_vault": "EeeQmdh89ufSgyctfEWHAgjH8R1awCF42BzveXPok8T9",
+  "scout_payout": "Bv7mLZPfbF3Nfa6Wiz46G4nAHSVb6hLf7Fq4DpBhcxxx",
+  "requirement_id": "e7bd527f-2b58-4935-8df6-0e552bc93c57",
+  "approve": [
+    {
+      "program": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "keys": [
+        {
+          "pubkey": "9BZ17sUdF2matCurxmdmUpD3BNabBTFmsmAVu5oY9qP3",
+          "signer": true,
+          "writable": true
+        },
+        {
+          "pubkey": "Bv7mLZPfbF3Nfa6Wiz46G4nAHSVb6hLf7Fq4DpBhcxxx",
+          "signer": false,
+          "writable": true
+        },
+        {
+          "pubkey": "7oSUM9a2PgNbFwYhFFXU5p1mrZr1hTykFWVqosNmT7vW",
+          "signer": false,
+          "writable": false
+        },
+        {
+          "pubkey": "ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR",
+          "signer": false,
+          "writable": false
+        },
+        {
+          "pubkey": "11111111111111111111111111111111",
+          "signer": false,
+          "writable": false
+        },
+        {
+          "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "signer": false,
+          "writable": false
+        }
+      ],
+      "data_hex": "01"
+    },
+    {
+      "program": "6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS",
+      "keys": [
+        {
+          "pubkey": "9BZ17sUdF2matCurxmdmUpD3BNabBTFmsmAVu5oY9qP3",
+          "signer": true,
+          "writable": true
+        },
+        {
+          "pubkey": "DqHBCi3KYaZSSgMGcPY8QftYnns8k2vcg9GCJejKBaAb",
+          "signer": false,
+          "writable": false
+        },
+        {
+          "pubkey": "6oHbEFdoimdkF3sv2r18AnyYyD3SYxoNqAFR2WWj8exs",
+          "signer": false,
+          "writable": true
+        },
+        {
+          "pubkey": "ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR",
+          "signer": false,
+          "writable": false
+        },
+        {
+          "pubkey": "EeeQmdh89ufSgyctfEWHAgjH8R1awCF42BzveXPok8T9",
+          "signer": false,
+          "writable": true
+        },
+        {
+          "pubkey": "7oSUM9a2PgNbFwYhFFXU5p1mrZr1hTykFWVqosNmT7vW",
+          "signer": false,
+          "writable": false
+        },
+        {
+          "pubkey": "Bv7mLZPfbF3Nfa6Wiz46G4nAHSVb6hLf7Fq4DpBhcxxx",
+          "signer": false,
+          "writable": true
+        },
+        {
+          "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "signer": false,
+          "writable": false
+        }
+      ],
+      "data_hex": "454ad9247375614c"
+    }
+  ],
+  "reject": [
+    {
+      "program": "6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS",
+      "keys": [
+        {
+          "pubkey": "9BZ17sUdF2matCurxmdmUpD3BNabBTFmsmAVu5oY9qP3",
+          "signer": true,
+          "writable": true
+        },
+        {
+          "pubkey": "6oHbEFdoimdkF3sv2r18AnyYyD3SYxoNqAFR2WWj8exs",
+          "signer": false,
+          "writable": true
+        }
+      ],
+      "data_hex": "87073f5583726fe0e7bd527f2b5849358df60e552bc93c57"
+    }
+  ],
+  "submitted_account_base64": "7RBpxhNF8urWSdb08vdDN4j1EICfZkx9eZF9AvFTHIOcs2Z9v6JwDXXsoxlvwleNKGODR49/Ba5AS0wAAAAAAAAAAAAAAAAAQ8uWbGN81ju3J714iXh223gOthMBQMvolLqMRGlVrq0NKokg2F8XY3z/VV7wCGlBh2e03py3LMVTyJRMz9DeuQGAUQEAAAAAACAcAAAAAAAAEA4AAAAAAACui8NqAAAAAAL+AWULo7ZBVy9H1yuGn3MC7EgKgl7WX7OPkERTPGzNKX9nAcxYwmoAAAAAAZs+wmoAAAAAAS3R46UpGvGss3ZUVkjoQDm9FFWERsfFKf+khkITb3JRAQEAAAAAAAAAAAAAAAAAAAAAAA=="
+}

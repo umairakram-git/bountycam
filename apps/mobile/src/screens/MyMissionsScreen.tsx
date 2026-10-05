@@ -16,6 +16,7 @@ export function MyMissionsScreen(props: {
 }): ReactNode {
   const [items, setItems] = useState<readonly BountySummary[] | undefined>(undefined);
   const [deadlines, setDeadlines] = useState<Readonly<Record<string, string>>>({});
+  const [states, setStates] = useState<Readonly<Record<string, string>>>({});
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const { token } = props;
 
@@ -29,15 +30,19 @@ export function MyMissionsScreen(props: {
         setItems(asSummaries(result.body, 'missions'));
         const list = (result.body as { missions?: unknown }).missions;
         const map: Record<string, string> = {};
+        const stateMap: Record<string, string> = {};
         if (Array.isArray(list)) {
           for (const raw of list) {
-            const r = raw as { id?: unknown; deadline?: unknown };
+            const r = raw as { id?: unknown; deadline?: unknown; state?: unknown };
             if (typeof r.id === 'string' && typeof r.deadline === 'string') {
               map[r.id] = new Date(r.deadline).toLocaleString();
             }
+            if (typeof r.id === 'string' && typeof r.state === 'string') stateMap[r.id] = r.state;
           }
         }
         setDeadlines(map);
+        // REVIEW.md section 7: settled missions are listed with their state.
+        setStates(stateMap);
       })
       .catch(() => setNotice("Couldn't reach BountyCam. Try again."));
   }, [token]);
@@ -60,7 +65,8 @@ export function MyMissionsScreen(props: {
           >
             <Text style={styles.value}>{item.title}</Text>
             <Text style={styles.muted}>
-              {rewardText(item.rewardAmount) + ' · due ' + (deadlines[item.id] ?? '')}
+              {(states[item.id] ?? '') + ' · ' + rewardText(item.rewardAmount) + ' · due ' +
+                (deadlines[item.id] ?? '')}
             </Text>
           </Pressable>
         ))}
