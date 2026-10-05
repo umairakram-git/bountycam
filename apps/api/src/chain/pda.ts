@@ -56,3 +56,18 @@ export function bountyAddress(
 ): ProgramAddress {
   return findProgramAddress([BOUNTY_SEED, requester, bountyId], programId);
 }
+
+/** The SPL Token and Associated Token programs (POLICY.md 20.7). */
+export const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+export const ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+export const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
+
+/** An owner's associated token account for a mint: seeds owner, Token program, mint. */
+export function associatedTokenAddress(
+  owner: Uint8Array,
+  mint: Uint8Array,
+  tokenProgram: Uint8Array,
+  associatedTokenProgram: Uint8Array,
+): Uint8Array {
+  return findProgramAddress([owner, tokenProgram, mint], associatedTokenProgram).address;
+}

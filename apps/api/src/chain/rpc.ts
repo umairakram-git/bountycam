@@ -194,3 +194,90 @@ export function jsonRpcChainWriter(url: string, fetchImpl: FetchLike): ChainWrit
     },
   };
 }
+
+// POLICY.md 20.4 step 6 and 20.7 (D157): the two reads that find a settling
+// transaction. Both at confirmed; the transaction in json encoding, whose instruction data
+// is base58. Error handling as above.
+export interface SignatureEntry {
+  readonly signature: string;
+  readonly failed: boolean;
+}
+
+export interface TransactionInstruction {
+  readonly programIdIndex: number;
+  readonly accounts: readonly number[];
+  readonly data: Uint8Array;
+}
+
+export interface ConfirmedTransaction {
+  readonly blockTime: number | null;
+  readonly failed: boolean;
+  readonly accountKeys: readonly string[];
+  readonly instructions: readonly TransactionInstruction[];
+}
+
+export interface SettlementReader {
+  /** Newest first, as the RPC returns them. */
+  getSignaturesForAddress(address: string, limit: number): Promise<SignatureEntry[]>;
+  /** Null where the RPC knows none. */
+  getTransaction(signature: string): Promise<ConfirmedTransaction | null>;
+}
+
+const isIndex = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
+
+export function jsonRpcSettlementReader(url: string, fetchImpl: FetchLike): SettlementReader {
+  return {
+    async getSignaturesForAddress(address, limit) {
+      const result = await rpcResult(url, fetchImpl, "getSignaturesForAddress", [
+        address,
+        { limit, commitment: "confirmed" },
+      ]);
+      if (!Array.isArray(result)) throw malformed("result is not a list");
+      return result.map((entry): SignatureEntry => {
+        const e = entry as { signature?: unknown; err?: unknown } | null;
+        if (e === null || typeof e !== "object" || typeof e.signature !== "string") {
+          throw malformed("entry lacks a signature");
+        }
+        return { signature: e.signature, failed: e.err !== null && e.err !== undefined };
+      });
+    },
+    async getTransaction(signature) {
+      const result = await rpcResult(url, fetchImpl, "getTransaction", [
+        signature,
+        { encoding: "json", commitment: "confirmed", maxSupportedTransactionVersion: 0 },
+      ]);
+      if (result === null) return null;
+      const r = result as {
+        blockTime?: unknown;
+        meta?: { err?: unknown } | null;
+        transaction?: { message?: { accountKeys?: unknown; instructions?: unknown } };
+      };
+      const keys = r.transaction?.message?.accountKeys;
+      const ixs = r.transaction?.message?.instructions;
+      if (!Array.isArray(keys) || !keys.every((k) => typeof k === "string") ||
+        !Array.isArray(ixs)) {
+        throw malformed("transaction lacks account keys or instructions");
+      }
+      const instructions = ixs.map((ix): TransactionInstruction => {
+        const i = ix as { programIdIndex?: unknown; accounts?: unknown; data?: unknown };
+        if (!isIndex(i.programIdIndex) || !Array.isArray(i.accounts) ||
+          !i.accounts.every(isIndex) || typeof i.data !== "string") {
+          throw malformed("instruction is malformed");
+        }
+        let data: Uint8Array;
+        try {
+          data = base58.decode(i.data);
+        } catch {
+          throw malformed("instruction data is not base58");
+        }
+        return { programIdIndex: i.programIdIndex, accounts: i.accounts as number[], data };
+      });
+      return {
+        blockTime: typeof r.blockTime === "number" ? r.blockTime : null,
+        failed: r.meta?.err !== null && r.meta?.err !== undefined,
+        accountKeys: keys as string[],
+        instructions,
+      };
+    },
+  };
+}

@@ -31,6 +31,8 @@ export interface VerifierConfig {
   readonly pollS: number;
   readonly deadlineMarginS: number;
   readonly confirmS: number;
+  /** POLICY.md 20.11 (D159): VERIFIER_RELEASE_MARGIN_S, default 10. */
+  readonly releaseMarginS: number;
 }
 
 const POSITIVE_INT = /^[1-9][0-9]{0,8}$/;
@@ -99,6 +101,7 @@ export function loadVerifierConfig(env: Record<string, string | undefined>): Ver
   const pollS = positiveInt(env, "VERIFIER_POLL_S", 5);
   const deadlineMarginS = positiveInt(env, "VERIFIER_DEADLINE_MARGIN_S", 30);
   const confirmS = positiveInt(env, "VERIFIER_CONFIRM_S", 60);
+  const releaseMarginS = positiveInt(env, "VERIFIER_RELEASE_MARGIN_S", 10);
   if (deadlineMarginS >= capture.deadlineBufferS - capture.submissionGraceS) {
     throw new Error(
       "VERIFIER_DEADLINE_MARGIN_S must be less than " +
@@ -121,6 +124,7 @@ export function loadVerifierConfig(env: Record<string, string | undefined>): Ver
     pollS,
     deadlineMarginS,
     confirmS,
+    releaseMarginS,
   };
 }
 

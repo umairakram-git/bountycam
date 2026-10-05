@@ -791,7 +791,7 @@ test("23 views: the Scout's submission, submit_by, the owner's three keys, a clo
   assert.equal(after["capture"]["capture_nonce"], null);
   const owner = await view(m, m.requester.token);
   assert.deepEqual(Object.keys(owner["submission"]).sort(),
-    ["item_count", "submitted_at", "verification"]);
+    ["item_count", "review_ends_at", "submitted_at", "verification"]); // POLICY.md 20.8
   assert.equal(owner["submission"]["verification"], "CHECKING"); // POLICY.md 19.11
   assert.equal(owner["submission"]["item_count"], 2);
   const stranger = await view(m, (await seedUser()).token);

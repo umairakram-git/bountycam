@@ -31,6 +31,7 @@ const expectedTables = [
   "policies",
   "reputation_events",
   "seeker_devices",
+  "settlements",
   "submissions",
   "users",
 ];

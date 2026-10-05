@@ -10,7 +10,7 @@ import {
   type EligibilityConfig,
 } from "./chain/config.ts";
 import { resolveDeployment, type Deployment } from "./chain/deployment.ts";
-import { jsonRpcChainReader } from "./chain/rpc.ts";
+import { jsonRpcChainReader, jsonRpcSettlementReader } from "./chain/rpc.ts";
 import { eligibilitySigner } from "./chain/signer.ts";
 import { assertMainnet, heliusSeekerCheck } from "./eligibility/seeker.ts";
 import { SWEEP_INTERVAL_MS, startReservationSweeper } from "./eligibility/sweeper.ts";
@@ -90,6 +90,7 @@ const app = buildApp({
   randomness: systemRandomness,
   logger: true,
   eligibility: { config: eligibility, deployment, chain, signer, seeker },
+  settlementChain: jsonRpcSettlementReader(eligibility.rpcUrl, fetch),
   ...(evidenceStore === undefined ? {} : { evidenceStore }),
 });
 

@@ -6,7 +6,11 @@ import { setTimeout as sleep } from "node:timers/promises";
 import pg from "pg";
 import { base58 } from "@scure/base";
 import { systemClock } from "../clock.ts";
-import { jsonRpcChainReader, jsonRpcChainWriter } from "../chain/rpc.ts";
+import {
+  jsonRpcChainReader,
+  jsonRpcChainWriter,
+  jsonRpcSettlementReader,
+} from "../chain/rpc.ts";
 import { s3EvidenceStore } from "../evidence/store.ts";
 import { checkConfigAccount, loadVerifierConfig, type VerifierConfig } from "./config.ts";
 import { tick, type VerifierDeps } from "./run.ts";
@@ -29,8 +33,12 @@ const chain = jsonRpcChainReader(config.rpcUrl, fetch);
 const writer = jsonRpcChainWriter(config.rpcUrl, fetch);
 
 let deploymentId: number;
+let usdcMint: Uint8Array;
 try {
-  deploymentId = checkConfigAccount(await chain.getAccount(config.configAccount), config);
+  const configInfo = await chain.getAccount(config.configAccount);
+  deploymentId = checkConfigAccount(configInfo, config);
+  // POLICY.md 20.7: the configured mint, Config bytes 9..41, for the release pass.
+  usdcMint = (configInfo as { data: Uint8Array }).data.slice(9, 41);
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
@@ -62,6 +70,26 @@ const deps: VerifierDeps = {
     await sleep(ms);
   },
   log,
+  // POLICY.md 20.6 (D159): the settlement pass and its release sends.
+  release: {
+    pool,
+    clock: systemClock,
+    chain,
+    writer,
+    settlement: jsonRpcSettlementReader(config.rpcUrl, fetch),
+    programId: config.programId,
+    programIdBytes: config.programIdBytes,
+    configAccount: config.configAccount,
+    usdcMint,
+    relayerSeed: config.relayerSeed,
+    releaseMarginS: config.releaseMarginS,
+    confirmS: config.confirmS,
+    sleep: async (ms) => {
+      await sleep(ms);
+    },
+    log,
+    retries: new Map(),
+  },
 };
 
 console.log(`verifier: polling every ${config.pollS} s`);

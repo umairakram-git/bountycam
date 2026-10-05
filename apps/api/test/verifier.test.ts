@@ -803,7 +803,7 @@ test("18 views: CHECKING, VERIFIED, NOT_VERIFIED; SUBMITTED serves both views", 
   assert.equal(scout["submission"]["verification"], "VERIFIED");
   assert.equal(scout["assignment"]["id"], ASSIGNMENT["id"]); // the assigned-Scout view
   assert.deepEqual(Object.keys(owner["submission"]).sort(),
-    ["item_count", "submitted_at", "verification"]);
+    ["item_count", "review_ends_at", "submitted_at", "verification"]); // POLICY.md 20.8
   assert.equal(owner["submission"]["verification"], "VERIFIED");
   for (const [status, reason, achieved] of [
     ["REFUSED", "EVIDENCE_MISSING", null],

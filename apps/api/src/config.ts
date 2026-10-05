@@ -51,6 +51,8 @@ export interface Config {
   readonly capture: CaptureConfig;
   /** Optional in the type, so hand-built test configurations stay valid. */
   readonly evidence?: EvidenceConfig;
+  /** POLICY.md 20.11: EVIDENCE_READ_URL_TTL_S, default 300, at most 900 (D156). */
+  readonly evidenceReadUrlTtlS?: number;
 }
 
 const SECRET_HEX = /^[0-9a-f]{64}$/;
@@ -176,5 +178,12 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     settlementMint,
     capture: loadCaptureConfig(env),
     evidence: loadEvidenceConfig(env),
+    evidenceReadUrlTtlS: readUrlTtl(env),
   };
+}
+
+function readUrlTtl(env: Record<string, string | undefined>): number {
+  const ttl = positiveInt(env, "EVIDENCE_READ_URL_TTL_S", 300);
+  if (ttl > 900) throw new Error("EVIDENCE_READ_URL_TTL_S must be at most 900 (D156)");
+  return ttl;
 }

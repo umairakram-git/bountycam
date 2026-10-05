@@ -22,6 +22,11 @@ import {
 } from "./policy.ts";
 import { snapLat, snapLon } from "./snap.ts";
 import { assignedView, listItem, ownerView, publicView } from "./views.ts";
+import { SETTLED_VIEW_STATES, settledFields } from "../settlement/views.ts";
+
+// POLICY.md sections 18.7, 19.11 and 20.8: the states whose views carry the submission.
+const SUBMISSION_STATES: ReadonlySet<string> =
+  new Set(["ACCEPTED", "SUBMITTED", "DISPUTED", "PAID", "REFUNDED"]);
 import { captureObject, liveNonce } from "../capture/nonce.ts";
 import { ownerSubmission, scoutSubmission } from "../evidence/routes.ts";
 import type { EligibilityDeps } from "../eligibility/deps.ts";
@@ -572,10 +577,12 @@ export function registerBountyRoutes(
             createdAt: row.created_at,
             policyHashHex: bytesToHex(row.policy_hash),
             canonicalJson: row.canonical_json,
-            // Sections 18.7 and 19.11: ACCEPTED and SUBMITTED carry the submission.
-            ...(row.state === "ACCEPTED" || row.state === "SUBMITTED"
+            // Sections 18.7, 19.11 and 20.8: ACCEPTED onward carry the submission;
+            // DISPUTED, PAID and REFUNDED also the dispute and the settlement.
+            ...(SUBMISSION_STATES.has(row.state)
               ? { submission: await ownerSubmission(pool, row.id) }
               : {}),
+            ...(await settledFields(pool, row.id, row.state)),
           }),
         );
       }
@@ -583,10 +590,14 @@ export function registerBountyRoutes(
       // Step 4a (POLICY.md 16.4, D127): the Scout holding the acceptance gets
       // the assigned-Scout view, with the exact location inside the policy. Section 19.11:
       // also in SUBMITTED.
-      if (row.state === "ACCEPTED" || row.state === "SUBMITTED") {
+      // Section 20.8: DISPUTED, PAID and REFUNDED too, whatever the assignment's status.
+      if (SUBMISSION_STATES.has(row.state)) {
+        const settled = SETTLED_VIEW_STATES.has(row.state);
         const held = await pool.query<{ id: string; accepted_at: Date; deadline: Date }>(
           "SELECT id, accepted_at, deadline FROM assignments WHERE bounty_id = $1 " +
-            "AND scout_id = $2 AND status = 'ACTIVE' AND accepted_at IS NOT NULL",
+            "AND scout_id = $2 AND accepted_at IS NOT NULL AND " +
+            (settled ? "status IN ('ACTIVE', 'COMPLETED', 'EXPIRED')" : "status = 'ACTIVE'") +
+            " ORDER BY accepted_at DESC LIMIT 1",
           [row.id, caller.id],
         );
         const acceptance = held.rows[0];
@@ -614,6 +625,7 @@ export function registerBountyRoutes(
               deadline: acceptance.deadline,
               capture,
               submission: await scoutSubmission(pool, acceptance.id),
+              ...(await settledFields(pool, row.id, row.state)),
             }),
           );
         }
@@ -705,7 +717,8 @@ export function registerBountyRoutes(
          FROM assignments a
          JOIN bounties b ON b.id = a.bounty_id
          JOIN policies p ON p.id = b.policy_id
-         WHERE a.scout_id = $1 AND a.status = 'ACTIVE' AND a.accepted_at IS NOT NULL
+         WHERE a.scout_id = $1 AND a.accepted_at IS NOT NULL
+           AND a.status IN ('ACTIVE', 'COMPLETED', 'EXPIRED')
          ORDER BY a.accepted_at DESC, b.id ASC
          LIMIT $2 OFFSET $3`,
         [caller.id, query.limit, query.offset],

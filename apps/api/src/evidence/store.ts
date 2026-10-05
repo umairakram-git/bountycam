@@ -26,6 +26,11 @@ export interface EvidenceStore {
    * caller's length comparison rather than filling memory. Throws as head does.
    */
   get(key: string, maxBytes: number): Promise<Uint8Array | null>;
+  /**
+   * POLICY.md 20.9 (D156, amendment A3): a SigV4 query-presigned GET URL, path style,
+   * signed header host only, for the requester's phone. Never logged or stored.
+   */
+  presignGet(key: string, ttlS: number, now: Date): string;
 }
 
 /** Section 18.4's object key, all lowercase. */
@@ -94,6 +99,19 @@ export function s3EvidenceStore(
         throw new Error("evidence store HEAD lacked length or checksum");
       }
       return { byteLength: length, sha256Base64: checksum };
+    },
+    presignGet(objectName, ttlS, at) {
+      const path = objectPath(config.bucket, objectName);
+      const query = presignQuery({
+        method: "GET",
+        host: config.host,
+        path,
+        headers: {},
+        expiresS: ttlS,
+        now: at,
+        key,
+      });
+      return config.endpoint + path + "?" + query;
     },
     async get(objectName, maxBytes) {
       const path = objectPath(config.bucket, objectName);

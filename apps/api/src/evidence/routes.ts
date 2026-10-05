@@ -61,6 +61,8 @@ interface SubmissionRow {
   item_count: number;
   /** POLICY.md 19.11: CHECKING, VERIFIED or NOT_VERIFIED. */
   verification: string;
+  /** POLICY.md 20.2: set by the settlement projection. */
+  review_ends_at: Date | null;
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -120,7 +122,7 @@ async function loadSubmission(
   assignmentId: string,
 ): Promise<SubmissionRow | null> {
   const r = await db.query<SubmissionRow>(
-    `SELECT s.id, s.submitted_at, s.evidence_root, s.statement_signature,
+    `SELECT s.id, s.submitted_at, s.evidence_root, s.statement_signature, s.review_ends_at,
             (SELECT count(*)::int FROM evidence_items e WHERE e.submission_id = s.id)
               AS item_count,
             CASE
@@ -433,6 +435,7 @@ export function registerEvidenceRoutes(app: FastifyInstance, deps: EvidenceRoute
         // Step 17.
         return reply.status(201).send(submissionBody({
           verification: "CHECKING",
+          review_ends_at: null,
           id: submissionId,
           submitted_at: now,
           evidence_root: Buffer.from(root),
@@ -463,8 +466,12 @@ export async function ownerSubmission(
   pool: Pool,
   bountyId: string,
 ): Promise<Record<string, unknown> | null> {
+  // POLICY.md 20.8: the accepted assignment whatever its status, so a settled bounty keeps
+  // its submission.
   const r = await pool.query<{ id: string }>(
-    "SELECT id FROM assignments WHERE bounty_id = $1 AND status = 'ACTIVE'",
+    `SELECT id FROM assignments WHERE bounty_id = $1 AND accepted_at IS NOT NULL
+       AND status IN ('ACTIVE', 'COMPLETED', 'EXPIRED')
+     ORDER BY accepted_at DESC LIMIT 1`,
     [bountyId],
   );
   const assignment = r.rows[0];
@@ -476,5 +483,7 @@ export async function ownerSubmission(
         submitted_at: row.submitted_at.toISOString(),
         item_count: row.item_count,
         verification: row.verification,
+        // POLICY.md 20.8: the review window's end, null until projected.
+        review_ends_at: row.review_ends_at === null ? null : row.review_ends_at.toISOString(),
       };
 }

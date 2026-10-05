@@ -26,6 +26,7 @@ import { attestationTransaction } from "../chain/tx.ts";
 import type { Clock } from "../clock.ts";
 import type { EvidenceStore } from "../evidence/store.ts";
 import { bindingsAgree } from "../funding/project.ts";
+import { settlementPass, type ReleaseDeps } from "../settlement/release.ts";
 
 export type RefusalCode =
   | "CHAIN_STATE"
@@ -62,6 +63,8 @@ export interface VerifierDeps {
   readonly confirmS: number;
   readonly sleep: (ms: number) => Promise<void>;
   readonly log: (level: "info" | "error", fields: Record<string, unknown>) => void;
+  /** POLICY.md 20.6: the settlement pass runs only when this is given. */
+  readonly release?: ReleaseDeps;
 }
 
 /** Section 19.5's backoff, by consecutive transient failures. */
@@ -571,4 +574,6 @@ export async function tick(deps: VerifierDeps): Promise<void> {
     [now],
   );
   for (const job of due.rows) await runJob(deps, job);
+  // POLICY.md 20.6: after section 19.5's steps, the settlement pass.
+  if (deps.release !== undefined) await settlementPass(deps.release);
 }

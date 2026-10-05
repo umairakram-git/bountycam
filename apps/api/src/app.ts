@@ -12,6 +12,8 @@ import { registerAcceptanceRoutes } from "./acceptance/routes.ts";
 import { registerCaptureRoutes } from "./capture/routes.ts";
 import { registerEvidenceRoutes } from "./evidence/routes.ts";
 import type { EvidenceStore } from "./evidence/store.ts";
+import type { SettlementReader } from "./chain/rpc.ts";
+import { registerSettlementRoutes } from "./settlement/routes.ts";
 
 export interface AppDeps {
   config: Config;
@@ -23,6 +25,8 @@ export interface AppDeps {
   eligibility?: EligibilityDeps;
   // POLICY.md section 18.3: the evidence routes register only with a store.
   evidenceStore?: EvidenceStore;
+  // POLICY.md section 20.5: the settlement routes register only with this reader.
+  settlementChain?: SettlementReader;
   // A stream lets a test capture log output and scan it (POLICY.md test 10);
   // Fastify passes the object to pino unchanged.
   logger?: boolean | { level: string; stream: { write: (msg: string) => void } };
@@ -98,6 +102,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         clock: deps.clock,
         deploymentId: deps.eligibility.deployment.deploymentId,
         store: deps.evidenceStore,
+      });
+    }
+    // POLICY.md sections 20.5 and 20.9: the photo route only with a configured store.
+    if (deps.settlementChain !== undefined) {
+      const withStore = deps.evidenceStore !== undefined && deps.config.evidence?.store != null;
+      registerSettlementRoutes(app, {
+        pool: deps.pool,
+        config: deps.config,
+        clock: deps.clock,
+        chain: deps.eligibility.chain,
+        settlement: deps.settlementChain,
+        programId: deps.eligibility.config.programId,
+        readUrlTtlS: deps.config.evidenceReadUrlTtlS ?? 300,
+        ...(withStore ? { store: deps.evidenceStore as EvidenceStore } : {}),
       });
     }
   }

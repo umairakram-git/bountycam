@@ -140,3 +140,50 @@ export function readSubmission(info: AccountInfo): SubmissionRead {
     achievedAssurance: view.getUint8(256),
   };
 }
+
+// POLICY.md 20.3 (D157): the six Option fields of the tail, read in serialised order
+// from byte 171. A tag byte, 0 for none and 1 for some, precedes each value only when 1.
+// Positions shift with every none, so only a sequential reader serves every state.
+export interface Tail {
+  readonly scout: Uint8Array | null;
+  readonly deadline: bigint | null;
+  readonly submittedAt: bigint | null;
+  readonly evidenceRoot: Uint8Array | null;
+  readonly achievedAssurance: number | null;
+  readonly failedRequirementId: Uint8Array | null;
+}
+
+export type TailRead =
+  | { readonly ok: true; readonly tail: Tail }
+  | { readonly ok: false; readonly error: "BAD_TAIL" };
+
+const TAIL_FIELDS = [
+  ["scout", 32],
+  ["deadline", 8],
+  ["submittedAt", 8],
+  ["evidenceRoot", 32],
+  ["achievedAssurance", 1],
+  ["failedRequirementId", 16],
+] as const;
+
+export function readTail(info: AccountInfo): TailRead {
+  const d = info.data;
+  const view = new DataView(d.buffer, d.byteOffset, d.byteLength);
+  const out: Record<string, unknown> = {};
+  let at = BOUNTY_FIXED_LENGTH;
+  for (const [name, size] of TAIL_FIELDS) {
+    if (at >= d.length) return { ok: false, error: "BAD_TAIL" };
+    const tag = d[at] as number;
+    at += 1;
+    if (tag === 0) {
+      out[name] = null;
+      continue;
+    }
+    if (tag !== 1 || at + size > d.length) return { ok: false, error: "BAD_TAIL" };
+    if (name === "deadline" || name === "submittedAt") out[name] = view.getBigInt64(at, true);
+    else if (name === "achievedAssurance") out[name] = d[at] as number;
+    else out[name] = d.slice(at, at + size);
+    at += size;
+  }
+  return { ok: true, tail: out as unknown as Tail };
+}

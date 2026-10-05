@@ -25,6 +25,10 @@ export interface OwnerViewInput {
   // POLICY.md section 18.7 (D138 ruling 5): passed for an ACCEPTED bounty only; the key
   // exists exactly when this is given.
   submission?: Record<string, unknown> | null;
+  // POLICY.md section 20.8 (amendment A2): given for DISPUTED, PAID and REFUNDED only;
+  // each key exists exactly when given.
+  dispute?: Record<string, unknown> | null;
+  settlement?: Record<string, unknown> | null;
 }
 
 // Section 8.2 owner view: eight keys, requester only. The policy is produced
@@ -42,6 +46,8 @@ export function ownerView(input: OwnerViewInput): Record<string, unknown> {
     policy_hash: input.policyHashHex,
     policy: JSON.parse(input.canonicalJson) as unknown,
     ...(input.submission === undefined ? {} : { submission: input.submission }),
+    ...(input.dispute === undefined ? {} : { dispute: input.dispute }),
+    ...(input.settlement === undefined ? {} : { settlement: input.settlement }),
   };
 }
 
@@ -156,6 +162,9 @@ export interface AssignedViewInput extends PublicViewInput {
   capture: Record<string, unknown>;
   // POLICY.md sections 18.7 and 19.11: null, or the submission's five keys.
   submission: Record<string, unknown> | null;
+  // POLICY.md section 20.8 (amendment A2): DISPUTED, PAID and REFUNDED only.
+  dispute?: Record<string, unknown> | null;
+  settlement?: Record<string, unknown> | null;
 }
 
 // POLICY.md section 16.4 (D127): the assigned-Scout view. The public view plus
@@ -173,5 +182,7 @@ export function assignedView(input: AssignedViewInput): Record<string, unknown> 
     },
     capture: input.capture,
     submission: input.submission,
+    ...(input.dispute === undefined ? {} : { dispute: input.dispute }),
+    ...(input.settlement === undefined ? {} : { settlement: input.settlement }),
   };
 }
