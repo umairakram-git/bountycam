@@ -10,6 +10,7 @@
 note (D141, D143, D144).
 **Amended:** Session 21 — section 12, the attestation message; section 6.4's closing note
 (D150).
+**Amended:** Session 22 — section 13, the settlement-path helpers (D160).
 **Scope:** `canonicalise`, `sha256`, `merkleRoot` as exported from
 `packages/shared/src/index.ts`.
 
@@ -1457,3 +1458,107 @@ shown red before the gate by a scripted mutation of the check it names.
      is `MESSAGE_FIELD_NOT_BYTES`; `achievedAssurance` 5, `issuedAt` 2 to the 63rd, and
      `deadline` as the number 0 are `MESSAGE_FIELD_RANGE`; `deploymentId` 256 together with
      `achievedAssurance` 5 reports `deploymentId` (six asserts).
+
+---
+
+## 13. Settlement-path helpers
+
+Session 22 (P6), D160. The requester's phone builds `approve` and `reject` (escrow SPEC.md
+sections 7.6 and 7.8) and checks them here before MWA sees them (SECURITY.md section 3). The
+plain-value instruction form is section 8.7's. The checks reuse section 6.5's four `TX_` codes
+with the same meanings.
+
+### 13.1 Constants and data
+
+- `APPROVE_DISCRIMINATOR`, the 8 bytes `454ad9247375614c`; `REJECT_DISCRIMINATOR`, the 8 bytes
+  `87073f5583726fe0`: the first eight of `sha256` of `global:approve` and `global:reject`.
+- `approveData(): Uint8Array` — the discriminator alone, 8 bytes.
+- `rejectData(requirementId: Uint8Array): Uint8Array` — the discriminator, then the 16 bytes,
+  24 bytes. Not a `Uint8Array`: `NOT_BYTES`. Not 16 bytes, or all zero:
+  `REQUIREMENT_ID_INVALID`. The caller passes `uuidBytes` (section 8.3) of the requirement's id.
+
+### 13.2 `checkApproveInstructions(instructions, expected): void`
+
+`expected` holds `programId`, `requester`, `config`, `bounty`, `usdcMint`, `bountyVault`,
+`scout` and `scoutPayout`, 32 bytes each.
+
+1. Exactly two instructions, else `TX_INSTRUCTION_COUNT`.
+2. The first's program is `ASSOCIATED_TOKEN_PROGRAM_ID`, the second's `expected.programId`, else
+   `TX_PROGRAM`.
+3. Exactly these keys, in this order, with these flags, else `TX_ACCOUNTS`:
+
+| Instruction | # | Account | Signer | Writable |
+|---|---|---|---|---|
+| first | 0 | `requester` | yes | yes |
+| | 1 | `scoutPayout` | no | yes |
+| | 2 | `scout` | no | no |
+| | 3 | `usdcMint` | no | no |
+| | 4 | System program | no | no |
+| | 5 | Token program | no | no |
+| second | 0 | `requester` | yes | yes |
+| | 1 | `config` | no | no |
+| | 2 | `bounty` | no | yes |
+| | 3 | `usdcMint` | no | no |
+| | 4 | `bountyVault` | no | yes |
+| | 5 | `scout` | no | no |
+| | 6 | `scoutPayout` | no | yes |
+| | 7 | Token program | no | no |
+
+4. The first's data is the single byte 1 (create idempotent), the second's `approveData()`, else
+   `TX_DATA`.
+
+The first instruction is the only non-escrow instruction any BountyCam transaction has carried.
+It creates, or leaves unchanged, the Scout's associated token account for the configured mint: it
+grants no authority and moves no USDC, so section 3's allowlist names it ("required Associated
+Token Program operations").
+
+### 13.3 `checkRejectInstructions(instructions, expected): void`
+
+`expected` holds `programId`, `requester` and `bounty` (32 bytes each) and `requirementId` (16
+bytes).
+
+1. Exactly one instruction, else `TX_INSTRUCTION_COUNT`.
+2. Its program is `expected.programId`, else `TX_PROGRAM`.
+3. Exactly two keys: `requester`, signer and writable; `bounty`, writable, not a signer. Else
+   `TX_ACCOUNTS`. The program declares the requester a signer only; the writable flag is the fee
+   payer's, as section 9.4 records for the Scout (D128).
+4. Its data equals `rejectData(expected.requirementId)`, else `TX_DATA`.
+
+### 13.4 `submittedScout(data: Uint8Array): Uint8Array`
+
+Returns the 32 Scout bytes of a `Submitted` bounty account. `data` is the account's data as read
+from the chain. All of: at least 257 bytes; the first eight are the bounty account discriminator;
+byte 169 is 2; the tags at bytes 171, 204, 213, 222 and 255 are 1. Otherwise
+`ACCOUNT_NOT_SUBMITTED`. The Scout is bytes 172 to 203. The phone also checks that the account's
+owner is the escrow program.
+
+### 13.5 Codes
+
+| Code | Function | Rejected input |
+|---|---|---|
+| `REQUIREMENT_ID_INVALID` | `rejectData` | not 16 bytes, or all zero |
+| `ACCOUNT_NOT_SUBMITTED` | `submittedScout` | section 13.4's conditions |
+
+### 13.6 Tests
+
+The package's existing test file. Vectors: an `approve` and a `reject` transaction built with
+`@solana/web3.js` 1.98.4 in the architect's sandbox, their instructions in section 8.7's plain
+form, under `vectors/settlement.json`; the recorded `Submitted` account of `d649d6f4`. The D36
+gate becomes `tests 150, pass 150, fail 0`. Each negative test is shown red before the gate by a
+scripted mutation of the check it names.
+
+144. Data: `approveData()` is the 8 discriminator bytes; `rejectData` of the vector's id is 24
+     bytes beginning with its discriminator; 15 bytes and 16 zero bytes are
+     `REQUIREMENT_ID_INVALID`; an array of numbers is `NOT_BYTES` (four asserts).
+145. `checkApproveInstructions` accepts the web3.js vector.
+146. Approve mutations: one instruction; three; the first's program the Token program; the second
+     key order swapped at 4 and 6; `scoutPayout` not writable; the requester not a signer; a ninth
+     key; the first's data 0; the second's data with one bit flipped. Each reports its code (nine
+     asserts).
+147. `checkRejectInstructions` accepts the web3.js vector.
+148. Reject mutations: two instructions; another program; the bounty not writable; a third key;
+     another requirement id; the discriminator altered. Each reports its code (six asserts).
+149. `submittedScout` of the recorded `d649d6f4` account is the A30's wallet
+     `7oSUM9a2PgNbFwYhFFXU5p1mrZr1hTykFWVqosNmT7vW`.
+150. `submittedScout` refuses: state byte 1; state byte 4; the tag at 213 set to 0; 256 bytes;
+     the discriminator's first byte altered (five asserts).

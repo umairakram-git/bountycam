@@ -15,6 +15,8 @@ upload and submission (D138 to D144).
 **Amended:** Session 21 (P5) — the new section 19: the verifier and the attestation (D146 to
 D153); it extends sections 7.2, 16.4 and 18.7 in place.
 **Amended:** Session 21 build — section 19.2, amendment A1.
+**Amended:** Session 22 (P6) — the new section 20: review, settlement and the settlement
+projection (D155 to D163); it extends sections 7.2, 16.4, 16.5 and 19.11 in place.
 
 Policies and bounties share this document deliberately: the hashed policy object and the
 bounty row that references it must not drift, and a split document is how they would.
@@ -688,8 +690,8 @@ value is checked against a written plan rather than memory:
 | `AVAILABLE` | Session 17, P1: the funding projection (section 15) |
 | `ACCEPTED` | Session 11 |
 | `SUBMITTED` | Session 13 — evidence upload and submission |
-| `DISPUTED` | Session 16 — requester review, dispute |
-| `PAID`, `REFUNDED`, `EXPIRED` | Session 15 — reconciliation of settlement confirmations |
+| `DISPUTED`, `PAID`, `REFUNDED` | Session 22, P6: the settlement projection (section 20) |
+| `EXPIRED` | not yet scheduled |
 | funded `CANCELLED` | not yet scheduled |
 
 Decided now, so nobody reads a scheduling conflict into the table: Session 11's
@@ -3212,3 +3214,364 @@ accepted from the A30. Every step happens between the accept and its deadline. F
 
 The laptop needs a connection for the verifier to reach devnet. If it has none at the spot, the
 job retries until it does, and the deadline still bounds it.
+
+---
+
+## 20. Review, settlement and the settlement projection
+
+Session 22 (P6). Normative; written before implementation. Rulings: D155 (Umair) and D156 to
+D163. The instructions are `programs/escrow/SPEC.md` sections 7.6 to 7.9 and 7.11, deployed since
+18 September; P6 changes no program. The phone's side is `apps/mobile/REVIEW.md`; the shared
+transaction checks are `packages/shared/SPEC.md` section 13.
+
+### 20.1 What P6 adds
+
+Migration 15 (section 20.2); reading the account's tail (20.3); the settlement projection (20.4);
+`POST /bounties/:id/settlement` (20.5); the verifier's settlement pass and `release` (20.6); the
+transactions the server builds (20.7); views (20.8); `GET /bounties/:id/evidence` (20.9);
+`settle.mjs` (20.10); configuration, logging and error codes (20.11); stated limits (20.12); tests
+(20.13); the live runs (20.14).
+
+### 20.2 Migration 15
+
+Up, in order:
+
+1. `CREATE TYPE settlement_kind AS ENUM ('APPROVED', 'RELEASED', 'RESOLVED_PAID',
+   'RESOLVED_REFUNDED', 'EXPIRED_REFUNDED')`.
+2. The table `settlements`, one row per settled bounty (D158):
+
+| Column | Type | Rule |
+|---|---|---|
+| `bounty_id` | `uuid` | primary key, references `bounties (id)` |
+| `kind` | `settlement_kind` | not null |
+| `tx_signature` | `text` | not null; base58 |
+| `settled_at` | `timestamptz` | not null; the transaction's block time |
+| `projected_at` | `timestamptz` | not null; the clock |
+
+3. `decisions`: add `tx_signature text`; add the constraint `decisions_one_per_submission`,
+   unique on `submission_id`; add `decisions_tx_signature`, `outcome = 'DISPUTE' OR tx_signature
+   IS NOT NULL`. The table holds no rows (migration 1 to 14 wrote none); up refuses to run over a
+   row.
+4. `submissions`: add `review_ends_at timestamptz`, nullable.
+
+No new column has a default. Down reverses each step; it refuses to run if `settlements` or
+`decisions` holds a row.
+
+Non-test gate, from raw output: `\d settlements` and `\d decisions` show the columns and
+constraints above.
+
+### 20.3 Reading the account's tail
+
+`readTail(info)` in `src/chain/bounty.ts` decodes the six `Option` fields in serialised order
+(escrow SPEC.md section 4.1) from byte 171: each a tag byte, 0 for none and 1 for some, followed
+by the value only when the tag is 1. Values: `scout` 32 bytes, `deadline` `i64`, `submittedAt`
+`i64`, `evidenceRoot` 32 bytes, `achievedAssurance` `u8`, `failedRequirementId` 16 bytes. A tag
+other than 0 or 1, or data ending inside a field, is `BAD_TAIL`. `readAcceptance` and
+`readSubmission` are unchanged. The reader is confirmed against the recorded `Accepted`,
+`Submitted`, `Paid` and `Refunded` accounts (section 20.13 test 1).
+
+Positions differ by path: after `expire_accepted` from `Accepted`, `submittedAt` is none, so every
+later tag moves. Only a sequential reader handles both.
+
+### 20.4 The projection (D157)
+
+`projectSettlement(bountyId)` in `src/settlement/project.ts`. Steps in order; the first that
+decides ends the call. Only step 8 writes.
+
+1. **Load** the bounty with `program_account`, the requester's wallet, the policy's
+   `canonical_json`, the assignment with `accepted_at` set (status `ACTIVE`, `COMPLETED` or
+   `EXPIRED`), its Scout's wallet, and its submission if any.
+   `PAID` and `REFUNDED` with a `settlements` row are `PROJECTED`, with no read. States other
+   than `ACCEPTED`, `SUBMITTED` and `DISPUTED` are `NOT_APPLICABLE`.
+2. **Read** the account at `confirmed`. A reader failure is `CHAIN_UNAVAILABLE`. No account is
+   `BINDING_MISMATCH`: no settling instruction closes it (D96).
+3. **Decode** the prefix and the tail (section 20.3). A failure, or an account `bounty_id` other
+   than the row id's 16 bytes, is `BINDING_MISMATCH`.
+4. **Scout.** The tail's `scout` is the assignment's Scout wallet decoded, else
+   `PARTY_MISMATCH`.
+5. **State.** By the chain state and the row's state:
+
+| Chain | Row | Result |
+|---|---|---|
+| `Accepted` | `ACCEPTED` | `NOT_SETTLED`, nothing written |
+| `Submitted` | `SUBMITTED` | `NOT_SETTLED`; step 8 sets `review_ends_at` if null |
+| `Submitted` | `ACCEPTED` | `NOT_SETTLED`; the verifier projects `SUBMITTED` (19.10) |
+| `Disputed` | `SUBMITTED` | step 6, `reject` |
+| `Paid` | `SUBMITTED` | step 6, `approve` or `release` |
+| `Paid` | `DISPUTED` | step 6, `resolve` paying the Scout |
+| `Refunded` | `ACCEPTED` | step 6, `expire_accepted` |
+| `Refunded` | `DISPUTED` | step 6, `resolve` refunding the requester |
+| `Disputed` | `DISPUTED` | `NOT_SETTLED` |
+| any other pair | | `UNPROJECTED_STATE` |
+
+   For a chain state past `Accepted` reached from `SUBMITTED` or `DISPUTED`, the tail's
+   `evidenceRoot` must equal the submission's, else `BINDING_MISMATCH`.
+6. **Signature.** `getSignaturesForAddress(program_account, limit 20)` at `confirmed`, newest
+   first. For each entry without an error, `getTransaction` at `confirmed` with
+   `maxSupportedTransactionVersion` 0 and `json` encoding. The first transaction with a top-level
+   instruction whose program is the escrow, whose account at the instruction's bounty position
+   (escrow SPEC.md section 7: index 2 for `approve`, `release` and `expire_accepted`, 1 for
+   `reject`, 3 for `resolve`) is `program_account`, and whose data begins with one of step 5's
+   discriminators wins:
+
+| Instruction | Discriminator (hex) |
+|---|---|
+| `approve` | `454ad9247375614c` |
+| `release` | `fdf90fce1c7fc1f1` |
+| `reject` | `87073f5583726fe0` |
+| `resolve` | `f696ecce6c3f3a0a`, then the outcome byte: 0 `PayScout`, 1 `RefundRequester` |
+| `expire_accepted` | `17526b3cd6ac3bbc` |
+
+   A `resolve` whose outcome byte disagrees with the chain state is `BINDING_MISMATCH`. No match
+   among the 20 is `CHAIN_UNAVAILABLE`: a signature list can lag the account, and the next caller
+   tries again. A reader failure is `CHAIN_UNAVAILABLE`. `settled_at` is the transaction's
+   `blockTime`.
+7. **Requirement**, for `reject` only. The tail's `failedRequirementId` as a uuid is an `id` in
+   the policy's `evidence_requirements`; if not, the outcome is `FOREIGN_REQUIREMENT` and step 8
+   writes no `decisions` row (D161).
+8. **Write**, one transaction. Lock the bounty row; if its state is no longer step 5's row state,
+   roll back and run the call once more from step 1. Then by the instruction:
+   - `reject`: the bounty `DISPUTED`; a `decisions` row (the submission, `REJECT`, the id,
+     `reason` null, `decided_by` the requester, `decided_at` the clock, the signature) unless step
+     7 said otherwise. The assignment stays `ACTIVE`.
+   - `approve`: the bounty `PAID`; a `decisions` row (`APPROVE`, no id, the requester, the
+     signature); `settlements` `APPROVED`; the assignment `COMPLETED`.
+   - `release`: as `approve` without the `decisions` row; `settlements` `RELEASED`.
+   - `resolve`, paying: the bounty `PAID`; `settlements` `RESOLVED_PAID`; the assignment
+     `COMPLETED`. Refunding: the bounty `REFUNDED`; `RESOLVED_REFUNDED`; `COMPLETED`.
+   - `expire_accepted`: the bounty `REFUNDED`; `settlements` `EXPIRED_REFUNDED`; the assignment
+     `EXPIRED`.
+   - In every case, and for `NOT_SETTLED` from chain `Submitted`, the submission's
+     `review_ends_at` is set to `submittedAt` plus `review_window_secs` from the tail and prefix
+     when it is null and a submission exists.
+
+The outcomes are `PROJECTED`, `NOT_SETTLED`, `NOT_APPLICABLE`, `CHAIN_UNAVAILABLE`,
+`BINDING_MISMATCH`, `PARTY_MISMATCH`, `UNPROJECTED_STATE` and `FOREIGN_REQUIREMENT`. The last four
+are alarms: one error-level line naming the outcome and the bounty id, and nothing else.
+`FOREIGN_REQUIREMENT` has still projected `DISPUTED`.
+
+Commitment is `confirmed`, as section 15.3; section 14, item 9 applies.
+
+Section 7.2's mapping is unchanged; its informative table is updated in place.
+
+### 20.5 `POST /bounties/:id/settlement`
+
+A phone asks the server to look, after every `approve` or `reject` attempt whatever the wallet
+reported, and whenever it shows a bounty in `SUBMITTED` or `DISPUTED`. No body; the server reads
+the chain.
+
+1. **Auth.** 401 codes per section 8.1.
+2. **Body.** Any present body is `INVALID_REQUEST` (400).
+3. **Id form**, as section 8.5 step 2: `NOT_FOUND` (404).
+4. **Load.** No row: `NOT_FOUND` (404).
+5. **Caller.** The requester, or the Scout of an assignment with `accepted_at` set. Anyone else:
+   `NOT_FOUND` (404) for `DRAFT` and `CANCELLED`, `FORBIDDEN` (403) otherwise.
+6. **Project** (section 20.4). `CHAIN_UNAVAILABLE` is 503; `BINDING_MISMATCH`, `PARTY_MISMATCH`
+   and `UNPROJECTED_STATE` are `BINDING_MISMATCH` (409). Every other outcome continues.
+7. **Respond** 200 with the caller's view as the row now stands: the owner view to the requester,
+   the assigned-Scout view to the Scout.
+
+`NOT_SETTLED` is a 200: the phone reads the state and repeats the call on REVIEW.md's schedule.
+
+Registered only when the chain dependencies exist, as section 15.4's route is.
+
+### 20.6 The verifier's settlement pass and `release` (D159)
+
+After section 19.5's steps, each tick:
+
+1. **Select** bounties in `SUBMITTED` or `DISPUTED`, oldest `created_at` first, at most 50.
+2. **Project** each (section 20.4).
+3. **Release** when the outcome is `NOT_SETTLED` from chain `Submitted`, `review_ends_at` is set,
+   `now` is later than `review_ends_at` plus `VERIFIER_RELEASE_MARGIN_S`, and the bounty is not
+   waiting out a retry. Build section 20.7's `release` transaction, send it with preflight at
+   `confirmed`, and poll `getSignatureStatuses` every 2 seconds for up to `VERIFIER_CONFIRM_S`.
+   Then, whatever happened, project again. `PROJECTED`: done. Still `NOT_SETTLED`: the bounty
+   waits 5, 10, 20, 40, then 60 seconds before its next send, held in memory.
+
+A `Disputed` bounty is projected and never released: only `resolve` exits it (D74).
+
+### 20.7 Transactions the server builds
+
+In `src/chain/tx.ts`, legacy messages built by hand as section 19.9's (D151), each pinned by a
+vector produced with `@solana/web3.js` 1.98.4 in the architect's sandbox. Instruction account
+orders and flags are the program's account structs (escrow SPEC.md sections 7.7, 7.9, 7.11). The
+Associated Token program's idempotent create carries accounts payer (signer, writable), the
+associated account (writable), its owner, the mint, the System program and the Token program, and
+data the single byte 1.
+
+| Transaction | Fee payer | Instructions |
+|---|---|---|
+| `release` | relayer | idempotent create of the Scout's payout account; `release` |
+| `expire_accepted` | relayer | idempotent create of the requester's account; `expire_accepted` |
+| `resolve` | relayer | idempotent create of the destination; `resolve`, signed by the arbiter |
+
+`release` accounts: requester (writable), config, bounty (writable), mint, vault (writable),
+Scout, Scout payout (writable), Token program; data the discriminator. `expire_accepted`: requester
+(writable), config, bounty (writable), mint, vault (writable), requester's account (writable),
+Token program. `resolve`: arbiter (signer), config, requester (writable), bounty (writable), mint,
+vault (writable), destination (writable), Token program; data the discriminator and the outcome
+byte. Every address is derived from the account just read and the configuration; nothing comes
+from a caller (SECURITY.md section 2).
+
+The JSON-RPC reader gains `getSignaturesForAddress` and `getTransaction`, with section 15's error
+handling.
+
+### 20.8 Views
+
+- **Owner view** of a bounty in `ACCEPTED`, `SUBMITTED`, `DISPUTED`, `PAID` or `REFUNDED` carries
+  `submission` (null, or section 19.11's three keys plus `review_ends_at`, ISO 8601 UTC or null),
+  `dispute` (null, or an object with exactly `failed_requirement_id`, the uuid or null for
+  `FOREIGN_REQUIREMENT`) and `settlement` (null, or an object with exactly `kind`,
+  `tx_signature`, `settled_at` and `amount`, the reward as a base-unit string).
+- **Assigned-Scout view.** Section 16.4 step 4a also serves `DISPUTED`, `PAID` and `REFUNDED`,
+  to the Scout of the assignment with `accepted_at` set, whatever its status. It gains `dispute`
+  and `settlement` as above. `REFUNDED` by `expire_accepted` is served too, so a Scout sees why a
+  mission ended.
+- **`GET /me/missions`.** Section 16.5 step 3 selects assignments in `ACTIVE`, `COMPLETED` or
+  `EXPIRED` with `accepted_at` set. Ordering and the item shape are unchanged.
+- **Public view** is unchanged. Discovery is unchanged.
+
+No view carries a photo URL, a store key, a coordinate, the Scout's wallet or the requester's.
+
+### 20.9 `GET /bounties/:id/evidence` (D156)
+
+1. **Auth.** 401 codes per section 8.1.
+2. **Parameters.** Any query parameter is `INVALID_REQUEST` (400).
+3. **Id form**, as section 8.5 step 2: `NOT_FOUND` (404).
+4. **Load.** No row: `NOT_FOUND` (404).
+5. **Owner.** Not the requester: `NOT_FOUND` (404) for `DRAFT` and `CANCELLED`, `FORBIDDEN` (403)
+   otherwise.
+6. **Evidence.** The state is `SUBMITTED`, `DISPUTED`, `PAID` or `REFUNDED`, a submission exists
+   and its `attestations` row is `SUBMITTED`; otherwise `NO_EVIDENCE` (409).
+7. **Respond** 200 with an object whose single key `evidence` holds `expires_at` (ISO 8601 UTC)
+   and `items`, in policy order, each with exactly `requirement_id`, `captured_at` and `url`.
+
+`EvidenceStore` gains `presignGet(key, now)`: SigV4 in query form, method `GET`, path style,
+payload `UNSIGNED-PAYLOAD`, signed header `host` only, expiry `EVIDENCE_READ_URL_TTL_S`. Every
+URL in one response shares one expiry. Registered only when the store is configured.
+
+### 20.10 `settle.mjs` (D162)
+
+`apps/api/scripts/settle.mjs`, run by hand from `apps/api`, reading `~/bountycam-env/api.env`,
+not in the gate:
+
+- `release <bounty_id>`, `expire <bounty_id>`: the relayer signs section 20.7's transaction.
+- `resolve <bounty_id> pay|refund`: prints the named requirement's prompt (or "not in the
+  policy", D161), downloads every photo through `EvidenceStore.get` to
+  `~/Downloads/bountycam-dispute-<bounty_id>/`, checking each against its stored sha256, then the
+  arbiter signs and the relayer pays. It reads `ARBITER_KEY_PATH`, mode 600; the API and the
+  verifier never read it.
+- `project <bounty_id>`: sends nothing.
+
+Each send first prints the chain state and asks once; each command ends with
+`projectSettlement`'s outcome and, for a settlement, the explorer link of D155 ruling 6.
+
+### 20.11 Configuration, logging and error codes
+
+| Key | Reader | Default | Rule |
+|---|---|---|---|
+| `EVIDENCE_READ_URL_TTL_S` | API | 300 | positive integer, at most 900 |
+| `VERIFIER_RELEASE_MARGIN_S` | verifier | 10 | positive integer |
+| `ARBITER_KEY_PATH` | `settle.mjs` | none | a Solana keypair file, mode 600 |
+
+Logging: one line per release send (the bounty id, the outcome, the transaction signature), and
+section 20.4's alarms. No line carries a URL, a store key, a coordinate or key material.
+
+| Code | Status | Failure |
+|---|---|---|
+| `NO_EVIDENCE` | 409 | no verified submission to show (section 20.9) |
+
+Reused: `INVALID_REQUEST`, `NOT_FOUND`, `FORBIDDEN`, `BINDING_MISMATCH`, `CHAIN_UNAVAILABLE`.
+
+### 20.12 Stated limits
+
+- A `Submitted` account is approvable after its window closes as well as releasable; whichever
+  lands first settles it, and the other fails on state. Both pay the same Scout the same amount.
+- The verifier releases only while it runs. Release is permissionless, so `settle.mjs release`
+  does the same by hand.
+- A dispute the arbiter never resolves leaves the reward in the vault (D94).
+- `expire_unaccepted` and funded `cancel` still have no projection; bounties `46551b54` and
+  `b15bd4a5` stay `AVAILABLE` in the database after their cutoffs.
+- A rejection that lands before the verifier projects `SUBMITTED` leaves the row `ACCEPTED`: the
+  verifier refuses `CHAIN_STATE` and the projection answers `UNPROJECTED_STATE`. The phone offers
+  Reject only on a `SUBMITTED` row, so only another client can cause it.
+- The signature lookup reads 20 entries. A bounty account touched more than 20 times after
+  settling would hide its settling transaction; nothing touches a settled account.
+
+### 20.13 Tests
+
+A new file, `apps/api/test/settlement.test.ts`, named in the test script after
+`verifier.test.ts`. Fixtures are D163's recorded responses under
+`apps/api/test/fixtures/devnet/`. Clock, chain reader, sender and store are injected. Each negative
+test is shown red before the gate by a scripted mutation of the check it names. D36 gate: `tests
+18, pass 18, fail 0`.
+
+1. **Tail.** `readTail` of the recorded `Accepted`, `Submitted`, `Paid` and `Refunded` accounts
+   gives their recorded fields; a tag of 2 and data cut inside `evidenceRoot` are `BAD_TAIL` (six
+   asserts).
+2. **Release transaction.** For fixed inputs the bytes equal the web3.js vector; the recorded
+   release transaction's message is a second vector (two asserts).
+3. **Expire and resolve transactions.** The bytes equal their web3.js vectors; the recorded
+   expire transaction's message is a further vector (three asserts).
+4. **Released.** The recorded `Paid` account and transactions: `PAID`, the assignment `COMPLETED`,
+   `settlements` `RELEASED` with the recorded signature and block time, `review_ends_at` set, no
+   `decisions` row.
+5. **Approved.** The recorded release transaction with its data replaced by `approve`'s, as harness
+   setup: `APPROVED`, a `decisions` `APPROVE` row by the requester with the signature.
+6. **Disputed.** The recorded `Submitted` account with state 3 and a requirement id appended, and
+   the recorded transaction with `reject`'s data, as harness setup: `DISPUTED`, a `REJECT` row
+   with that id and the signature, the assignment `ACTIVE`.
+7. **Foreign requirement.** Test 6 with an id outside the policy: `DISPUTED`, no `decisions` row,
+   one error-level line `FOREIGN_REQUIREMENT`.
+8. **Resolved.** From `DISPUTED`, `resolve` paying and refunding as harness setup: `PAID` and
+   `REFUNDED` with their kinds; an outcome byte disagreeing with the state is `BINDING_MISMATCH`
+   (three asserts).
+9. **Expired.** The recorded `Refunded` account and transactions of `3591bf4c`: `REFUNDED`, the
+   assignment `EXPIRED`, `EXPIRED_REFUNDED`.
+10. **Not settled.** Chain `Submitted` with `review_ends_at` null: it is set, nothing else; chain
+    `Accepted`: nothing written (two asserts).
+11. **Idempotent.** A second call writes nothing; a `PAID` row with its `settlements` row reads
+    nothing (two asserts).
+12. **Lookup.** An errored entry and a non-escrow transaction are skipped; no match is
+    `CHAIN_UNAVAILABLE` with nothing written; a throwing reader is `CHAIN_UNAVAILABLE` (four
+    asserts).
+13. **Alarms.** No account; another `bounty_id`; another Scout; chain `Funded` under `ACCEPTED`:
+    each logs one line carrying only the outcome and the bounty id (four asserts).
+14. **Settlement route.** Requester 200 owner view; Scout 200 assigned-Scout view; another user
+    403; a `DRAFT` bounty for another user 404; a body 400; a throwing reader 503 (six asserts).
+15. **Evidence route.** The requester gets one `GET` URL per item in policy order, over the item's
+    key, with one expiry 300 s ahead; another user 403; `ACCEPTED` and an attestation `REFUSED`
+    are `NO_EVIDENCE`; no log line carries a URL (five asserts).
+16. **`presignGet`.** The AWS Signature Version 4 documentation's presigned `GET` example is
+    reproduced byte for byte.
+17. **Views.** The owner view in `DISPUTED`, `PAID` and `REFUNDED` has exactly section 20.8's
+    keys; the assigned-Scout view is served in those states; `/me/missions` lists a `COMPLETED`
+    and an accepted `EXPIRED` mission (three asserts).
+18. **Release pass.** Before `review_ends_at` plus the margin, no send; after, one send of
+    `tx.ts`'s bytes, then `PAID` and `RELEASED`; a failed send with the account now `Paid` is
+    projected without a second send; with the account still `Submitted`, the next send waits 5 s;
+    a `DISPUTED` bounty is projected and never sent (five asserts).
+
+Other suites: **Migrations**, the table list gains `settlements` (gate 1). **Verifier**, unchanged
+at 20. Every other suite keeps its count.
+
+### 20.14 The live runs
+
+Setup as section 19.15, plus `adb reverse tcp:7070 tcp:7070` on the Seeker, which now loads
+photos. Before each run the store check prints 403. From raw output:
+
+**Run A — approve.** A fresh bounty funded from the Seeker, two required photos,
+`required_assurance` 1, accepted, captured and submitted on the A30, attested. On the Seeker: the
+photos show; "Reject by HH:MM" shows; Approve, the confirm step, the wallet. Then: the bounty
+`PAID`, `settlements` `APPROVED`; the payout transaction, opened from the explorer link, shows the
+vault's 5 USDC reaching the A30's account; the A30, once reloaded, shows "Paid N USDC." with the
+same link.
+
+**Run B — reject and resolve.** A second bounty through the same steps to `SUBMITTED`. On the
+Seeker inside the window: Reject, one requirement, the wallet. Then `DISPUTED` with the `REJECT`
+row; both phones show their dispute lines. `settle.mjs resolve <id> pay` or `refund`, the arbiter's
+choice after looking at the photos; the bounty `PAID` or `REFUNDED`, both phones showing the
+arbiter's line and the link.
+
+The release of `d649d6f4` and the three expiries (D163) precede both runs; their projection by
+`settle.mjs project` follows the build.

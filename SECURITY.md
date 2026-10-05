@@ -107,7 +107,7 @@ Any other fee payer may submit the same three instructions under the same limits
 requires no trust. Every money-moving instruction must remain safe if the relayer, or any
 fee payer, is malicious.
 In the MVP the verifier process holds the relayer key beside the attester key: two keys, one
-process (D147).
+process (D147). It sends `release` at its first tick after a review window closes (D159).
 
 **Arbiter** — dedicated protocol-level administrative key, held as program or config
 state, never per-bounty and never caller-supplied (D9, D74).
@@ -122,7 +122,8 @@ who may accept work, the arbiter releases locked funds to one side of a dispute.
 
 **API server** — server secret.
 May: issue sessions after wallet authentication; store SIWS challenges (D72); gate
-evidence access; hold workflow metadata.
+evidence access, issuing the requester short-lived read URLs it never follows (D156); hold
+workflow metadata.
 May not: hold user keys; sign requester or Scout transactions; hold token spending
 authority; manufacture an attestation; determine an on-chain payout destination.
 
@@ -433,7 +434,7 @@ These rules keep later expansion cheap without building any of it now.
   so retries never duplicate a bounty, an assignment or a submission.
 - Evidence bytes never pass through the API process; clients upload directly to object
   storage via presigned URLs. The verifier, a separate process, reads them back to re-hash
-  them (D147).
+  them (D147). The requester reads them through presigned `GET` URLs (D156).
 - Polling is the MVP (D7); moving to push must not change any state rule.
 
 **More chains.**

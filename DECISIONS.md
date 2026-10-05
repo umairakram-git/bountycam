@@ -3037,3 +3037,128 @@ transaction `3pMzGVWg…CNPGdnt`, finalized. `attestation-check` passed 10 of 10
 Metro, "Evidence verified." with "Submitted 15:55 · 2 photos" (its clock is UTC+4) and, for
 `3591bf4c`, "Evidence couldn't be verified. Your USDC returns after the deadline." The
 transaction and the `Submitted` account are POLICY.md 19.14 test 19's second vector and fixture.
+
+
+**D155 — Session 22 product rulings for P6 (Umair, 5 October).**
+
+1. **Approve asks once.** Before the wallet opens, one confirm step: "Pay N USDC to the Scout?
+   This can't be undone." N is the bounty's reward.
+2. **Silence releases automatically.** At the first verifier tick after the review window
+   closes, the verifier sends `release` (D12, D92). The relayer pays the fee and any rent for the
+   Scout's payout account; the program moves only what the bounty's state already authorises.
+3. **A rejection names exactly one requirement.** The requester picks one requirement from the
+   bounty's list. There is no free-text field; `decisions.reason` stays null, so nothing
+   unstructured needs moderation.
+4. **"Reject by HH:MM".** The requester sees the review window's end, and Reject is hidden once
+   it has closed. The program refuses a late rejection whatever the screen shows (D93).
+5. **Outcome lines.** Requester: "Paid N USDC to the Scout."; "Disputed: [requirement]. The
+   arbiter will decide."; "Arbiter paid the Scout."; "Arbiter refunded you." Scout: "Paid N
+   USDC." for approval, silence and an arbiter payment alike; "The requester disputed
+   '[requirement]'. The arbiter will decide."; "The arbiter refunded the requester." The Scout's
+   line does not say whether approval or silence paid.
+6. **Explorer links on both sides.** Every final payout or refund transaction is shown to the
+   requester and the Scout as `https://explorer.solana.com/tx/<signature>?cluster=devnet`.
+7. **Fixtures and cleanup.** Bounty `d649d6f4` is released by the relayer, recorded as the first
+   fixture and the first payout confirmed on the explorer. Bounties `3591bf4c`, `17e419ff` and
+   `802997ff` are expired by `expire_accepted`, returning 25 test USDC to the Seeker.
+8. **The arbiter is a person.** At A1, Umair resolves disputes by CLI. Product and demo text
+   calls it "BountyCam's arbiter" and never implies that arbitration is decentralised or
+   automatic.
+9. **Two live runs.** First the approve path to payout; then a second A30 cycle rejected from the
+   Seeker inside the review window, naming one requirement, and resolved by the arbiter CLI.
+
+
+**D156 — The requester reads photos through short-lived presigned `GET` URLs.**
+
+Ruling, technical. A new owner-only route, `GET /bounties/:id/evidence`, returns one SigV4
+query-presigned `GET` URL per evidence item, valid for `EVIDENCE_READ_URL_TTL_S` (default 300,
+at most 900). Reasons: SECURITY.md section 14 keeps evidence bytes out of the API process, and
+the phone loads the images at once, so a short lifetime limits a leaked URL at no cost. URLs are
+served only once the submission's attestation is `SUBMITTED`, because nothing can be approved or
+rejected before chain `Submitted`. They are never logged, stored or returned by another route
+(SECURITY.md section 7). The Scout and the public get no photo route. POLICY.md section 20.9.
+
+
+**D157 — One settlement projection, from the account, with the signature found by the server.**
+
+Ruling, technical. `projectSettlement(bountyId)` is the only writer of `DISPUTED`, `PAID`,
+`REFUNDED` from `expire_accepted`, `settlements` rows and P6's `decisions` rows. Its evidence is
+the account (D79, SECURITY.md section 12). The settling transaction's signature is needed for the
+explorer link but the account does not hold it, so the server finds it itself: the account's
+recent signatures at `confirmed`, each successful transaction read until one carries a top-level
+escrow instruction on this account whose discriminator matches the chain state. It never takes a
+signature from a phone. Callers: `POST /bounties/:id/settlement`, the verifier's settlement pass
+and `settle.mjs`. Reasons: the funding and acceptance projections set the pattern (D118, D124),
+and a phone-supplied signature would be a claim to check, where a chain read is evidence.
+POLICY.md section 20.4.
+
+
+**D158 — Migration 15: `settlements`, the rejection's signature, the review window's end.**
+
+Ruling, technical. A `settlements` table, one row per settled bounty, holds the kind, the
+signature and the block time. `decisions` gains `tx_signature` and a unique key on
+`submission_id`: one decision per submission, `APPROVE` or `REJECT`. `submissions` gains
+`review_ends_at`, the chain's `submitted_at` plus `review_window_secs`, so views never read the
+chain. Reasons: a settlement is a fact about the bounty, not a requester's decision (a release
+has no decider, a resolution is the arbiter's), and D97's `decisions` row for a rejection stays
+the product record. POLICY.md section 20.2.
+
+
+**D159 — The verifier sends `release`; repeated sends are harmless and checked first.**
+
+Ruling, technical, carrying D155 ruling 2. Each verifier tick runs a settlement pass over
+`SUBMITTED` and `DISPUTED` bounties. For one whose projection finds chain `Submitted` and whose
+`review_ends_at` plus `VERIFIER_RELEASE_MARGIN_S` (10) has passed on the verifier's clock, it
+sends `release` with the relayer as fee payer. Idempotency: the projection reads the account
+before every send, so a settled bounty is projected rather than resent; the send uses preflight at
+`confirmed`, so a second `release` against a `Paid` account fails simulation with
+`BountyNotReleasable` and costs nothing; after any failure the account is read again. The margin
+absorbs drift between the verifier's clock and the cluster's, as D152's does. Retry state is held
+in memory, because the chain is the record and a restart simply reads it again. POLICY.md
+section 20.6.
+
+
+**D160 — The phone builds `approve` and `reject`; the Scout comes from the chain.**
+
+Ruling, technical. As for funding and acceptance (SECURITY.md section 3), the requester's phone
+builds both transactions with typed builders, checks them with new `packages/shared` functions
+and passes them to MWA. `approve` carries the Associated Token program's idempotent create for the
+Scout's payout account first, its rent paid by the requester as fee payer (D92). The Scout's
+wallet is read from the bounty account on chain, not from the API: the owner view never carries
+Scout detail (D138 ruling 5), and the program checks the Scout regardless (`ScoutMismatch`). The
+requirement id comes from the owner view's policy after its hash is checked. `packages/shared`
+SPEC.md section 13; `apps/mobile/REVIEW.md`.
+
+
+**D161 — A rejection naming a requirement outside the policy is projected and flagged.**
+
+Ruling, technical. D93 leaves membership to the API and the arbiter. The only client checks it
+before signing, so a foreign id means a transaction built elsewhere. The chain is `Disputed`
+either way and the database follows the chain: the bounty becomes `DISPUTED` with no `decisions`
+row, the foreign key permitting none, and one error-level line `FOREIGN_REQUIREMENT` is logged.
+The arbiter CLI prints that the requirement is not in the policy. D97's sentence on the
+`decisions` row holds for every rejection the product can produce.
+
+
+**D162 — `settle.mjs`: release, expire, resolve and project by hand.**
+
+Ruling, technical. One laptop script in `apps/api/scripts`, outside the gate:
+`release <bounty_id>` and `expire <bounty_id>` sign with the relayer; `resolve <bounty_id>
+pay|refund` signs with the arbiter, the relayer paying the fee; `project <bounty_id>` sends
+nothing. Each prints the chain state, asks once before sending, sends, then runs
+`projectSettlement` and prints its outcome and the explorer link. `resolve` first prints the
+named requirement's prompt and downloads the photos, each checked against its stored sha256, to a
+folder in `~/Downloads`, so the arbiter decides on the evidence. The transaction builders are in
+`src/chain/tx.ts` and tested; the script only wires them. POLICY.md section 20.10.
+
+
+**D163 — Fixtures are recorded before the build, by a one-off script.**
+
+Ruling, technical. The projection's tests need a real `Paid` account, a real `Refunded` account
+and real `getTransaction` and `getSignaturesForAddress` responses. D155 ruling 7's four sends
+produce them: a one-off script outside the repo signs `release` for `d649d6f4` and
+`expire_accepted` for the three stale bounties with the relayer, and saves every raw response.
+The rows of those bounties stay as they are until the build lands, then `settle.mjs project`
+projects them. `approve`, `reject` and `resolve` cannot be recorded before the live runs: their
+tests start from the recorded transactions with the instruction data changed, stated in each test
+as harness setup, and the records commit adds the real ones.
