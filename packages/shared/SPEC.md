@@ -1562,3 +1562,10 @@ scripted mutation of the check it names.
      `7oSUM9a2PgNbFwYhFFXU5p1mrZr1hTykFWVqosNmT7vW`.
 150. `submittedScout` refuses: state byte 1; state byte 4; the tag at 213 set to 0; 256 bytes;
      the discriminator's first byte altered (five asserts).
+
+### 13.7 Amendment A8 (Session 22, build 2)
+
+`expectedApproveKeys(expected)` is exported: it returns section 13.2's table as two lists of
+plain account metas, and `checkApproveInstructions` compares against it. The phone builds the
+two instructions from the same lists, as it builds funding from `expectedFundingKeys`
+(section 8.7), so the table exists once.
