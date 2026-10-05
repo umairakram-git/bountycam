@@ -892,6 +892,37 @@ open.
 - **One verifier instance only** (POLICY.md 19.13) — two would race to send; correct but
   untested.
 
+## Session 22 (5–6 October)
+
+**Closed.**
+
+- **P6** — review, approve, reject, dispute and settlement; live on devnet (D164): one release
+  by silence, one approval, one rejection resolved by the arbiter, three expiries.
+- **Bounties `3591bf4c`, `17e419ff` and `802997ff`** — expired; 25 test USDC back with the
+  Seeker.
+
+**Still open.**
+
+- **The bottom buttons sit under the A30's navigation bar** (O8) — seen again on Detail and
+  Mission.
+- **The API type check never sees its tests**; **P3's check 4 is half met; no
+  optional-requirement toggle; hashing takes about 6 s per photo in the development build** —
+  unchanged.
+- **One verifier instance only** (POLICY.md 19.13) — now also the only release sender.
+
+**New.**
+
+- **The Mission screen's heading always reads "Accepted."** — a settled mission shows the right
+  line and link under it; the heading should follow the state.
+- **`submission-check.mjs` C7 fails once the verifier has run** — it expects `ACCEPTED`, which
+  P5 made momentary; it should accept `SUBMITTED` once an attestation exists.
+- **Shared modules import from `index.js`, which re-exports them** — five cycles, a
+  development-build warning only.
+- **`expire_unaccepted` and funded `cancel` have no projection** — bounties `46551b54` and
+  `b15bd4a5` stay `AVAILABLE` past their cutoffs (POLICY.md 20.12).
+- **A `Disputed` account cannot be recorded after resolution** — the chain keeps only the
+  current state; settlement test 6 sets the state byte on a recorded `Paid` account (A9).
+
 ---
 
 ## Remaining plan
@@ -913,7 +944,8 @@ HANDOFF.md; this section lists only what remains, in build order.
   19, SPEC.md section 12, CAPTURE.md section 8 (D146 to D153). **Done, Session 21**: live on
   devnet 4 October (D154).
 - **P6** — Requester review, `approve`, and `reject` with a named requirement; payout confirmed
-  on the explorer.
+  on the explorer. Specified in Session 22: POLICY.md section 20, SPEC.md section 13, REVIEW.md
+  (D155 to D163). **Done, Session 22**: live on devnet 5 and 6 October (D164).
 
 ### Store lead time
 
@@ -929,7 +961,8 @@ HANDOFF.md; this section lists only what remains, in build order.
 ### Off the payment path
 
 - **O1** — Relayer and fee sponsorship (D2); reconciliation from confirmations beyond P1 and P2.
-- **O2** — Dispute view and arbiter `resolve`.
+- **O2** — Dispute view and arbiter `resolve`. The arbiter's CLI resolve and both sides'
+  dispute lines are done (Session 22, D162); what remains is an arbiter view in the app.
 - **O3** — Standalone independent verification script.
 - **O4** — Reputation counters, both-sided profiles.
 - **O5** — SKR: balance display, bounty bonus, Scout bond.

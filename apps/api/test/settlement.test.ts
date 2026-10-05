@@ -22,7 +22,6 @@ import {
 } from "../src/chain/rpc.ts";
 import { eligibilitySigner } from "../src/chain/signer.ts";
 import {
-  APPROVE_DISCRIMINATOR,
   expireMessage,
   REJECT_DISCRIMINATOR,
   releaseMessage,
@@ -53,6 +52,18 @@ const d649 = json(S + "d649d6f4_rows.json");
 const r3591 = json("devnet/verifier_rows.json");
 const recorded = json(S + "recorded_messages.json");
 const resolveVector = json("vectors/resolve_web3.json");
+// The Session 22 live runs: 2c92c434 approved from the Seeker; 70af9c0f rejected from the
+// Seeker naming one requirement, then resolved by the arbiter paying the Scout.
+const runA = json(S + "2c92c434_rows.json");
+const runB = json(S + "70af9c0f_rows.json");
+const BA = runA.bounty.id as string;
+const AA = runA.bounty.program_account as string;
+const BB = runB.bounty.id as string;
+const AB = runB.bounty.program_account as string;
+const APPROVE_SIG = json(S + "2c92c434_signatures.json").result[0].signature as string;
+const RESOLVE_SIG = json(S + "70af9c0f_signatures.json").result[0].signature as string;
+const REJECT_SIG = json(S + "70af9c0f_signatures.json").result[1].signature as string;
+const ARBITER_LIVE = "6YPX1obwh62N2DDyxtNa2RwkriWUUWLzjAvEWJFbvK1K";
 
 const PROGRAM = "6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS";
 const CONFIG_ACCOUNT = "DqHBCi3KYaZSSgMGcPY8QftYnns8k2vcg9GCJejKBaAb";
@@ -121,6 +132,33 @@ function loadRecorded(): void {
   signatureLists.set(A3591, json(S + "3591bf4c_signatures.json").result);
   transactions.set(RELEASE_SIG, json(S + "d649d6f4_release_tx.json").result);
   transactions.set(EXPIRE_SIG, json(S + "3591bf4c_expire_tx.json").result);
+  accounts.set(AA, dataOf("2c92c434_paid_account.json"));
+  accounts.set(AB, dataOf("70af9c0f_paid_account.json"));
+  signatureLists.set(AA, json(S + "2c92c434_signatures.json").result);
+  signatureLists.set(AB, json(S + "70af9c0f_signatures.json").result);
+  transactions.set(APPROVE_SIG, json(S + "2c92c434_approve_tx.json").result);
+  transactions.set(REJECT_SIG, json(S + "70af9c0f_reject_tx.json").result);
+  transactions.set(RESOLVE_SIG, json(S + "70af9c0f_resolve_tx.json").result);
+}
+
+/** Harness setup: Run B's recorded Paid account with another state byte. The Disputed
+ * state it held between reject and resolve cannot be read back from the chain. */
+function runBAccount(state: number): Uint8Array {
+  const d = dataOf("70af9c0f_paid_account.json");
+  d[169] = state;
+  return d;
+}
+
+/** Harness setup: Run B's recorded resolve with its outcome byte replaced. */
+function runBResolve(outcome: number): unknown {
+  const tx = clone(json(S + "70af9c0f_resolve_tx.json").result);
+  const keys = tx.transaction.message.accountKeys as string[];
+  const ix = (tx.transaction.message.instructions as { programIdIndex: number;
+    data: string }[]).find((i) => keys[i.programIdIndex] === PROGRAM)!;
+  const data = base58.decode(ix.data);
+  data[8] = outcome;
+  ix.data = base58.encode(data);
+  return tx;
 }
 
 /** Harness setup: the recorded release transaction with its escrow instruction replaced. */
@@ -296,9 +334,18 @@ async function seedBounty(rows: Record<string, any>, state: string): Promise<voi
 
 /** d649d6f4 in `state`, with its recorded submission and SUBMITTED attestation. */
 async function seed649(state = "SUBMITTED", attestation = "SUBMITTED"): Promise<void> {
+  await seedRun(d649, state, attestation);
+}
+
+/** A recorded run's rows, the bounty in `state`; no decision or settlement row. */
+async function seedRun(
+  rows: Record<string, any>,
+  state: string,
+  attestation = "SUBMITTED",
+): Promise<void> {
   await seedUsers();
-  await seedBounty(d649, state);
-  for (const n of d649.capture_nonces as Record<string, string>[]) {
+  await seedBounty(rows, state);
+  for (const n of rows.capture_nonces as Record<string, string>[]) {
     await pool.query(
       `INSERT INTO capture_nonces (id, assignment_id, bounty_id, scout_id, deployment_id, value,
          status, issued_at, expires_at, consumed_at, start_lat, start_lon, start_accuracy_m,
@@ -309,7 +356,7 @@ async function seed649(state = "SUBMITTED", attestation = "SUBMITTED"): Promise<
         Number(n["start_accuracy_m"]), ts(n["start_fixed_at"]!)],
     );
   }
-  const s = d649.submission as Record<string, string>;
+  const s = rows.submission as Record<string, string>;
   await pool.query(
     `INSERT INTO submissions (id, assignment_id, bounty_id, scout_id, capture_nonce_id, manifest,
        evidence_root, statement_signature, achieved_assurance, attester_signature, submitted_at)
@@ -318,7 +365,7 @@ async function seed649(state = "SUBMITTED", attestation = "SUBMITTED"): Promise<
       s["manifest"], hexOf(s["evidence_root"]!), hexOf(s["statement_signature"]!),
       Number(s["achieved_assurance"]), hexOf(s["attester_signature"]!), ts(s["submitted_at"]!)],
   );
-  for (const e of d649.evidence_items as Record<string, string>[]) {
+  for (const e of rows.evidence_items as Record<string, string>[]) {
     await pool.query(
       `INSERT INTO evidence_items (id, submission_id, requirement_id, storage_key, hash,
          c2pa_present, captured_at, byte_length, lat, lon, horizontal_accuracy_m, fixed_at)
@@ -328,7 +375,7 @@ async function seed649(state = "SUBMITTED", attestation = "SUBMITTED"): Promise<
         Number(e["horizontal_accuracy_m"]), ts(e["fixed_at"]!)],
     );
   }
-  const t = d649.attestation as Record<string, string>;
+  const t = rows.attestation as Record<string, string>;
   await pool.query(
     `INSERT INTO attestations (submission_id, status, achieved_assurance, message, signature,
        reason, tries, sends, next_attempt_at, tx_signature, created_at, updated_at)
@@ -440,7 +487,7 @@ function decodeMessage(msg: Uint8Array) {
   return out;
 }
 
-test("03 expire and resolve transactions: the recorded message and the web3.js vectors", () => {
+test("03 expire and resolve: recorded messages and the web3.js vectors", () => {
   const k = keysFor(A3591, "3591bf4c_accepted_account.json");
   const msg = expireMessage(k, base58.decode(RELAYER_LIVE), ataOf(k.requester, k),
     base58.decode(recorded.blockhashes["3591bf4c"]));
@@ -456,6 +503,20 @@ test("03 expire and resolve transactions: the recorded message and the web3.js v
       base58.decode(resolveVector.blockhash));
     assert.deepEqual(decodeMessage(m), c.instructions, `outcome ${c.outcome}`);
   }
+  // Run B's landed resolve, signed by the live relayer and arbiter: tx.ts rebuilds its
+  // message byte for byte from the account and the blockhash it carries.
+  const landed = Buffer.from(json(S + "70af9c0f_resolve_tx_base64.json").result.transaction[0],
+    "base64");
+  assert.equal(landed[0], 2);
+  const message = Uint8Array.from(landed.subarray(1 + 64 * 2));
+  const nKeys = message[3]!;
+  const blockhash = message.slice(4 + 32 * nKeys, 4 + 32 * nKeys + 32);
+  const kb = settlementKeys(base58.decode(PROGRAM), CONFIG_ACCOUNT, base58.decode(AB),
+    dataOf("70af9c0f_paid_account.json").slice(24, 56), base58.decode(MINT));
+  const scout = base58.decode(SCOUT_WALLET);
+  const rebuilt = resolveMessage(kb, base58.decode(RELAYER_LIVE), base58.decode(ARBITER_LIVE), 0,
+    scout, ataOf(scout, kb), blockhash);
+  assert.equal(Buffer.from(rebuilt).toString("hex"), Buffer.from(message).toString("hex"));
 });
 
 test("04 released: the recorded Paid account and release transaction", async () => {
@@ -472,34 +533,40 @@ test("04 released: the recorded Paid account and release transaction", async () 
   assert.equal((await decisionsOf()).length, 0);
 });
 
-test("05 approved: the release transaction with approve's data (harness setup)", async () => {
-  await seed649();
-  transactions.set(RELEASE_SIG, harnessTx(APPROVE_DISCRIMINATOR, (a) => a));
-  assert.equal((await projectSettlement(deps, B649)).outcome, "PROJECTED");
-  assert.equal((await settlementOf(B649)).kind, "APPROVED");
+test("05 approved: Run A's recorded approve", async () => {
+  await seedRun(runA, "SUBMITTED");
+  assert.equal((await projectSettlement(deps, BA)).outcome, "PROJECTED");
+  assert.equal(await stateOf(BA), "PAID");
+  assert.equal(await assignmentStatus(BA), "COMPLETED");
+  const st = await settlementOf(BA);
+  assert.equal(st.kind, "APPROVED");
+  assert.equal(st.tx_signature, APPROVE_SIG);
+  assert.equal(st.tx_signature, runA.settlements[0].tx_signature);
+  assert.equal(st.settled_at.getTime(), ts(runA.settlements[0].settled_at).getTime());
   const [d] = await decisionsOf();
   assert.equal(d.outcome, "APPROVE");
-  assert.equal(d.decided_by, ids().requester);
-  assert.equal(d.tx_signature, RELEASE_SIG);
+  assert.equal(d.decided_by, runA.decisions[0].decided_by);
+  assert.equal(d.tx_signature, APPROVE_SIG);
   assert.equal(d.failed_requirement_id, null);
 });
 
 const rejectTx = (id: string) =>
   harnessTx(cat(REJECT_DISCRIMINATOR, uuidBytes(id)), (a) => [a[0]!, a[2]!]);
 
-test("06 disputed: a Disputed account and reject's data (harness setup)", async () => {
-  await seed649();
-  accounts.set(A649, harnessAccount(3, REQ_IDS[1]!));
-  transactions.set(RELEASE_SIG, rejectTx(REQ_IDS[1]!));
-  assert.equal((await projectSettlement(deps, B649)).outcome, "PROJECTED");
-  assert.equal(await stateOf(B649), "DISPUTED");
-  assert.equal(await assignmentStatus(B649), "ACTIVE");
+test("06 disputed: Run B's recorded reject, the account's Disputed byte set (harness)", async () => {
+  await seedRun(runB, "SUBMITTED");
+  accounts.set(AB, runBAccount(3));
+  assert.equal((await projectSettlement(deps, BB)).outcome, "PROJECTED");
+  assert.equal(await stateOf(BB), "DISPUTED");
+  assert.equal(await assignmentStatus(BB), "ACTIVE");
   const [d] = await decisionsOf();
+  const recorded = runB.decisions[0] as Record<string, string>;
   assert.equal(d.outcome, "REJECT");
-  assert.equal(d.failed_requirement_id, REQ_IDS[1]);
-  assert.equal(d.tx_signature, RELEASE_SIG);
+  assert.equal(d.failed_requirement_id, recorded["failed_requirement_id"]);
+  assert.equal(d.tx_signature, REJECT_SIG);
+  assert.equal(d.tx_signature, recorded["tx_signature"]);
   assert.equal(d.reason, null);
-  assert.equal(await settlementOf(B649), undefined);
+  assert.equal(await settlementOf(BB), undefined);
 });
 
 test("07 foreign requirement: DISPUTED, no decision, one alarm", async () => {
@@ -517,24 +584,26 @@ const resolveTx = (outcome: number) =>
   harnessTx(cat(RESOLVE_DISCRIMINATOR, Uint8Array.from([outcome])),
     (a) => [a[5]!, a[1]!, a[0]!, a[2]!, a[3]!, a[4]!, a[6]!, a[7]!]);
 
-test("08 resolved: paying and refunding from DISPUTED; a disagreeing outcome", async () => {
-  for (const [state, outcome, final, kind] of [
-    [4, 0, "PAID", "RESOLVED_PAID"],
-    [5, 1, "REFUNDED", "RESOLVED_REFUNDED"],
-  ] as const) {
-    await seed649("DISPUTED");
-    accounts.set(A649, harnessAccount(state, REQ_IDS[0]!));
-    transactions.set(RELEASE_SIG, resolveTx(outcome));
-    assert.equal((await projectSettlement(deps, B649)).outcome, "PROJECTED");
-    assert.equal(await stateOf(B649), final);
-    assert.equal((await settlementOf(B649)).kind, kind);
-    assert.equal(await assignmentStatus(B649), "COMPLETED");
-  }
-  await seed649("DISPUTED");
-  accounts.set(A649, harnessAccount(4, REQ_IDS[0]!));
-  transactions.set(RELEASE_SIG, resolveTx(1));
-  assert.equal((await projectSettlement(deps, B649)).outcome, "BINDING_MISMATCH");
-  assert.equal(await stateOf(B649), "DISPUTED");
+test("08 resolved: Run B's recorded resolve; a refund and a disagreeing byte (harness)", async () => {
+  await seedRun(runB, "DISPUTED");
+  assert.equal((await projectSettlement(deps, BB)).outcome, "PROJECTED");
+  assert.equal(await stateOf(BB), "PAID");
+  const paid = await settlementOf(BB);
+  assert.equal(paid.kind, "RESOLVED_PAID");
+  assert.equal(paid.tx_signature, RESOLVE_SIG);
+  assert.equal(paid.tx_signature, runB.settlements[0].tx_signature);
+  assert.equal(await assignmentStatus(BB), "COMPLETED");
+  await seedRun(runB, "DISPUTED");
+  accounts.set(AB, runBAccount(5));
+  transactions.set(RESOLVE_SIG, runBResolve(1));
+  assert.equal((await projectSettlement(deps, BB)).outcome, "PROJECTED");
+  assert.equal(await stateOf(BB), "REFUNDED");
+  assert.equal((await settlementOf(BB)).kind, "RESOLVED_REFUNDED");
+  await seedRun(runB, "DISPUTED");
+  accounts.set(AB, dataOf("70af9c0f_paid_account.json"));
+  transactions.set(RESOLVE_SIG, runBResolve(1));
+  assert.equal((await projectSettlement(deps, BB)).outcome, "BINDING_MISMATCH");
+  assert.equal(await stateOf(BB), "DISPUTED");
 });
 
 test("09 expired: the recorded Refunded account and expire transaction of 3591bf4c", async () => {

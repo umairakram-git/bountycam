@@ -1,6 +1,6 @@
 # BountyCam — Handoff
 
-**Date:** 4 October 2026
+**Date:** 6 October 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
 spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification and build;
 Session 10; Session 11 escrow initialisation; Session 12 mobile sign-in; Session 13
@@ -8,11 +8,11 @@ eligibility specification; Sessions 14 and 15 eligibility build; Session 16 Seek
 Session 17 P1 — create and fund from the device, the funding projection; Session 18 P2 —
 discovery, accept from the device, the acceptance projection; Session 19 P3 — the capture nonce;
 Session 20 P4 — evidence capture, upload and signed submission; Session 21 P5 — the verifier
-and the attestation
-**Next session:** P6 in BACKLOG.md's Remaining plan — requester review, `approve`, and `reject`
-with a named requirement; payout confirmed on the explorer. Specification first; D116's order
-stands.
-**Deadline:** 8 October 2026 (4 days remaining)
+and the attestation; Session 22 P6 — review, approve, reject, dispute and settlement
+**Next session:** the payment path is complete at A1. With two days left Umair rules the order
+of BACKLOG.md's remaining items; S0 (dApp Store dry run) and S1 to S4 (ship) are the
+candidates, and A2 and A3 the assurance work D116 ordered next.
+**Deadline:** 8 October 2026 (2 days remaining)
 
 **Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
@@ -1715,6 +1715,67 @@ hashes. Red phases: 7 shared mutations, 21 API mutations, and 3 for this records
 vector, each turning exactly its named tests red.
 
 **Still open.** BACKLOG.md's Session 21 section.
+
+---
+
+## Session 22 — P6: review, approve, reject, dispute and settlement (5–6 October)
+
+Seven commits: `8f1c243` (specification, D155 to D163), `2476d7a` (POLICY.md amendments A1 to
+A7), `02a217b` (API: build 1), the shared SPEC.md amendment A8 and `91ac447` (build 2: shared and
+mobile), then this session's two records commits: D164 with amendment A9, and the fixtures,
+tests and these notes.
+
+**What landed.** The whole of P6, and the arbiter half of O2.
+
+- **Specification:** `apps/api/POLICY.md` section 20, `packages/shared/SPEC.md` section 13,
+  `apps/mobile/REVIEW.md`, three lines in SECURITY.md. Umair's rulings are D155: Approve asks
+  once; silence releases automatically at the verifier's first tick after the window; a rejection
+  names exactly one requirement and carries no text; "Reject by HH:MM"; the outcome lines; the
+  explorer link on both sides; the cleanup sends; the arbiter is a person using a CLI; two live
+  runs. Nine amendments while building (A1 to A9).
+- **API:** migration 15 (`settlements`, `decisions.tx_signature`, `submissions.review_ends_at`);
+  `readTail`; the settlement transactions in `src/chain/tx.ts`, which rebuild the recorded
+  release, expire and resolve messages byte for byte; `projectSettlement`, which finds the
+  settling signature on chain itself; `POST /bounties/:id/settlement`; `GET
+  /bounties/:id/evidence` (presigned `GET`, 300 s, requester only); the verifier's settlement
+  pass and `release`; views gaining `review_ends_at`, `dispute` and `settlement`;
+  `scripts/settle.mjs` (release, expire, resolve, project). `test/settlement.test.ts` (18).
+  Gate 1 / 38 / 81 / 8 / 7 / 26 / 24 / 16 / 25 / 26 / 20 / 18.
+- **Shared:** approve and reject data, their instruction checks, `submittedScout`. Tests 144 to
+  150, gate 150.
+- **Mobile:** the requester's bounty screen (photos, "Reject by", approve, reject), the outcome
+  lines and explorer links on both sides, settled missions listed. No native rebuild.
+- **Decisions:** D155 to D164. Umair ruled D155; D164 is the record.
+
+**Live, 5 and 6 October.** D164 in full. In short: the relayer released `d649d6f4` and expired
+the three stale bounties; Run A (`2c92c434`) approved from the Seeker and paid the A30; Run B
+(`70af9c0f`) rejected naming "PhotoMouse", disputed, and resolved by the arbiter paying the
+Scout. Every settlement shows on both phones with its explorer link, and every row matches its
+account.
+
+**Facts worth not rediscovering.**
+
+- `bountycam_dev` is at migration 15.
+- The Seeker needs `adb reverse tcp:7070 tcp:7070` now, as the A30 does: its photos come
+  from the store.
+- `submission-check.mjs` and `attestation-check.mjs` live in `apps/api/scripts/`; run them from
+  `apps/api` as `node scripts/…`.
+- `settle.mjs resolve` reads the arbiter key from `ARBITER_KEY_PATH`, defaulting to
+  `~/bountycam-keys/arbiter.json`; the API and the verifier never read it.
+- Restarting the adb server drops every `adb reverse`; the Seeker asked to authorise the laptop
+  again once this session.
+- The verifier's settlement pass projects `SUBMITTED` and `DISPUTED` bounties every tick and
+  releases a `Submitted` one 10 s after its window. An `ACCEPTED` bounty refunded by
+  `expire_accepted` is projected only by `settle.mjs project`.
+- The yellow "Require cycle" banner in the development build is Metro's notice of the shared
+  package's index re-exports; it does not reach a release build.
+
+**Process.** Specification first. Every apply script ran in the architect's sandbox (Postgres 16
+with PostGIS, pnpm 11.22.0, Node 22.22.2, Expo 57) before it ran here, and printed the same
+hashes. Red phases: 12 API mutations for build 1, 7 shared mutations for build 2, and the 12
+re-run against this commit's real fixtures.
+
+**Still open.** BACKLOG.md's Session 22 section.
 
 ---
 

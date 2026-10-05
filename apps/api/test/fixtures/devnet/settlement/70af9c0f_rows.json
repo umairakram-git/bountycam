@@ -1,0 +1,155 @@
+{
+  "_note": "Recorded bountycam_dev rows of bounty 70af9c0f, Run B (reject, then resolve paying the Scout), 6 October 2026, collected by s22_records.py after settlement (Session 22 records). psql CSV text values, as d649d6f4_rows.json. The bounty row's state is the settled one; tests seed the state they need.",
+  "policy": {
+    "id": "27458596-b99b-4f78-862d-70cc3e53e8c7",
+    "requester_id": "188b1a6a-b401-419c-a16f-b150418df598",
+    "canonical_json": "{\"acceptance_window_seconds\":86400,\"capture_radius_m\":150,\"chain\":\"solana\",\"challenge_window_seconds\":3600,\"cluster\":\"devnet\",\"completion_window_seconds\":7200,\"domain_tag\":\"BOUNTYCAM_POLICY_V1\",\"eligibility_profile_id\":\"BASE_V1\",\"evidence_requirements\":[{\"id\":\"3090641a-4fdb-4605-9325-689c9c04b1b2\",\"prompt\":\"PhotoMouse\",\"required\":true,\"type\":\"PHOTO\"},{\"id\":\"a22c1ade-d47d-4b23-85de-1eb263770b4f\",\"prompt\":\"Keyborad\",\"required\":true,\"type\":\"PHOTO\"}],\"fee_amount\":\"0\",\"lat\":\"-33.7118400\",\"lon\":\"150.9654270\",\"required_assurance\":1,\"reward_amount\":\"5000000\",\"salt\":\"248682addaa87322a0b513702974f605a55cef3d2462ce1b5dfc42ef83abf320\",\"settlement_mint\":\"ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR\"}",
+    "policy_hash": "\\x960ecc9631a833f2ce4d2264261491604f15aa26e2fb96af9391ce422ce7e1e5",
+    "required_assurance": "1",
+    "created_at": "2026-10-06 09:28:01.179051+11",
+    "eligibility_profile_id": "BASE_V1"
+  },
+  "bounty": {
+    "id": "70af9c0f-3a6c-48f5-963e-b479a5e28304",
+    "requester_id": "188b1a6a-b401-419c-a16f-b150418df598",
+    "policy_id": "27458596-b99b-4f78-862d-70cc3e53e8c7",
+    "title": "RejectTest",
+    "category": "Infrastructure",
+    "capture_radius_m": "150",
+    "reward_amount": "5000000",
+    "state": "PAID",
+    "program_account": "2fQFuuCbdxgLrCsPoWsFa3XBEJid2U87F1tP3rbLhEgx",
+    "created_at": "2026-10-06 09:28:01.179051+11",
+    "location": "0101000020E61000009DF529C7E4DE624009FEB7921DDB40C0",
+    "location_public": "0101000020E61000007B14AE47E1DE6240EC51B81E85DB40C0",
+    "idempotency_key": "c04a0845-b18d-41d5-85fe-925a18e810f3",
+    "request_digest": "\\xca58ddb194b4f4b410c1f72bcb7789fdc312dc0dca2273093c07b8ea2f107a31",
+    "acceptance_cutoff": "2026-10-07 09:28:16+11"
+  },
+  "assignment": {
+    "id": "d327ce2b-41ed-4b92-b368-b130ff61c2ed",
+    "bounty_id": "70af9c0f-3a6c-48f5-963e-b479a5e28304",
+    "scout_id": "cda7b66f-0707-4062-b3f7-4decd04b8dcb",
+    "accepted_at": "2026-10-06 09:30:53+11",
+    "deadline": "2026-10-06 11:30:53+11",
+    "status": "COMPLETED",
+    "expires_at": "2026-10-06 09:35:33+11"
+  },
+  "users": [
+    {
+      "id": "188b1a6a-b401-419c-a16f-b150418df598",
+      "wallet_address": "9BZ17sUdF2matCurxmdmUpD3BNabBTFmsmAVu5oY9qP3",
+      "display_name": "",
+      "trust_level": "0",
+      "seeker_verified": "f",
+      "created_at": "2026-09-20 08:34:09.353748+10",
+      "status": "ACTIVE"
+    },
+    {
+      "id": "cda7b66f-0707-4062-b3f7-4decd04b8dcb",
+      "wallet_address": "7oSUM9a2PgNbFwYhFFXU5p1mrZr1hTykFWVqosNmT7vW",
+      "display_name": "",
+      "trust_level": "0",
+      "seeker_verified": "f",
+      "created_at": "2026-09-28 21:27:21.899268+10",
+      "status": "ACTIVE"
+    }
+  ],
+  "capture_nonces": [
+    {
+      "id": "b113539f-b1a2-47df-99f8-5332d427bcf8",
+      "assignment_id": "d327ce2b-41ed-4b92-b368-b130ff61c2ed",
+      "bounty_id": "70af9c0f-3a6c-48f5-963e-b479a5e28304",
+      "scout_id": "cda7b66f-0707-4062-b3f7-4decd04b8dcb",
+      "deployment_id": "2",
+      "value": "\\x7cae85a5544d566948f649af2861e14f669fec4a5e8af0cc15fbff1e2f994c84",
+      "status": "CONSUMED",
+      "issued_at": "2026-10-06 09:31:05.03+11",
+      "expires_at": "2026-10-06 09:51:05.03+11",
+      "consumed_at": "2026-10-06 09:31:58.409+11",
+      "start_lat": "-33.7116762",
+      "start_lon": "150.9655090",
+      "start_accuracy_m": "20",
+      "start_fixed_at": "2026-10-06 09:31:07.139+11"
+    }
+  ],
+  "submission": {
+    "id": "70050256-5391-4715-a67a-465a04e688b5",
+    "assignment_id": "d327ce2b-41ed-4b92-b368-b130ff61c2ed",
+    "evidence_root": "\\x68dcb4b6870279d55cb1f492e1047f5d10654f9ff89320b1c503f20b93cd53b2",
+    "achieved_assurance": "1",
+    "attester_signature": "\\x9fb865abc3a2f0d649e1597278dc1c04e114dbea5d44f4cc4dd724894a70b0c0fa4cba52b2d96da6a0cc103e51af07e74bd42b173d53c7249efa0526002a390d",
+    "submitted_at": "2026-10-06 09:31:58.409+11",
+    "bounty_id": "70af9c0f-3a6c-48f5-963e-b479a5e28304",
+    "scout_id": "cda7b66f-0707-4062-b3f7-4decd04b8dcb",
+    "capture_nonce_id": "b113539f-b1a2-47df-99f8-5332d427bcf8",
+    "manifest": "{\"header\":{\"assignment_id\":\"d327ce2b-41ed-4b92-b368-b130ff61c2ed\",\"bounty_id\":\"70af9c0f-3a6c-48f5-963e-b479a5e28304\",\"capture_nonce\":\"7cae85a5544d566948f649af2861e14f669fec4a5e8af0cc15fbff1e2f994c84\",\"deployment_id\":2,\"manifest_version\":1,\"policy_hash\":\"960ecc9631a833f2ce4d2264261491604f15aa26e2fb96af9391ce422ce7e1e5\",\"scout\":\"7oSUM9a2PgNbFwYhFFXU5p1mrZr1hTykFWVqosNmT7vW\"},\"items\":[{\"byte_length\":1997214,\"captured_at\":\"2026-10-05T22:31:13.891Z\",\"fixed_at\":\"2026-10-05T22:31:20.174Z\",\"horizontal_accuracy_m\":25,\"lat\":\"-33.7116721\",\"lon\":\"150.9655128\",\"photo_sha256\":\"d98e01e502ac286338efc041190d284a11c48a0dc6475fe641f012c465002ff9\",\"requirement_id\":\"3090641a-4fdb-4605-9325-689c9c04b1b2\"},{\"byte_length\":1544565,\"captured_at\":\"2026-10-05T22:31:27.697Z\",\"fixed_at\":\"2026-10-05T22:31:33.184Z\",\"horizontal_accuracy_m\":46,\"lat\":\"-33.7118040\",\"lon\":\"150.9654278\",\"photo_sha256\":\"52a06f94ceeec892fe98cd8bc80400f8f6d1e61a75ee6298eb0633be1959f414\",\"requirement_id\":\"a22c1ade-d47d-4b23-85de-1eb263770b4f\"}]}",
+    "statement_signature": "\\x765b8bcf53285d1ed06e9f0af7881094e59b49b78941714db954a9fc357f8b696ecc631c16ce479db24a0b0595e258d3fb783fb461bf2e8db106028fc1f69d0d",
+    "review_ends_at": "2026-10-06 10:32:00+11"
+  },
+  "evidence_items": [
+    {
+      "id": "e5cbfa1c-4398-46ae-b1d7-c55f16f99a4e",
+      "submission_id": "70050256-5391-4715-a67a-465a04e688b5",
+      "requirement_id": "3090641a-4fdb-4605-9325-689c9c04b1b2",
+      "storage_key": "evidence/70af9c0f-3a6c-48f5-963e-b479a5e28304/b113539f-b1a2-47df-99f8-5332d427bcf8/3090641a-4fdb-4605-9325-689c9c04b1b2/d98e01e502ac286338efc041190d284a11c48a0dc6475fe641f012c465002ff9.jpg",
+      "hash": "\\xd98e01e502ac286338efc041190d284a11c48a0dc6475fe641f012c465002ff9",
+      "c2pa_present": "f",
+      "captured_at": "2026-10-06 09:31:13.891+11",
+      "byte_length": "1997214",
+      "lat": "-33.7116721",
+      "lon": "150.9655128",
+      "horizontal_accuracy_m": "25",
+      "fixed_at": "2026-10-06 09:31:20.174+11"
+    },
+    {
+      "id": "38ba26d2-0216-49b8-b266-a7aca283d64c",
+      "submission_id": "70050256-5391-4715-a67a-465a04e688b5",
+      "requirement_id": "a22c1ade-d47d-4b23-85de-1eb263770b4f",
+      "storage_key": "evidence/70af9c0f-3a6c-48f5-963e-b479a5e28304/b113539f-b1a2-47df-99f8-5332d427bcf8/a22c1ade-d47d-4b23-85de-1eb263770b4f/52a06f94ceeec892fe98cd8bc80400f8f6d1e61a75ee6298eb0633be1959f414.jpg",
+      "hash": "\\x52a06f94ceeec892fe98cd8bc80400f8f6d1e61a75ee6298eb0633be1959f414",
+      "c2pa_present": "f",
+      "captured_at": "2026-10-06 09:31:27.697+11",
+      "byte_length": "1544565",
+      "lat": "-33.7118040",
+      "lon": "150.9654278",
+      "horizontal_accuracy_m": "46",
+      "fixed_at": "2026-10-06 09:31:33.184+11"
+    }
+  ],
+  "attestation": {
+    "submission_id": "70050256-5391-4715-a67a-465a04e688b5",
+    "status": "SUBMITTED",
+    "achieved_assurance": "1",
+    "message": "\\x424f554e545943414d5f4154544553544154494f4e5f56310100025342ad625c0024d2730d76c54ea40074d4403ccf16c2ca331ac70077196813f770af9c0f3a6c48f5963eb479a5e2830479917d02f1531c839cb3667dbfa2700d75eca3196fc2578d286383478f7f05ae650ba3b641572f47d72b869f7302ec480a825ed65fb38f9044533c6ccd297f67960ecc9631a833f2ce4d2264261491604f15aa26e2fb96af9391ce422ce7e1e50d2a8920d85f17637cff555ef00869418767b4de9cb72cc553c8944ccfd0deb9013d41c46a00000000100e00000000000068dcb4b6870279d55cb1f492e1047f5d10654f9ff89320b1c503f20b93cd53b2016025c46a00000000",
+    "signature": "\\x9fb865abc3a2f0d649e1597278dc1c04e114dbea5d44f4cc4dd724894a70b0c0fa4cba52b2d96da6a0cc103e51af07e74bd42b173d53c7249efa0526002a390d",
+    "reason": "",
+    "tries": "0",
+    "sends": "1",
+    "next_attempt_at": "2026-10-06 09:32:00.317+11",
+    "tx_signature": "adrGJFGD64Uopeveo4AqC9CePGPDXCTiTrLMSU86puVC7sxfDXTsHHgvbv4eLTk9rpzyjEZAREazCHc8nvgEEDg",
+    "created_at": "2026-10-06 09:31:59.745+11",
+    "updated_at": "2026-10-06 09:32:03.754+11"
+  },
+  "decisions": [
+    {
+      "id": "cc5eae84-f33f-4e2a-9400-245f7ebf68b3",
+      "submission_id": "70050256-5391-4715-a67a-465a04e688b5",
+      "outcome": "REJECT",
+      "failed_requirement_id": "3090641a-4fdb-4605-9325-689c9c04b1b2",
+      "reason": "",
+      "decided_by": "188b1a6a-b401-419c-a16f-b150418df598",
+      "decided_at": "2026-10-06 09:35:45.629+11",
+      "tx_signature": "ugAuKoxbsd5t8DaFYnbstDUo9PQgqFcNat6MqWkcQ2AcVAHKyKZaFqmCqXLeYyVFSq4F8tJQix7abwd9YzsLXi9"
+    }
+  ],
+  "settlements": [
+    {
+      "bounty_id": "70af9c0f-3a6c-48f5-963e-b479a5e28304",
+      "kind": "RESOLVED_PAID",
+      "tx_signature": "f9QZhRY1VKiUL2mYAcm7wx8eq3fVVsmH5p9Bv4NMvMsG6NFpq8jmiYPt5sqjGb3Cd39MZNSv1py7xKm8g1j4oYv",
+      "settled_at": "2026-10-06 09:39:47+11",
+      "projected_at": "2026-10-06 09:39:49.851+11"
+    }
+  ]
+}
