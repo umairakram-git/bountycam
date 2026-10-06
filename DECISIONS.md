@@ -3193,3 +3193,23 @@ Record. Sydney times (AEDT, UTC+11); the Seeker's clock is UTC+4.
 
 The approve, reject and resolve transactions, both settled accounts and both bounties' rows are
 the settlement suite's fixtures from the records commit (POLICY.md 20.15, A9).
+
+
+**D165 — S0: dApp Store publishing and a public backend (Umair, 6 October).**
+
+1. **Order after P6:** S0, then S3; A2 and A3 deferred.
+2. **Publisher:** an individual, Umair Akram, verified through the portal's identity check.
+   Publisher wallet: a dedicated Phantom account, `FsrzwgGWQJYtdEmPhcLQw5qAoS5cSZDBe5pPvxYfU7DC`,
+   separate from the Seeker wallet and every devnet key, its recovery phrase on paper.
+3. **The backend is hosted publicly,** so the store build works on any phone: an OVHcloud
+   VPS-1 in Sydney, monthly with no commitment, Ubuntu 24.04, `51.161.153.97`.
+4. **Domain:** `bountycam.app` at Cloudflare; `api.` and `store.` point at the VPS, DNS only;
+   the landing page on Cloudflare Pages.
+5. **App identity:** Android package `app.bountycam`; the name under the icon **BountyCam**.
+
+Technical calls, the architect's: host networking for every container, so the code is
+unchanged and only Caddy listens publicly; a fresh database on the server; secrets copied by
+`scp` at mode 600, never in an image; the arbiter key stays on the laptop; the release build's
+API address through `EXPO_PUBLIC_API_BASE_URL`. `ops/DEPLOY.md`.
+
+The repository is private. HANDOFF.md's header called it public; corrected in this commit.

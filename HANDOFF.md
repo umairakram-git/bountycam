@@ -14,7 +14,7 @@ of BACKLOG.md's remaining items; S0 (dApp Store dry run) and S1 to S4 (ship) are
 candidates, and A2 and A3 the assurance work D116 ordered next.
 **Deadline:** 8 October 2026 (2 days remaining)
 
-**Repo:** https://github.com/umairakram-git/bountycam (public)
+**Repo:** https://github.com/umairakram-git/bountycam (private)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
 
 ---
