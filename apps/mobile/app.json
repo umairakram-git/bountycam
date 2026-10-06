@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "mobile",
+    "name": "BountyCam",
     "slug": "mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,7 +8,7 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.mobile"
+      "bundleIdentifier": "app.bountycam"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +18,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.mobile"
+      "package": "app.bountycam"
     },
     "web": {
       "favicon": "./assets/favicon.png"

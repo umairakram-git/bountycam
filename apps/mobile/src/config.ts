@@ -3,7 +3,11 @@
 // The handset reaches the laptop's API through `adb reverse tcp:3000 tcp:3000`,
 // which maps the device's own loopback to the host's. So 127.0.0.1 here is
 // correct on device — not a LAN address, not a tunnel.
-export const API_BASE_URL = 'http://127.0.0.1:3000';
+// ops/DEPLOY.md section 7: a release build sets EXPO_PUBLIC_API_BASE_URL to
+// https://api.bountycam.app; Expo inlines it when the bundle is built. Without it, the
+// development default stays the laptop over adb reverse.
+export const API_BASE_URL: string =
+  process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:3000';
 
 // AUTH.md 14.2 is an OPEN item: the SIWS spec says the wallet "must determine
 // the domain" when the dapp supplies none, and says nothing about a native app;

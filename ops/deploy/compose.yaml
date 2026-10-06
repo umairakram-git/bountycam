@@ -1,0 +1,73 @@
+# ops/DEPLOY.md section 3. Run through server-up.sh, which sets the project directory to
+# /opt/bountycam, so every relative path below resolves there. Every service uses the
+# host's network: the API, the store and Postgres listen on 127.0.0.1 only, as on the
+# laptop, and Caddy alone listens publicly (80 and 443). ufw allows 22, 80 and 443.
+name: bountycam
+
+x-node: &node
+  image: bountycam-node:latest
+  build:
+    context: ./src
+    dockerfile: ops/deploy/Dockerfile
+  network_mode: host
+  restart: unless-stopped
+  env_file: ./server.env
+  volumes:
+    - ./keys:/keys:ro
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    network_mode: host
+    restart: unless-stopped
+    env_file: ./db.env
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U bountycam -d bountycam"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  store:
+    image: versity/versitygw:latest
+    network_mode: host
+    restart: unless-stopped
+    user: "0:0"
+    env_file: ./store.env
+    command: ["--port", "127.0.0.1:7070", "posix", "/data"]
+    volumes:
+      - ./evidence:/data
+
+  api:
+    <<: *node
+    command: ["node", "src/index.ts"]
+    depends_on:
+      db:
+        condition: service_healthy
+      store:
+        condition: service_started
+
+  verifier:
+    <<: *node
+    command: ["node", "src/verifier/main.ts"]
+    depends_on:
+      db:
+        condition: service_healthy
+      store:
+        condition: service_started
+
+  caddy:
+    image: caddy:2
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./src/ops/deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata: {}
+  caddy_data: {}
+  caddy_config: {}

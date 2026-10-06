@@ -1,0 +1,10 @@
+# ops/DEPLOY.md section 4: TLS for both hostnames, certificates from Let's Encrypt.
+# Caddy passes the client's Host header through unchanged, which the store needs: a
+# presigned URL is signed over the host store.bountycam.app.
+api.bountycam.app {
+	reverse_proxy 127.0.0.1:3000
+}
+
+store.bountycam.app {
+	reverse_proxy 127.0.0.1:7070
+}
