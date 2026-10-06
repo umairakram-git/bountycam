@@ -8,10 +8,12 @@ eligibility specification; Sessions 14 and 15 eligibility build; Session 16 Seek
 Session 17 P1 — create and fund from the device, the funding projection; Session 18 P2 —
 discovery, accept from the device, the acceptance projection; Session 19 P3 — the capture nonce;
 Session 20 P4 — evidence capture, upload and signed submission; Session 21 P5 — the verifier
-and the attestation; Session 22 P6 — review, approve, reject, dispute and settlement
-**Next session:** the payment path is complete at A1. With two days left Umair rules the order
-of BACKLOG.md's remaining items; S0 (dApp Store dry run) and S1 to S4 (ship) are the
-candidates, and A2 and A3 the assurance work D116 ordered next.
+and the attestation; Session 22 P6 — review, approve, reject, dispute and settlement;
+Session 23 S0 — public backend, release build, dApp Store submission (in review)
+**Next session:** S3 — demo script, seeded demo bounties, pitch video, presentation — while the
+store review runs; then S4. Umair's order after P6 is S0 then S3 (D165).
+**Live:** `https://api.bountycam.app`, `https://store.bountycam.app`, `https://bountycam.app`;
+the server is `ubuntu@51.161.153.97` (key login); redeploy with `ops/deploy/deploy.sh`.
 **Deadline:** 8 October 2026 (2 days remaining)
 
 **Repo:** https://github.com/umairakram-git/bountycam (private)
@@ -1776,6 +1778,42 @@ hashes. Red phases: 12 API mutations for build 1, 7 shared mutations for build 2
 re-run against this commit's real fixtures.
 
 **Still open.** BACKLOG.md's Session 22 section.
+
+---
+
+## Session 23 — S0: public backend, release build and dApp Store submission (6 October)
+
+Commits: the specification (D165, `ops/DEPLOY.md`), then the deployment files and app identity,
+ending at `bab9a39`, which the server runs; then this records commit (D166, `ops/LISTING.md`,
+`ops/site/`, `ops/listing/`, DEPLOY.md section 10).
+
+**What landed.** D165's rulings: publish as an individual from a dedicated Phantom wallet; host
+the backend publicly on an OVHcloud Sydney VPS; `bountycam.app` at Cloudflare; package
+`app.bountycam`, name BountyCam. The server runs Postgres with PostGIS, versitygw, the API, the
+verifier and Caddy in Docker Compose on the host network. The release APK points at
+`https://api.bountycam.app`, signed with a release key held only on the laptop. A full bounty
+ran end to end on both phones against the server without cables. The listing, the website
+(terms, privacy) and `support@` are live; the app is minted and v1.0.0 is in review. D166 has
+the record.
+
+**Facts worth not rediscovering.**
+
+- Redeploy: commit, then `ops/deploy/deploy.sh` from the repo root; check with
+  `ops/deploy/smoke.sh`. Server logs: `ssh ubuntu@51.161.153.97 'cd /opt/bountycam && docker
+  compose --project-directory /opt/bountycam -f src/ops/deploy/compose.yaml logs --tail 30 api
+  verifier'`.
+- The server's database is separate from `bountycam_dev`; bounties made against the server
+  exist only there. The arbiter key never leaves the laptop (DEPLOY.md section 8).
+- The release build must use a cleared Metro cache, and the dev client afterwards needs
+  `npx expo start --dev-client --clear`, or each picks up the other's API address.
+- The signing key is `~/bountycam-keys/bountycam-release.p12`, certificate `cb6d8678…`; losing it
+  means no updates to the store app ever.
+- The Mac cached a negative DNS answer for the new names for a while; `curl --resolve` checks
+  the server meanwhile.
+- The A30's three-button navigation bar covers bottom buttons (O8); swipe gestures avoid it.
+- The website is a dashboard-uploaded static Worker; re-upload `ops/site/` with "New deployment".
+
+**Still open.** BACKLOG.md's Session 23 section.
 
 ---
 

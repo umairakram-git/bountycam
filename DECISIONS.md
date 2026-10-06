@@ -3213,3 +3213,25 @@ unchanged and only Caddy listens publicly; a fresh database on the server; secre
 API address through `EXPO_PUBLIC_API_BASE_URL`. `ops/DEPLOY.md`.
 
 The repository is private. HANDOFF.md's header called it public; corrected in this commit.
+
+
+**D166 — S0's record: the public backend, the release build and the store submission, 6 October.**
+
+Record. Sydney times (AEDT).
+
+- **Server.** OVHcloud VPS-1, Sydney, Ubuntu 24.04.4 (kernel 6.8.0-146), `51.161.153.97`: key
+  login only, root and password logins off, ufw allowing 22, 80 and 443, Docker 29.8.2 with
+  Compose 5.6.0. `ops/deploy/deploy.sh` deployed `bab9a39`: the five containers up, 15
+  migrations on an empty database, `/health` and the store's 403 from inside; from outside,
+  HTTPS on both names with Let's Encrypt certificates and ports 3000, 5432 and 7070 closed.
+- **Release APK.** Built and signed as `ops/DEPLOY.md` section 10; installed beside the dev
+  client on both phones.
+- **End to end on the server, no cable.** Bounty "Test1" (`a06d54b6…`) created and funded on the
+  Seeker, accepted and captured on the A30 with its photos uploaded to `store.bountycam.app`,
+  attested by the server's verifier, approved on the Seeker: `PAID`, "Paid 5 USDC to the Scout."
+  and "Paid 5 USDC." with explorer links on both phones. A second run ("BusStop") likewise.
+- **Website and mail.** `bountycam.app` serves `ops/site/` (home, `/terms`, `/privacy`);
+  `support@bountycam.app` forwards to Umair's mail, tested.
+- **Store.** Listing as `ops/LISTING.md`; app collection minted (about 0.0176 SOL from the
+  publisher wallet); v1.0.0 submitted and in review. The APK went to the portal's storage; no
+  further SOL was spent.

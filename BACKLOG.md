@@ -923,6 +923,23 @@ open.
 - **A `Disputed` account cannot be recorded after resolution** — the chain keeps only the
   current state; settlement test 6 sets the state byte on a recorded `Paid` account (A9).
 
+## Session 23 (6 October)
+
+**Closed.** S0 (above). The launcher label (`BountyCam`) and the template package id
+(`app.bountycam`).
+
+**New.**
+
+- **The release APK is 91 MB** — four processor architectures; an arm64-only build
+  (`-PreactNativeArchitectures=arm64-v8a`) would be about a third, for the next release.
+- **The app identity URI is still `https://bountycam.invalid`** — AUTH.md 14.2; changing it
+  touches the SIWS domain, so it waits for a session that can retest sign-in.
+- **The website is uploaded by hand** — no Wrangler configuration; a scripted deploy must carry
+  the custom domain or it would drop it.
+- **The terms and privacy pages are not legal advice** — enough for a devnet test release; real
+  money needs a lawyer and an identifiable operator.
+- **Single server, images not pinned to digests** (DEPLOY.md section 9).
+
 ---
 
 ## Remaining plan
@@ -950,7 +967,9 @@ HANDOFF.md; this section lists only what remains, in build order.
 ### Store lead time
 
 - **S0** — dApp Store dry run: recorded APK build procedure, signing key, publisher and app
-  NFTs, one test submission.
+  NFTs, one test submission. **Done, Session 23**, and beyond a dry run: the public backend,
+  the signed release, the app NFT and v1.0.0 submitted for review (D165, D166). S2's release
+  NFT is minted with it; what S2 still holds is acting on the review.
 
 ### Assurance
 

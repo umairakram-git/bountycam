@@ -79,7 +79,7 @@ unsigned request; the certificate issuer; ports 3000, 5432 and 7070 closed from 
   client keeps the other address. Seen in the architect's sandbox.
 - The SIWS domain and the app identity are unchanged (AUTH.md 14.2); `SIWS_DOMAIN` on the
   server is the laptop's value.
-- The signing key, the build procedure and the listing are section 9, written with the build.
+- The signing key and the build procedure are section 10; the listing is `ops/LISTING.md`.
 
 ## 8. The arbiter from the laptop
 
@@ -94,3 +94,27 @@ the laptop. Written up when the first dispute on the server needs it.
 - `versity/versitygw:latest` and `caddy:2` are not pinned to a digest.
 - The deploy and server scripts are not in any gate: the architect's sandbox has no Docker.
   `deploy.sh`'s environment derivation was run there against a fabricated `api.env`.
+
+## 10. The release build (recorded 6 October)
+
+The procedure that produced v1.0.0, from the repo root on the laptop:
+
+1. Signing key, once: `keytool -genkeypair -v -storetype PKCS12 -keystore
+   ~/bountycam-keys/bountycam-release.p12 -alias bountycam -keyalg RSA -keysize 4096 -validity
+   10000 -dname "CN=Umair Akram, O=BountyCam, C=AU"`, mode 600, backed up offline with its
+   password. Certificate SHA-256 `cb6d8678d485c9d1a812fa138cf39109033a4f85c4684f8bd8463d4b6f04fa38`,
+   valid to 2054. Every update must be signed with this key.
+2. `cd apps/mobile && npx expo prebuild --platform android --clean` (namespace and applicationId
+   `app.bountycam`).
+3. Clear Metro's cache: `rm -rf "${TMPDIR%/}"/metro-cache "${TMPDIR%/}"/metro-file-map-*`.
+4. `cd apps/mobile/android && EXPO_PUBLIC_API_BASE_URL=https://api.bountycam.app ./gradlew
+   assembleRelease` (2 m 54 s on first run; build tools 36.0.0).
+5. Check the bundle: `assets/index.android.bundle` holds `api.bountycam.app` once and
+   `127.0.0.1:3000` never.
+6. Sign: `apksigner sign --ks ~/bountycam-keys/bountycam-release.p12 --ks-key-alias bountycam
+   --out ~/bountycam-release/bountycam-1.0.0.apk app-release.apk`; verify with `apksigner verify
+   --print-certs` and `aapt2 dump badging`.
+
+v1.0.0: versionCode 1, 90.98 MB, sha256
+`8f6d6cfac27a74af845699ded040b997fe1af497905370fc1529000abd4b7417`. The size is four processor
+architectures; an arm64-only build would be about a third of it (BACKLOG).
