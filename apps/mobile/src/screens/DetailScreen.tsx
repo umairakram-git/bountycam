@@ -6,7 +6,8 @@ import { ScrollView, Text, View } from 'react-native';
 import { apiGet } from '../api/client';
 import { aboutKm } from '../scout/location';
 import { asPublicBounty, rewardText, type Point, type PublicBounty } from '../scout/views';
-import { Button, Field } from './common';
+import { Button, Header } from './common';
+import { categoryLabel, hoursLabel } from './FindScreen';
 import { styles } from './styles';
 
 export function DetailScreen(props: {
@@ -33,45 +34,43 @@ export function DetailScreen(props: {
   if (bounty === undefined) {
     return (
       <View style={styles.screen}>
-        <Text style={styles.title}>Bounty</Text>
+        <Header title="Bounty" onBack={props.onBack} />
         <Text style={styles.notice}>{notice ?? 'Loading…'}</Text>
-        <View style={styles.buttons}>
-          <Button label="Back" secondary onPress={props.onBack} />
-        </View>
       </View>
     );
   }
   const hours = bounty.completionWindowSeconds / 3600;
   const distance = aboutKm(props.position, bounty.area);
+  const reward = rewardText(bounty.rewardAmount);
   return (
     <View style={styles.screen}>
-      <Text style={styles.title}>{bounty.title}</Text>
+      <Header title={bounty.title} onBack={props.onBack} />
       <ScrollView style={{ flex: 1 }}>
-        <Field label="Category" value={bounty.category} />
-        <Field label="Reward" value={rewardText(bounty.rewardAmount)} />
-        <Field
-          label="Time"
-          value={'Complete within ' + String(hours) + (hours === 1 ? ' hour' : ' hours') +
-            ' of accepting'}
-        />
-        <Field
-          label="Where"
-          value={(distance === undefined ? '' : distance + '. ') +
-            'Exact spot shown after you accept.'}
-        />
-        <Text style={styles.label}>Evidence</Text>
-        {bounty.prompts.map((prompt, index) => (
-          <Text key={String(index)} style={styles.value}>
-            {String(index + 1) + '. ' + prompt}
+        <Text style={styles.muted}>{categoryLabel(bounty.category)}</Text>
+        <Text style={styles.rewardLarge}>{reward}</Text>
+        <Text style={styles.meta}>Held in escrow. Released to you after the requester's review.</Text>
+
+        <Text style={styles.section}>WHERE AND WHEN</Text>
+        <View style={styles.card}>
+          <Text style={styles.value}>{distance ?? 'Distance unknown'}</Text>
+          <Text style={styles.muted}>Exact spot shown after you accept.</Text>
+          <Text style={[styles.value, { marginTop: 8 }]}>
+            {'Complete within ' + hoursLabel(hours) + ' of accepting'}
           </Text>
-        ))}
+        </View>
+
+        <Text style={styles.section}>WHAT YOU'LL DO</Text>
+        <View style={styles.card}>
+          {bounty.prompts.map((prompt, index) => (
+            <Text key={String(index)} style={[styles.value, { marginBottom: 6 }]}>
+              {String(index + 1) + '.  ' + prompt}
+            </Text>
+          ))}
+          <Text style={styles.muted}>Each photo is taken in the app, at the location.</Text>
+        </View>
       </ScrollView>
       <View style={styles.buttons}>
-        <Button
-          label={'Accept — earn ' + rewardText(bounty.rewardAmount)}
-          onPress={() => props.onAccept(bounty)}
-        />
-        <Button label="Back" secondary onPress={props.onBack} />
+        <Button label={'Accept · Earn ' + reward} onPress={() => props.onAccept(bounty)} />
       </View>
     </View>
   );

@@ -4,13 +4,13 @@ import type { ReactNode } from 'react';
 import { Text, View } from 'react-native';
 
 import type { FundOutcome } from '../funding/fund';
-import { Button, LogPane } from './common';
+import { Button, TechnicalDetails } from './common';
 import { styles } from './styles';
 
 export function describeOutcome(outcome: FundOutcome): string {
   switch (outcome.kind) {
     case 'FUNDED':
-      return 'Funded — live for Scouts.';
+      return 'Reward secured in escrow. Your bounty is live for Scouts.';
     case 'PENDING':
       return 'Not confirmed yet. It will show in My bounties once it lands.';
     case 'NOT_FUNDED':
@@ -36,7 +36,7 @@ export function FundingScreen(props: {
       {props.outcome === undefined ? null : (
         <Text style={styles.notice}>{describeOutcome(props.outcome)}</Text>
       )}
-      <LogPane lines={props.lines} />
+      <TechnicalDetails lines={props.lines} />
       <View style={styles.buttons}>
         {again ? <Button label="Fund again" onPress={props.onFundAgain} /> : null}
         <Button label="Done" secondary disabled={running} onPress={props.onDone} />

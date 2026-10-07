@@ -3,14 +3,10 @@
 import type { ReactNode } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
-import { FIXED_LABELS } from '../create/defaults';
 import { formatUsdc, type VerifiedBounty } from '../create/createBounty';
-import { Button, Field } from './common';
+import { Button, Header, TechnicalDetails, shortWallet } from './common';
+import { JobRules } from './JobRules';
 import { styles } from './styles';
-
-function shortWallet(address: string): string {
-  return address.slice(0, 4) + '…' + address.slice(-4);
-}
 
 export function ReviewScreen(props: {
   readonly bounty: VerifiedBounty;
@@ -23,7 +19,7 @@ export function ReviewScreen(props: {
   const amount = formatUsdc(props.bounty.args.rewardAmount);
   return (
     <View style={styles.screen}>
-      <Text style={styles.title}>Review</Text>
+      <Header title="Fund your bounty" onBack={props.onBack} />
       <ScrollView>
         {props.resumed ? (
           <Text style={styles.notice}>
@@ -31,30 +27,35 @@ export function ReviewScreen(props: {
             holds what it sent.
           </Text>
         ) : null}
-        <Field label="Title" value={e.title} />
-        <Field label="Category" value={e.category} />
-        <Field label="Location" value={e.policy.lat + ', ' + e.policy.lon} />
-        <Field label="Reward" value={amount + ' USDC'} />
-        <Field label="Photos" value={String(e.policy.evidence_requirements.length)} />
-        {e.policy.evidence_requirements.map((r, i) => (
-          <Text key={String(i)} style={styles.muted}>
-            {String(i + 1) + '. ' + r.prompt}
-          </Text>
-        ))}
-        {FIXED_LABELS.map(([label, value]) => (
-          <Field key={label} label={label} value={value} />
-        ))}
-        <Field label="Paying wallet" value={shortWallet(props.wallet)} />
-        <Field label="Bounty id" value={props.bounty.id} />
+        <Text style={styles.cardTitle}>{e.title}</Text>
+        <Text style={styles.muted}>{e.category}</Text>
+        <Text style={styles.rewardLarge}>{amount + ' USDC'}</Text>
+        <Text style={styles.meta}>{'Pin: ' + e.policy.lat + ', ' + e.policy.lon}</Text>
+
+        <Text style={styles.section}>
+          {'EVIDENCE REQUIRED (' + String(e.policy.evidence_requirements.length) + ')'}
+        </Text>
+        <View style={styles.card}>
+          {e.policy.evidence_requirements.map((r, i) => (
+            <Text key={String(i)} style={[styles.value, { marginBottom: 6 }]}>
+              {String(i + 1) + '.  ' + r.prompt}
+            </Text>
+          ))}
+        </View>
+
+        <Text style={styles.section}>JOB RULES</Text>
+        <JobRules />
+
         <Text style={styles.notice}>
           {'Transfers exactly ' +
             amount +
             " USDC into this bounty's escrow. Grants no spending permission."}
         </Text>
+        <Text style={styles.muted}>{'Paying from ' + shortWallet(props.wallet)}</Text>
         <View style={styles.buttons}>
-          <Button label={'Fund ' + amount + ' USDC'} onPress={props.onFund} />
-          <Button label="Back" secondary onPress={props.onBack} />
+          <Button label={'Fund bounty · ' + amount + ' USDC'} onPress={props.onFund} />
         </View>
+        <TechnicalDetails lines={['Bounty ID: ' + props.bounty.id]} />
       </ScrollView>
     </View>
   );

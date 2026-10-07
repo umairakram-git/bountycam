@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { Text, View } from 'react-native';
 
 import type { AcceptOutcome } from '../scout/accept';
-import { Button, LogPane } from './common';
+import { Button, TechnicalDetails } from './common';
 import { styles } from './styles';
 
 export function describeAccept(outcome: AcceptOutcome): string {
@@ -38,7 +38,7 @@ export function AcceptingScreen(props: {
     <View style={styles.screen}>
       <Text style={styles.title}>{running ? 'Accepting…' : 'Accept'}</Text>
       {text === undefined ? null : <Text style={styles.notice}>{text}</Text>}
-      <LogPane lines={props.lines} />
+      <TechnicalDetails lines={props.lines} />
       <View style={styles.buttons}>
         {again ? (
           <Button

@@ -10,7 +10,8 @@ import { outcomeFor, promptOf } from '../review/outcome';
 import { readRequirements, readSubmission } from '../scout/evidence';
 import { rewardText } from '../scout/views';
 import type { WalletProvider } from '../wallet/types';
-import { Button } from './common';
+import { Button, Header, StatusPill } from './common';
+import { stateLabel } from './MyBountiesScreen';
 import { styles } from './styles';
 
 const REJECT_MARGIN_MS = 30_000;
@@ -48,6 +49,7 @@ export function BountyReviewScreen(props: {
   const [choosing, setChoosing] = useState(false);
   const [chosen, setChosen] = useState<string | undefined>(undefined);
   const [now, setNow] = useState(Date.now());
+  const [enlarged, setEnlarged] = useState<string | undefined>(undefined);
   const log = useCallback((line: string) => console.log('[review] ' + line), []);
 
   const loadPhotos = useCallback(async () => {
@@ -137,11 +139,8 @@ export function BountyReviewScreen(props: {
   if (view === undefined) {
     return (
       <View style={styles.screen}>
-        <Text style={styles.title}>Bounty</Text>
-        <Text style={styles.placeholder}>{notice ?? 'Loading…'}</Text>
-        <View style={styles.buttons}>
-          <Button label="Back" secondary onPress={props.onBack} />
-        </View>
+        <Header title="Bounty" onBack={props.onBack} />
+        <Text style={styles.muted}>{notice ?? 'Loading…'}</Text>
       </View>
     );
   }
@@ -155,64 +154,144 @@ export function BountyReviewScreen(props: {
   const reward = rewardText(String(get(get(view, 'policy'), 'reward_amount')));
   const reviewable = state === 'SUBMITTED' && submission?.verification === 'VERIFIED';
   const canReject = reviewable && Number.isFinite(endsAt) && now < endsAt - REJECT_MARGIN_MS;
+  const kind = get(get(view, 'settlement'), 'kind');
+  const verified = submission?.verification === 'VERIFIED';
+  const paid = state === 'PAID';
+  const howPaid =
+    kind === 'APPROVED'
+      ? 'You approved the evidence.'
+      : kind === 'RELEASED'
+        ? 'Released automatically after your review time.'
+        : kind === 'RESOLVED_PAID'
+          ? 'The arbiter paid the Scout.'
+          : undefined;
+  const received = photos?.length ?? submission?.itemCount;
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.title}>{String(get(view, 'title'))}</Text>
+      <Header
+        title={String(get(view, 'title'))}
+        onBack={props.onBack}
+        backDisabled={busy}
+        action={{ label: 'Refresh', onPress: () => void load(), disabled: busy }}
+      />
       {notice === undefined ? null : <Text style={styles.notice}>{notice}</Text>}
       <ScrollView style={{ flex: 1 }}>
-        <Text style={styles.muted}>{state + ' · ' + reward}</Text>
-        {outcome === null ? null : (
-          <View>
+        <View style={[styles.cardRow, { marginBottom: 8 }]}>
+          <StatusPill {...stateLabel(state)} />
+          <Text style={styles.reward}>{reward}</Text>
+        </View>
+
+        {paid ? (
+          <View style={[styles.card, { borderColor: '#2f6b4c' }]}>
+            {verified ? <Text style={styles.meta}>✓ Evidence verified</Text> : null}
+            <Text style={styles.rewardLarge}>{reward + ' released'}</Text>
+            <Text style={styles.muted}>{'Paid to the Scout. ' + (howPaid ?? '')}</Text>
+            {verified && received !== undefined && received >= requirements.length ? (
+              <Text style={styles.value}>
+                {requirements.length === 1
+                  ? '✓ Required photo received'
+                  : '✓ All ' + String(requirements.length) + ' required photos received'}
+              </Text>
+            ) : null}
+            {verified ? (
+              <Text style={styles.value}>{"✓ Checked against this bounty's rules"}</Text>
+            ) : null}
+            {outcome?.explorerUrl === undefined ? null : (
+              <View>
+                <Text style={styles.value}>✓ Settled on Solana</Text>
+                <Pressable
+                  accessibilityRole="link"
+                  onPress={() => void Linking.openURL(outcome.explorerUrl as string)}
+                  style={{ paddingVertical: 8 }}
+                >
+                  <Text style={styles.headerActionLabel}>View transaction ›</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        ) : outcome === null ? null : (
+          <View style={styles.card}>
             <Text style={styles.value}>{outcome.line}</Text>
             {outcome.explorerUrl === undefined ? null : (
               <Pressable
                 accessibilityRole="link"
                 onPress={() => void Linking.openURL(outcome.explorerUrl as string)}
+                style={{ paddingVertical: 8 }}
               >
-                <Text style={styles.label}>View on Solana Explorer</Text>
+                <Text style={styles.headerActionLabel}>View transaction ›</Text>
               </Pressable>
             )}
           </View>
         )}
-        {reviewable && Number.isFinite(endsAt) ? (
-          <Text style={styles.value}>{'Reject by ' + hhmm(endsAt)}</Text>
+
+        {reviewable ? (
+          <View style={styles.card}>
+            <Text style={styles.value}>
+              {'✓ Evidence verified. Check the ' +
+                (requirements.length === 1 ? 'photo' : 'photos') + ', then approve.'}
+            </Text>
+            {Number.isFinite(endsAt) ? (
+              <Text style={styles.muted}>
+                {'Reject by ' + hhmm(endsAt) +
+                  '. If you do nothing, payment releases automatically after that.'}
+              </Text>
+            ) : null}
+          </View>
         ) : null}
+
+        {photos === undefined && !photoError ? null : (
+          <Text style={styles.section}>
+            {'EVIDENCE' + (received === undefined ? '' : ' ' + String(received) + '/' +
+              String(requirements.length))}
+          </Text>
+        )}
         {photoError ? (
           <View>
             <Text style={styles.notice}>{"Couldn't load the photos."}</Text>
             <Button label="Try again" secondary onPress={() => void loadPhotos()} />
           </View>
         ) : null}
-        {(photos ?? []).map((photo) => (
-          <View key={photo.requirementId}>
-            <Text style={styles.label}>{promptOf(view, photo.requirementId)}</Text>
-            <Pressable
-              onPress={() => {
-                if (Date.now() >= photosExpire) void loadPhotos();
-              }}
-            >
-              <Image
-                source={{ uri: photo.url }}
-                style={{ width: '100%', aspectRatio: 3 / 4, marginBottom: 8 }}
-                resizeMode="contain"
-                onError={() => {
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {(photos ?? []).map((photo) => {
+            const big = enlarged === photo.requirementId;
+            return (
+              <Pressable
+                key={photo.requirementId}
+                accessibilityRole="imagebutton"
+                accessibilityLabel={promptOf(view, photo.requirementId) + (big ? ', tap to shrink' : ', tap to enlarge')}
+                onPress={() => {
                   if (Date.now() >= photosExpire) void loadPhotos();
+                  setEnlarged(big ? undefined : photo.requirementId);
                 }}
-              />
-            </Pressable>
-          </View>
-        ))}
+                style={[styles.card, { padding: 8, marginBottom: 0, width: big ? '100%' : '48%' }]}
+              >
+                <Image
+                  source={{ uri: photo.url }}
+                  style={{ width: '100%', aspectRatio: 3 / 4, borderRadius: 8 }}
+                  resizeMode={big ? 'contain' : 'cover'}
+                  onError={() => {
+                    if (Date.now() >= photosExpire) void loadPhotos();
+                  }}
+                />
+                <Text style={[styles.muted, { marginTop: 6 }]} numberOfLines={big ? undefined : 2}>
+                  {promptOf(view, photo.requirementId)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
         {choosing ? (
           <View>
-            <Text style={styles.label}>Which requirement was not met?</Text>
+            <Text style={styles.section}>WHICH REQUIREMENT WAS NOT MET?</Text>
             {requirements.map((r) => (
               <Pressable
                 key={r.id}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: chosen === r.id }}
                 onPress={() => setChosen(r.id)}
-                style={[styles.chip, chosen === r.id ? styles.chipSelected : null]}
+                style={[styles.chip, { marginBottom: 8 }, chosen === r.id ? styles.chipSelected : null]}
               >
                 <Text style={styles.value}>{r.prompt}</Text>
               </Pressable>
@@ -220,10 +299,12 @@ export function BountyReviewScreen(props: {
           </View>
         ) : null}
         {confirming === 'approve' ? (
-          <Text style={styles.value}>{'Pay ' + reward + " to the Scout? This can't be undone."}</Text>
+          <Text style={[styles.value, { marginTop: 12 }]}>
+            {'Pay ' + reward + " to the Scout? This can't be undone."}
+          </Text>
         ) : null}
         {confirming === 'reject' && chosen !== undefined ? (
-          <Text style={styles.value}>
+          <Text style={[styles.value, { marginTop: 12 }]}>
             {"Reject '" + promptOf(view, chosen) + "'? The arbiter will decide who is paid."}
           </Text>
         ) : null}
@@ -231,7 +312,7 @@ export function BountyReviewScreen(props: {
       <View style={styles.buttons}>
         {confirming === 'approve' ? (
           <>
-            <Button label="Pay" disabled={busy} onPress={() => void approve()} />
+            <Button label={'Pay ' + reward} disabled={busy} onPress={() => void approve()} />
             <Button label="Cancel" secondary disabled={busy} onPress={() => setConfirming(undefined)} />
           </>
         ) : confirming === 'reject' ? (
@@ -251,13 +332,15 @@ export function BountyReviewScreen(props: {
         ) : (
           <>
             {reviewable ? (
-              <Button label="Approve" disabled={busy} onPress={() => setConfirming('approve')} />
+              <Button
+                label={'Approve · Pay ' + reward}
+                disabled={busy}
+                onPress={() => setConfirming('approve')}
+              />
             ) : null}
             {canReject ? (
               <Button label="Reject" secondary disabled={busy} onPress={() => setChoosing(true)} />
             ) : null}
-            <Button label="Refresh" secondary disabled={busy} onPress={() => void load()} />
-            <Button label="Back" secondary disabled={busy} onPress={props.onBack} />
           </>
         )}
       </View>

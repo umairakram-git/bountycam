@@ -4,8 +4,8 @@
 // the first screen, and its rules stand: the JWT is never logged.
 
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BackHandler, Text, View } from 'react-native';
 
 import { runSiwsSignIn, type SiwsUser } from './src/auth/signIn';
 import {
@@ -21,7 +21,7 @@ import { CreateScreen } from './src/screens/CreateScreen';
 import { FundingScreen } from './src/screens/FundingScreen';
 import { MyBountiesScreen } from './src/screens/MyBountiesScreen';
 import { ReviewScreen } from './src/screens/ReviewScreen';
-import { Button, LogPane } from './src/screens/common';
+import { Button, TechnicalDetails, shortWallet } from './src/screens/common';
 import { styles } from './src/screens/styles';
 import { createMwaWalletProvider } from './src/wallet/mwa';
 import { SpecError, verifyAssignedPolicy } from '@hackathon/shared';
@@ -179,7 +179,7 @@ export default function App() {
       })
       .catch((error: unknown) => {
         append('UNCAUGHT: ' + describeThrown(error));
-        setOutcome({ kind: 'NOT_SENT', message: 'Something went wrong. See the log.' });
+        setOutcome({ kind: 'NOT_SENT', message: 'Something went wrong. Open Technical details for the reason.' });
       })
       .finally(() => setBusy(false));
   }, [append, bounty, provider, session]);
@@ -223,7 +223,7 @@ export default function App() {
           append('UNCAUGHT: ' + describeThrown(error));
           setAcceptOutcome({
             kind: 'NOT_SENT',
-            message: 'Something went wrong. See the log.',
+            message: 'Something went wrong. Open Technical details for the reason.',
           });
         })
         .finally(() => setBusy(false));
@@ -263,19 +263,51 @@ export default function App() {
     [session, showMission],
   );
 
+  // Android back: the same move as each screen's back action. Ignored while a
+  // wallet or network step is running, as those screens' buttons are disabled then.
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (screen === 'signin' || screen === 'home' || session === undefined) return false;
+      if (busy) return true;
+      if (screen === 'bounty') setScreen('mine');
+      else if (screen === 'detail') setScreen('find');
+      else setScreen('home');
+      return true;
+    });
+    return () => subscription.remove();
+  }, [screen, busy, session]);
+
+  // A run log starts with '==='; anything else in it is a message for the user.
+  const message =
+    lines.length > 0 && !(lines[0] ?? '').startsWith('===')
+      ? lines.filter((line) => line !== '').join('\n')
+      : undefined;
+  const failedLine = lines.find(
+    (line) => line.startsWith('RESULT: failed') || line.startsWith('UNCAUGHT'),
+  );
+  const signInError =
+    failedLine === undefined
+      ? undefined
+      : failedLine.startsWith('RESULT: failed') && failedLine.includes(' — ')
+        ? failedLine.slice(failedLine.indexOf(' — ') + 3)
+        : "Sign-in didn't finish. Please try again.";
+
   if (screen === 'signin' || session === undefined) {
     return (
       <View style={styles.screen}>
-        <Text style={styles.title}>BountyCam — sign in</Text>
+        <Text style={styles.title}>BountyCam</Text>
+        <Text style={styles.muted}>Ask the real world. Someone nearby verifies it.</Text>
         <View style={styles.buttons}>
           <Button
             label={busy ? 'Signing in…' : 'Sign in with wallet'}
             disabled={busy}
             onPress={onSignIn}
           />
-          <Button label="Clear" secondary onPress={() => setLines([])} />
         </View>
-        <LogPane lines={lines} />
+        {busy || signInError === undefined ? null : (
+          <Text style={styles.notice}>{signInError}</Text>
+        )}
+        <TechnicalDetails lines={lines} />
         <StatusBar style="light" />
       </View>
     );
@@ -412,7 +444,10 @@ export default function App() {
   return (
     <View style={styles.screen}>
       <Text style={styles.title}>BountyCam</Text>
-      <Text style={styles.muted}>{'Signed in as ' + session.user.wallet_address}</Text>
+      <Text style={styles.muted}>
+        {'Ask the real world. · Signed in ' + shortWallet(session.user.wallet_address)}
+      </Text>
+      {message === undefined ? null : <Text style={styles.notice}>{message}</Text>}
       <View style={styles.buttons}>
         <Button
           label="Create a bounty"
@@ -435,7 +470,7 @@ export default function App() {
           }}
         />
       </View>
-      <LogPane lines={lines} />
+      <TechnicalDetails lines={lines} />
       <StatusBar style="light" />
     </View>
   );
