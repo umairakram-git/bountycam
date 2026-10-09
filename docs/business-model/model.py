@@ -38,6 +38,9 @@ CONSERVATIVE = dict(BOLD,
 )
 # Cost of revenue as a share of each stream: storage, compute, chain fees, payments, support.
 COST_SHARE = dict(fee=0.22, subs=0.12, api=0.15, data=0.25)
+# Compliance and licensing (KYC, payments rules), fraud and dispute losses, and paying users'
+# network fees, as a share of Scout payouts. Kept out of gross margin, inside EBITDA.
+RISK_AND_COMPLIANCE = 0.02
 
 
 def run(a):
@@ -53,27 +56,29 @@ def run(a):
                  data=a['data_revenue'][i])
         revenue = sum(s.values())
         gross = revenue - sum(s[k] * COST_SHARE[k] for k in s)
-        ebitda = gross - a['headcount'][i] * a['cost_per_head'][i] - a['sales_marketing'][i]
+        risk = gmv * RISK_AND_COMPLIANCE
+        ebitda = (gross - a['headcount'][i] * a['cost_per_head'][i] - a['sales_marketing'][i]
+                  - risk)
         cum += ebitda
         low = min(low, cum)
         scouts = checks / 12 / a['checks_per_active_scout_month'][i]
         rows.append(dict(year=year, customers=a['biz_customers_end'][i], checks=checks, gmv=gmv,
                          revenue=revenue, gross_margin=gross / revenue, ebitda=ebitda,
-                         cumulative=cum, scouts=scouts, scout_year=gmv / scouts, **s))
+                         cumulative=cum, scouts=scouts, scout_year=gmv / scouts, risk=risk, **s))
     return rows, -low
 
 
 def main():
     case = 'conservative' if 'conservative' in sys.argv[1:] else 'bold'
     rows, peak_burn = run(CONSERVATIVE if case == 'conservative' else BOLD)
-    m = lambda x: '%8.1f' % (x / 1e6)
+    m = lambda x: '%8.2f' % (x / 1e6)
     print('%s case, USD millions unless stated' % case.capitalize())
-    print('year  customers  checks(M)  to Scouts  fee  subs  api  data  revenue  GM  EBITDA  cum.  active Scouts  $/Scout/yr')
+    print('year  customers  checks(M)  to Scouts  fee  subs  api  data  revenue  GM  risk  EBITDA  cum.  active Scouts  $/Scout/yr')
     for r in rows:
-        print('%d %9d %10.2f %s %s %s %s %s %s %3.0f%% %s %s %10.0f %8.0f' % (
+        print('%d %9d %10.2f %s %s %s %s %s %s %3.0f%% %s %s %s %10.0f %8.0f' % (
             r['year'], r['customers'], r['checks'] / 1e6, m(r['gmv']), m(r['fee']), m(r['subs']),
-            m(r['api']), m(r['data']), m(r['revenue']), 100 * r['gross_margin'], m(r['ebitda']),
-            m(r['cumulative']), r['scouts'], r['scout_year']))
+            m(r['api']), m(r['data']), m(r['revenue']), 100 * r['gross_margin'], m(r['risk']),
+            m(r['ebitda']), m(r['cumulative']), r['scouts'], r['scout_year']))
     last = rows[-1]
     print('Peak cumulative burn: %.1f' % (peak_burn / 1e6))
     print('%d mix: fee %.0f%%, subscriptions %.0f%%, API %.0f%%, data %.0f%%; EBITDA margin %.0f%%' % (
