@@ -121,6 +121,7 @@ API (Node 22, Fastify) ── Postgres 16 + PostGIS        Escrow program (Ancho
 | `ops/` | Deployment (`DEPLOY.md`, Docker Compose, Caddy), store listing, website |
 | `HANDOFF.md`, `DECISIONS.md`, `BACKLOG.md` | Build log, decision record (D1 to D166), plan |
 | `SECURITY.md` | Trust boundaries and key custody |
+| `AUDIT-RESPONSE.md` | Answers to the Radiants advisory security audit, finding by finding |
 
 ## Run the code
 
