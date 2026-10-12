@@ -7,7 +7,7 @@ import { SpecError, parseCoordinatePair } from '@hackathon/shared';
 
 import { CATEGORIES, PROMPTS_MAX, PROMPT_MAX, type Category } from '../create/defaults';
 import type { CreateForm } from '../create/createBounty';
-import { currentPosition } from '../scout/location';
+import { currentPosition, openLocationSettings } from '../scout/location';
 import { Button, Header } from './common';
 import { JobRules } from './JobRules';
 import { styles } from './styles';
@@ -25,6 +25,7 @@ export function CreateScreen(props: {
   const [locating, setLocating] = useState(false);
   const [locationNote, setLocationNote] = useState<string | undefined>(undefined);
   const [locationDenied, setLocationDenied] = useState(false);
+  const [locationOff, setLocationOff] = useState(false);
   const [reward, setReward] = useState('');
   const [prompts, setPrompts] = useState<readonly string[]>([]);
   const [draft, setDraft] = useState('');
@@ -43,6 +44,7 @@ export function CreateScreen(props: {
     setLocating(true);
     setLocationNote(undefined);
     setLocationDenied(false);
+    setLocationOff(false);
     currentPosition()
       .then((fix) => {
         if (fix.ok) {
@@ -51,6 +53,9 @@ export function CreateScreen(props: {
         } else if (fix.kind === 'DENIED') {
           setLocationDenied(true);
           setLocationNote('Location access is off. Allow it in Settings, or enter coordinates.');
+        } else if (fix.kind === 'SERVICES_OFF') {
+          setLocationOff(true);
+          setLocationNote('Location is turned off on this phone. Turn it on, or enter coordinates.');
         } else {
           setLocationNote("Couldn't find your location. Try again, or enter coordinates.");
         }
@@ -140,6 +145,11 @@ export function CreateScreen(props: {
         {locationDenied ? (
           <Pressable accessibilityRole="button" onPress={() => void Linking.openSettings()}>
             <Text style={styles.headerActionLabel}>Open Settings</Text>
+          </Pressable>
+        ) : null}
+        {locationOff ? (
+          <Pressable accessibilityRole="button" onPress={() => void openLocationSettings()}>
+            <Text style={styles.headerActionLabel}>Turn on Location</Text>
           </Pressable>
         ) : null}
         {parsedLocation === undefined ? null : (

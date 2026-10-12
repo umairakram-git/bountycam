@@ -19,12 +19,13 @@ import {
   type StartFix,
 } from '../scout/capture';
 import { readSubmission, type SubmissionSummary } from '../scout/evidence';
+import { openLocationSettings } from '../scout/location';
 import type { WalletProvider } from '../wallet/types';
 import { Button } from './common';
 import { EvidenceSection } from './EvidenceSection';
 import { styles } from './styles';
 
-type Action = 'settings' | 'retry' | 'missions' | undefined;
+type Action = 'settings' | 'location' | 'retry' | 'missions' | undefined;
 
 interface Message {
   readonly text: string;
@@ -34,7 +35,7 @@ interface Message {
 
 const MESSAGES = {
   denied: 'BountyCam needs your location to start capture. Open Settings to allow it.',
-  servicesOff: 'Location is turned off. Turn it on in Settings to start capture.',
+  servicesOff: 'Location is turned off on this phone. Turn it on to start capture.',
   noFix: "Couldn't get your location. Move near a window or outside, then try again.",
   imprecise: "Your location isn't precise enough yet. Move near a window or outside, then " +
     'try again.',
@@ -168,7 +169,7 @@ export function CaptureSection(props: {
         } else if (taken.kind === 'DENIED') {
           setMessage({ text: MESSAGES.denied, action: 'settings' });
         } else {
-          setMessage({ text: MESSAGES.servicesOff, action: 'settings' });
+          setMessage({ text: MESSAGES.servicesOff, action: 'location' });
         }
         return;
       }
@@ -271,6 +272,9 @@ export function CaptureSection(props: {
         ) : null}
         {message?.action === 'settings' ? (
           <Button label="Open Settings" secondary onPress={() => void Linking.openSettings()} />
+        ) : null}
+        {message?.action === 'location' ? (
+          <Button label="Turn on Location" secondary onPress={() => void openLocationSettings()} />
         ) : null}
         {message?.action === 'missions' ? (
           <Button label="Back to My missions" secondary onPress={props.onMissions} />

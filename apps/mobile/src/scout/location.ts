@@ -2,6 +2,7 @@
 // only and sent nowhere but the discovery query.
 
 import * as Location from 'expo-location';
+import { Linking } from 'react-native';
 import { formatCoordinate } from '@hackathon/shared';
 
 import type { Point } from './views';
@@ -39,6 +40,13 @@ export async function currentPosition(): Promise<PositionResult> {
     }
     return { ok: false, kind: 'NO_FIX', detail: String(error) };
   }
+}
+
+/** D167: the phone-wide Location switch, not the app's permission page. */
+export function openLocationSettings(): Promise<void> {
+  return Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS').catch(() =>
+    Linking.openSettings(),
+  );
 }
 
 function positionOf(latitude: number, longitude: number): PositionResult {

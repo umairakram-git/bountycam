@@ -2,11 +2,11 @@
 // filled in from the public view (GET /bounties/:id) for its evidence count and
 // time limit; a card whose view fails still shows title, reward and distance.
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import { AppState, Linking, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { apiGet } from '../api/client';
 import { DISCOVERY_LIMIT, DISCOVERY_RADIUS_M } from '../config';
-import { aboutKm, currentPosition } from '../scout/location';
+import { aboutKm, currentPosition, openLocationSettings } from '../scout/location';
 import {
   asPublicBounty,
   asSummaries,
@@ -49,6 +49,7 @@ export function FindScreen(props: {
   const [position, setPosition] = useState<Point | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [denied, setDenied] = useState(false);
+  const [servicesOff, setServicesOff] = useState(false);
   const [loading, setLoading] = useState(false);
   const { token } = props;
 
@@ -56,6 +57,7 @@ export function FindScreen(props: {
     setLoading(true);
     setNotice(undefined);
     setDenied(false);
+    setServicesOff(false);
     setItems(undefined);
     setExtras({});
     try {
@@ -68,6 +70,7 @@ export function FindScreen(props: {
           );
         } else if (fix.kind === 'SERVICES_OFF') {
           setDenied(true);
+          setServicesOff(true);
           setNotice('Location is turned off on this phone. Turn it on to find bounties near you.');
         } else {
           setNotice("Couldn't get your location. Check that Location is on, then tap Refresh.");
@@ -110,6 +113,16 @@ export function FindScreen(props: {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Back from the Location switch: try again without a tap on Refresh. Only for
+  // Location off, where no permission dialog can fire and re-trigger this.
+  useEffect(() => {
+    if (!servicesOff) return undefined;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void load();
+    });
+    return () => sub.remove();
+  }, [servicesOff, load]);
 
   const total = items === undefined ? undefined : totalReward(items);
   return (
@@ -167,7 +180,11 @@ export function FindScreen(props: {
       </ScrollView>
       {denied ? (
         <View style={styles.buttons}>
-          <Button label="Open Settings" onPress={() => void Linking.openSettings()} />
+          {servicesOff ? (
+            <Button label="Turn on Location" onPress={() => void openLocationSettings()} />
+          ) : (
+            <Button label="Open Settings" onPress={() => void Linking.openSettings()} />
+          )}
         </View>
       ) : null}
     </View>
