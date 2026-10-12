@@ -16,8 +16,8 @@ real money moves.**
 |---|---|
 | Website | https://bountycam.app |
 | API | https://api.bountycam.app (live, devnet) |
-| APK | [v1.0.2 release](https://github.com/umairakram-git/bountycam/releases/tag/v1.0.2) (`bountycam-1.0.2.apk`, package `app.bountycam`) |
-| dApp Store | v1.0.2 submitted, in review |
+| APK | [v1.0.3 release](https://github.com/umairakram-git/bountycam/releases/tag/v1.0.3) (`bountycam-1.0.3.apk`, package `app.bountycam`) |
+| dApp Store | v1.0.3 submitted, in review (adds in-app test funds and clearer Location handling, from the v1.0.2 review) |
 | Demo video | https://youtu.be/aFJEaaxlAPQ (2:58, two real phones) |
 | Escrow program (devnet) | [`6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS`](https://explorer.solana.com/address/6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS?cluster=devnet) |
 | Test USDC mint (devnet) | [`ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR`](https://explorer.solana.com/address/ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR?cluster=devnet) |
@@ -28,15 +28,16 @@ real money moves.**
 1. Install the APK from Releases on an Android phone (Seeker or any Android 7+), allowing
    installs from your browser.
 2. Have a Solana wallet app that supports **Mobile Wallet Adapter** (Seed Vault Wallet on Seeker,
-   Phantom or Solflare), set to **devnet**, with a little devnet SOL from
-   https://faucet.solana.com.
-3. Open BountyCam and **Sign in with wallet** (Sign-In With Solana through MWA).
+   Phantom or Solflare), set to **devnet**.
+3. Open BountyCam and **Sign in with wallet** (Sign-In With Solana through MWA), then tap
+   **Get test USDC and SOL**: the app sends 20 test USDC and 0.02 devnet SOL to your wallet,
+   once a day.
 4. **As a Scout:** *Find bounties* lists funded bounties within 50 km of you. Accept one (your
    wallet signs), go within the capture radius, capture the requested photos and submit. You
    need only devnet SOL.
-5. **As a requester:** *Create a bounty* and *Fund* it. Funding needs BountyCam's **test USDC**
-   (mint `ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR`), which we mint on request: email
-   support@bountycam.app with your devnet wallet address.
+5. **As a requester:** *Create a bounty* at any place you choose and *Fund* it with the test
+   USDC from step 3 (mint `ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR`). If the faucet is
+   used up for the day, email support@bountycam.app with your devnet wallet address.
 
 The full loop needs two wallets, ideally on two phones: one requests, one scouts. The demo video
 shows it end to end on a Seeker (requester) and a Samsung A30 (Scout).

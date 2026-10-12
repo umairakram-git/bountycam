@@ -119,6 +119,9 @@ v1.0.0: versionCode 1, 90.98 MB, sha256
 `8f6d6cfac27a74af845699ded040b997fe1af497905370fc1529000abd4b7417`. The size is four processor
 architectures; an arm64-only build would be about a third of it (BACKLOG).
 
+v1.0.3: versionCode 4, sha256
+`8366f95827437621c056088d550fc57b6f661a4184ab672df6c5db1eb444a079`.
+
 ## 11. The devnet faucet (D167)
 
 Off until `FAUCET_KEY_PATH` is set. Once, on the laptop, from the repo root:
