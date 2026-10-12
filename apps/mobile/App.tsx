@@ -102,6 +102,7 @@ export default function App() {
           append(
             'signed in as ' + result.user.wallet_address + '. Token received and not logged.',
           );
+          setTestFundsNotice(undefined);
           setSession({ token: result.token, user: result.user });
           setScreen('home');
         } else {
@@ -495,6 +496,7 @@ export default function App() {
           onPress={() => {
             provider.disconnect();
             setSession(undefined);
+            setTestFundsNotice(undefined);
             setLines([]);
             setScreen('signin');
           }}
