@@ -14,6 +14,7 @@ import { registerEvidenceRoutes } from "./evidence/routes.ts";
 import type { EvidenceStore } from "./evidence/store.ts";
 import type { SettlementReader } from "./chain/rpc.ts";
 import { registerSettlementRoutes } from "./settlement/routes.ts";
+import { registerFaucetRoutes, type FaucetDeps } from "./faucet/routes.ts";
 
 export interface AppDeps {
   config: Config;
@@ -27,6 +28,8 @@ export interface AppDeps {
   evidenceStore?: EvidenceStore;
   // POLICY.md section 20.5: the settlement routes register only with this reader.
   settlementChain?: SettlementReader;
+  // D167: the devnet faucet registers only when configured.
+  faucet?: FaucetDeps;
   // A stream lets a test capture log output and scan it (POLICY.md test 10);
   // Fastify passes the object to pino unchanged.
   logger?: boolean | { level: string; stream: { write: (msg: string) => void } };
@@ -67,6 +70,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   registerAuthRoutes(app, deps);
   registerBountyRoutes(app, deps);
+  if (deps.faucet !== undefined) {
+    registerFaucetRoutes(app, {
+      pool: deps.pool,
+      config: deps.config,
+      clock: deps.clock,
+      ...deps.faucet,
+    });
+  }
   if (deps.eligibility !== undefined) {
     registerVoucherRoutes(app, { ...deps, eligibility: deps.eligibility });
     // POLICY.md 15.4: the report endpoint shares the voucher's chain reader.

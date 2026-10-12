@@ -3235,3 +3235,36 @@ Record. Sydney times (AEDT).
 - **Store.** Listing as `ops/LISTING.md`; app collection minted (about 0.0176 SOL from the
   publisher wallet); v1.0.0 submitted and in review. The APK went to the portal's storage; no
   further SOL was spent.
+
+
+**D167 — A devnet faucet in the app; D122 rule 1 reversed (Umair, 12 October).**
+
+The dApp Store's second review of v1.0.2 (TXN-001, PER-001) found that a reviewer cannot fund a
+bounty: a new wallet holds no test USDC, so the courtesy balance check stops before the wallet
+opens and no transaction reaches simulation; and location lookups failed on the review device.
+
+Ruling, product (Umair): one button, **Get test USDC and SOL**, on Home and on the funding
+screen when the balance check fails. It sends test USDC and devnet SOL to the signed-in
+wallet. This reverses D122 rule 1 (test funds only from a script run on request).
+
+Technical calls, the architect's:
+
+1. **Keys.** The upgrade authority stays offline. A one-time script on the laptop
+   (`apps/api/scripts/faucet-authority.mjs`) hands the test mint's authority to a new faucet
+   key; the server holds that key, which can mint worthless test USDC and do nothing else.
+   The relayer pays the fee and sends the SOL.
+2. **Endpoint.** `POST /faucet`, authenticated: 20 test USDC and 0.02 devnet SOL per grant,
+   one grant per user per 24 hours, at most 200 grants a day across all users; each grant row
+   is written under a per-user advisory lock before anything is sent, so a double tap sends
+   once. A send that fails, or a transaction that fails on chain, frees the cooldown; an
+   unconfirmed one keeps it (202). Migration 16, `faucet_grants`.
+3. **Devnet only.** The loader refuses any cluster but devnet and any RPC URL naming
+   mainnet; at startup the API checks on chain that the faucet key is the mint's authority
+   and otherwise leaves the faucet off, logging why. Off entirely without `FAUCET_KEY_PATH`.
+4. **Location (PER-001).** Discovery waits 30 seconds for a fix, then uses the phone's last
+   known position (it needs only the area); a phone with Location off is told so; an empty
+   list says that BountyCam is piloting in Sydney and that a bounty can be created anywhere.
+5. **Version.** v1.0.3, versionCode 4.
+
+Tests: `apps/api/test/faucet.test.ts`, 13.
+

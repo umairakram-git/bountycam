@@ -66,8 +66,11 @@ export function FindScreen(props: {
           setNotice(
             'BountyCam needs your location to find bounties near you. Open Settings to allow it.',
           );
+        } else if (fix.kind === 'SERVICES_OFF') {
+          setDenied(true);
+          setNotice('Location is turned off on this phone. Turn it on to find bounties near you.');
         } else {
-          setNotice("Couldn't find your location. Try again.");
+          setNotice("Couldn't get your location. Check that Location is on, then tap Refresh.");
         }
         return;
       }
@@ -121,7 +124,11 @@ export function FindScreen(props: {
         <Text style={styles.muted}>Finding your location…</Text>
       ) : null}
       {items !== undefined && items.length === 0 ? (
-        <Text style={styles.muted}>No bounties near you right now. Tap Refresh to check again.</Text>
+        <Text style={styles.muted}>
+          {'No bounties within ' + String(DISCOVERY_RADIUS_M / 1000) + ' km of you right now. ' +
+            'BountyCam is piloting in Sydney. You can create a bounty at any place you choose, ' +
+            'or tap Refresh to check again.'}
+        </Text>
       ) : null}
       {items !== undefined && items.length > 0 ? (
         <Text style={styles.muted}>

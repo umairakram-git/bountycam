@@ -10,7 +10,13 @@ import {
   type EligibilityConfig,
 } from "./chain/config.ts";
 import { resolveDeployment, type Deployment } from "./chain/deployment.ts";
-import { jsonRpcChainReader, jsonRpcSettlementReader } from "./chain/rpc.ts";
+import {
+  jsonRpcChainReader,
+  jsonRpcChainWriter,
+  jsonRpcSettlementReader,
+} from "./chain/rpc.ts";
+import { bytesEqual } from "./chain/config.ts";
+import { loadFaucetConfig, mintAuthority, type FaucetConfig } from "./faucet/config.ts";
 import { eligibilitySigner } from "./chain/signer.ts";
 import { assertMainnet, heliusSeekerCheck } from "./eligibility/seeker.ts";
 import { SWEEP_INTERVAL_MS, startReservationSweeper } from "./eligibility/sweeper.ts";
@@ -82,6 +88,29 @@ console.log(
     : `evidence store: ${storeConfig.endpoint} bucket ${storeConfig.bucket}`,
 );
 
+// D167: the devnet faucet, when FAUCET_KEY_PATH is set. A misconfiguration stops the
+// process; a faucet key that is not the mint's authority leaves the faucet off and logs
+// why, so the rest of the API still starts.
+let faucet: FaucetConfig | null;
+try {
+  faucet = loadFaucetConfig(process.env);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+if (faucet !== null) {
+  const mint = await chain.getAccount(faucet.mintAddress).catch(() => null);
+  const authority = mint === null ? null : mintAuthority(mint.data);
+  if (authority === null || !bytesEqual(authority, faucet.faucetPubkey)) {
+    console.error("faucet: off; the faucet key is not the test mint's authority");
+    faucet = null;
+  } else {
+    console.log(`faucet: on, authority ${base58.encode(faucet.faucetPubkey)}`);
+  }
+} else {
+  console.log("faucet: not configured");
+}
+
 const pool = new pg.Pool({ connectionString: process.env["DATABASE_URL"] });
 const app = buildApp({
   config,
@@ -92,6 +121,9 @@ const app = buildApp({
   eligibility: { config: eligibility, deployment, chain, signer, seeker },
   settlementChain: jsonRpcSettlementReader(eligibility.rpcUrl, fetch),
   ...(evidenceStore === undefined ? {} : { evidenceStore }),
+  ...(faucet === null
+    ? {}
+    : { faucet: { faucet, writer: jsonRpcChainWriter(faucet.rpcUrl, fetch) } }),
 });
 
 const port = Number(process.env["PORT"] ?? 3000);

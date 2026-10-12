@@ -118,3 +118,18 @@ The procedure that produced v1.0.0, from the repo root on the laptop:
 v1.0.0: versionCode 1, 90.98 MB, sha256
 `8f6d6cfac27a74af845699ded040b997fe1af497905370fc1529000abd4b7417`. The size is four processor
 architectures; an arm64-only build would be about a third of it (BACKLOG).
+
+## 11. The devnet faucet (D167)
+
+Off until `FAUCET_KEY_PATH` is set. Once, on the laptop, from the repo root:
+
+1. `node apps/api/scripts/faucet-authority.mjs` — hands the test mint's authority from the
+   upgrade authority to a new key, `~/bountycam-keys/faucet.json` (mode 600), after one
+   confirmation. Back the file up offline with the other keys. Running it again only reports.
+2. Add `FAUCET_KEY_PATH=/Users/<you>/bountycam-keys/faucet.json` to `~/bountycam-env/api.env`;
+   `deploy.sh` stages it under `/keys` like every other `*_PATH`.
+3. Keep the relayer funded: each grant sends 0.02 devnet SOL from it, plus fees. Check its
+   balance on the explorer and top it up from https://faucet.solana.com when low.
+4. Deploy. The API logs `faucet: on, authority <key>`; `faucet: off; ...` names the reason.
+
+Manual minting for a tester, when needed, now uses the faucet key, not the upgrade authority.

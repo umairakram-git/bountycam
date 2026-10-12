@@ -17,6 +17,7 @@ import {
 } from './src/create/createBounty';
 import { uuidV4 } from './src/create/uuid';
 import { fundBounty, type FundOutcome } from './src/funding/fund';
+import { requestTestFunds } from './src/funding/faucet';
 import { CreateScreen } from './src/screens/CreateScreen';
 import { FundingScreen } from './src/screens/FundingScreen';
 import { MyBountiesScreen } from './src/screens/MyBountiesScreen';
@@ -68,6 +69,9 @@ export default function App() {
   const [lines, setLines] = useState<readonly string[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
+  // D167: the faucet's last answer, shown on Home and on the funding screen.
+  const [testFundsNotice, setTestFundsNotice] = useState<string | undefined>(undefined);
+  const [testFundsBusy, setTestFundsBusy] = useState(false);
   const [bounty, setBounty] = useState<VerifiedBounty | undefined>(undefined);
   const [resumed, setResumed] = useState(false);
   const [outcome, setOutcome] = useState<FundOutcome | undefined>(undefined);
@@ -169,6 +173,7 @@ export default function App() {
   const onFund = useCallback(() => {
     if (session === undefined || bounty === undefined) return;
     setOutcome(undefined);
+    setTestFundsNotice(undefined);
     setLines(['=== funding ' + bounty.id + ' ' + new Date().toISOString() + ' ===']);
     setScreen('funding');
     setBusy(true);
@@ -183,6 +188,19 @@ export default function App() {
       })
       .finally(() => setBusy(false));
   }, [append, bounty, provider, session]);
+
+  const onGetTestFunds = useCallback(() => {
+    if (session === undefined || testFundsBusy) return;
+    setTestFundsBusy(true);
+    setTestFundsNotice(undefined);
+    requestTestFunds(session.token)
+      .then((result) => {
+        append('faucet: ' + (result.ok ? 'sent' : 'refused') +
+          (result.signature === undefined ? '' : ' ' + result.signature));
+        setTestFundsNotice(result.message);
+      })
+      .finally(() => setTestFundsBusy(false));
+  }, [append, session, testFundsBusy]);
 
   // DISCOVERY.md 3.4: nothing is shown unless the policy hashes as expected.
   const showMission = useCallback(
@@ -343,6 +361,9 @@ export default function App() {
         outcome={outcome}
         onFundAgain={onFund}
         onDone={() => setScreen('home')}
+        onGetTestFunds={onGetTestFunds}
+        testFundsBusy={testFundsBusy}
+        testFundsNotice={testFundsNotice}
       />
     );
   }
@@ -448,6 +469,9 @@ export default function App() {
         {'Ask the real world. · Signed in ' + shortWallet(session.user.wallet_address)}
       </Text>
       {message === undefined ? null : <Text style={styles.notice}>{message}</Text>}
+      {testFundsNotice === undefined ? null : (
+        <Text style={styles.notice}>{testFundsNotice}</Text>
+      )}
       <View style={styles.buttons}>
         <Button
           label="Create a bounty"
@@ -459,6 +483,12 @@ export default function App() {
         <Button label="My bounties" secondary onPress={() => setScreen('mine')} />
         <Button label="Find bounties" onPress={() => setScreen('find')} />
         <Button label="My missions" secondary onPress={() => setScreen('missions')} />
+        <Button
+          label={testFundsBusy ? 'Sending test funds…' : 'Get test USDC and SOL'}
+          secondary
+          disabled={testFundsBusy}
+          onPress={onGetTestFunds}
+        />
         <Button
           label="Sign out"
           secondary

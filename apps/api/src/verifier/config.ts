@@ -55,7 +55,10 @@ function positiveInt(
 }
 
 /** A Solana keypair file: a JSON array of 64 bytes, seed then public key. */
-function readKeypair(path: string, name: string): { seed: Uint8Array; pubkey: Uint8Array } {
+export function readKeypair(
+  path: string,
+  name: string,
+): { seed: Uint8Array; pubkey: Uint8Array } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, "utf8"));

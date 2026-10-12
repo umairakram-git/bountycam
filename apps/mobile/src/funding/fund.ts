@@ -40,7 +40,13 @@ export type FundOutcome =
   /** 200 from the report: AVAILABLE with its program_account. */
   | { readonly kind: 'FUNDED'; readonly signature: string | undefined; readonly view: unknown }
   /** Stopped before the wallet opened. Nothing was sent. */
-  | { readonly kind: 'NOT_SENT'; readonly message: string; readonly detail?: string }
+  | {
+      readonly kind: 'NOT_SENT';
+      readonly message: string;
+      readonly detail?: string;
+      /** D167: the wallet lacks devnet SOL or test USDC; the faucet can help. */
+      readonly needsTestFunds?: true;
+    }
   /** NOT_FUNDED at the last attempt after the wallet returned a signature. */
   | { readonly kind: 'PENDING'; readonly signature: string }
   /** NOT_FUNDED at the last attempt after the wallet reported failure. */
@@ -156,7 +162,11 @@ export async function fundBounty(
     const lamports = await connection.getBalance(requester);
     log('SOL balance: ' + String(lamports) + ' lamports');
     if (lamports < MIN_LAMPORTS_FOR_FUNDING) {
-      return { kind: 'NOT_SENT', message: 'This wallet needs a little devnet SOL.' };
+      return {
+        kind: 'NOT_SENT',
+        message: 'This wallet needs a little devnet SOL for the network fee.',
+        needsTestFunds: true,
+      };
     }
     let held = 0n;
     try {
@@ -170,6 +180,7 @@ export async function fundBounty(
       return {
         kind: 'NOT_SENT',
         message: 'This wallet needs at least ' + reward + ' test USDC.',
+        needsTestFunds: true,
       };
     }
   } catch (error: unknown) {

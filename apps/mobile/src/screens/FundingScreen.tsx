@@ -26,19 +26,47 @@ export function FundingScreen(props: {
   readonly outcome: FundOutcome | undefined;
   readonly onFundAgain: () => void;
   readonly onDone: () => void;
+  /** D167: offered when the wallet lacks devnet SOL or test USDC. */
+  readonly onGetTestFunds: () => void;
+  readonly testFundsBusy: boolean;
+  readonly testFundsNotice: string | undefined;
 }): ReactNode {
   const running = props.outcome === undefined;
   const again = props.outcome !== undefined &&
     (props.outcome.kind === 'NOT_FUNDED' || props.outcome.kind === 'NOT_SENT');
+  const needsFunds = props.outcome !== undefined && props.outcome.kind === 'NOT_SENT' &&
+    props.outcome.needsTestFunds === true;
   return (
     <View style={styles.screen}>
       <Text style={styles.title}>{running ? 'Funding…' : 'Funding'}</Text>
       {props.outcome === undefined ? null : (
         <Text style={styles.notice}>{describeOutcome(props.outcome)}</Text>
       )}
+      {needsFunds ? (
+        <Text style={styles.muted}>
+          {'BountyCam runs on Solana devnet. Get free test USDC and devnet SOL for this wallet, then fund again.'}
+        </Text>
+      ) : null}
+      {props.testFundsNotice === undefined ? null : (
+        <Text style={styles.notice}>{props.testFundsNotice}</Text>
+      )}
       <TechnicalDetails lines={props.lines} />
       <View style={styles.buttons}>
-        {again ? <Button label="Fund again" onPress={props.onFundAgain} /> : null}
+        {needsFunds ? (
+          <Button
+            label={props.testFundsBusy ? 'Sending test funds…' : 'Get test USDC and SOL'}
+            disabled={props.testFundsBusy}
+            onPress={props.onGetTestFunds}
+          />
+        ) : null}
+        {again ? (
+          <Button
+            label="Fund again"
+            secondary={needsFunds}
+            disabled={props.testFundsBusy}
+            onPress={props.onFundAgain}
+          />
+        ) : null}
         <Button label="Done" secondary disabled={running} onPress={props.onDone} />
       </View>
     </View>
