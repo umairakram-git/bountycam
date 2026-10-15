@@ -122,6 +122,9 @@ architectures; an arm64-only build would be about a third of it (BACKLOG).
 v1.0.3: versionCode 4, sha256
 `8366f95827437621c056088d550fc57b6f661a4184ab672df6c5db1eb444a079`.
 
+v1.0.4: versionCode 5, the same code as v1.0.3 (the store refuses a repeated versionCode),
+sha256 `0ce0feb1bc999f5952b897ea8519a99cb8865fa1d108f29deeb194ac33d053c1`.
+
 ## 11. The devnet faucet (D167)
 
 Off until `FAUCET_KEY_PATH` is set. Once, on the laptop, from the repo root:
