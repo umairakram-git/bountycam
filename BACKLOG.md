@@ -1,6 +1,6 @@
 # BountyCam — Backlog
 
-**As at:** 21 September 2026 · 17 days to deadline · voucher endpoint built, Seeker check next
+**As at:** 25 October 2026 · hackathon submitted · dApp Store v1.0.5 in review
 
 ---
 
@@ -939,6 +939,33 @@ open.
 - **The terms and privacy pages are not legal advice** — enough for a devnet test release; real
   money needs a lawyer and an identifiable operator.
 - **Single server, images not pinned to digests** (DEPLOY.md section 9).
+
+## Session 24 (7–25 October)
+
+**Closed.** S3 (demo video, deck, writeup, landing page video) and the hackathon submission;
+store review points PKG-007, PER-001 (twice), TXN-001 and LEG-001, the publisher website,
+changed by support to bountycam.app on 25 October (D167, D168).
+
+**New.**
+
+- **My bounties says AVAILABLE while a Scout holds the bounty.** The requester cannot tell it
+  was accepted. Show "Accepted, in progress" from the active assignment.
+- **A Scout cannot give a bounty back.** Accepting reserves it until the capture deadline, and
+  Find hides it meanwhile. A "Give up" that ends the reservation early.
+- **Seeker wallet sign-in timeout.** On 25 October the Seeker's Seed Vault Wallet showed
+  "Failed to update balances" and BountyCam's sign-in failed with an MWA `authorize`
+  timeout; the A30 signed in at once. The wallet side, not ours; if it recurs, a friendlier
+  message than the raw error ("The wallet didn't respond. Open it, then try again").
+- **After store approval:** README dApp Store row, the website's "Get it" line, deck slide 7.
+- **The GitHub profile README** (`umairakram-git/umairakram-git`) stays; update its "(in
+  review)" line on approval.
+- **Faucet capacity.** 200 grants a day at 0.02 SOL is up to 4 SOL a day against a 4.5 SOL
+  relayer; a balance alert, or a lower SOL grant, before any wider launch.
+- **DMARC.** Cloudflare recommends a DMARC record for `bountycam.app`; start with `p=none`
+  and a reporting address so the Gmail send-as path is not blocked.
+- **`docs/business-model/model.py` docstring** says "slide 14"; the deck slide is 15.
+- Still open from Session 23: arm64-only APK; the app identity URI `bountycam.invalid`; a
+  scripted website deploy; legal review before real money; image digests.
 
 ---
 

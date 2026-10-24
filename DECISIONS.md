@@ -3268,3 +3268,25 @@ Technical calls, the architect's:
 
 Tests: `apps/api/test/faucet.test.ts`, 13.
 
+**D168 — Store review rounds three and four: account-scoped notices, the Location switch, the
+version bump, the publisher page, the site video (Umair and the architect, 12–25 October).**
+
+1. **The faucet notice is cleared at sign-in and sign-out** (architect). Found on the phones:
+   after switching wallets, Home showed the previous wallet's "already sent today". Any
+   per-account message on Home follows the same rule.
+2. **"Turn on Location"** (architect). When the phone's Location is off, Find, Capture and
+   Create say so and the button opens Android's Location settings
+   (`android.settings.LOCATION_SOURCE_SETTINGS`, falling back to the app's settings); Find
+   reloads by itself on return, only in that case, so no permission dialog can loop it. "Open
+   Settings" stays for a refused permission.
+3. **Resubmission bumps versionCode with no code change** (architect). The portal refuses a
+   versionCode it has seen, rejected or not: v1.0.4 (versionCode 5) and v1.0.5 (versionCode 6)
+   are v1.0.3's code.
+4. **The publisher website** (Umair). Set at verification to the GitHub profile, which failed
+   review twice (LEG-001) — the profile README added on 16 October did not change that. A
+   Discord ticket (Publishing Portal Issue, 25 October) had support set it to
+   `https://bountycam.app/`. When a second app ships, a publisher page listing the apps.
+5. **The demo video on the website** (Umair asked; the architect chose the form). A
+   click-to-play card under "How it works": nothing loads from YouTube until play, then
+   `youtube-nocookie.com` plays in place. The privacy policy says so (updated 16 October).
+

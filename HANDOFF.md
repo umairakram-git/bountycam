@@ -1,6 +1,6 @@
 # BountyCam — Handoff
 
-**Date:** 6 October 2026
+**Date:** 25 October 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
 spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification and build;
 Session 10; Session 11 escrow initialisation; Session 12 mobile sign-in; Session 13
@@ -9,14 +9,19 @@ Session 17 P1 — create and fund from the device, the funding projection; Sessi
 discovery, accept from the device, the acceptance projection; Session 19 P3 — the capture nonce;
 Session 20 P4 — evidence capture, upload and signed submission; Session 21 P5 — the verifier
 and the attestation; Session 22 P6 — review, approve, reject, dispute and settlement;
-Session 23 S0 — public backend, release build, dApp Store submission (in review)
-**Next session:** S3 — demo script, seeded demo bounties, pitch video, presentation — while the
-store review runs; then S4. Umair's order after P6 is S0 then S3 (D165).
+Session 23 S0 — public backend, release build, dApp Store submission; Session 24 — S3,
+hackathon submission, store reviews to v1.0.5
+**Status:** CLOCK IN hackathon **submitted** 12 October (reference F433A4AE). dApp Store:
+**v1.0.5 (versionCode 6) submitted 25 October**, awaiting review — the fifth submission.
+Every review point is fixed; the last (LEG-001, publisher website) by Solana Mobile support
+setting the publisher website to `https://bountycam.app` (Session 24).
+**Next session:** act on the v1.0.5 review result (Session 24, "Next actions"); then the
+post-hackathon plan (BACKLOG.md "Remaining plan").
 **Live:** `https://api.bountycam.app`, `https://store.bountycam.app`, `https://bountycam.app`;
 the server is `ubuntu@51.161.153.97` (key login); redeploy with `ops/deploy/deploy.sh`.
-**Deadline:** 8 October 2026 (2 days remaining)
+**Deadline:** the hackathon deadline (13 October) has passed; no deadline is open.
 
-**Repo:** https://github.com/umairakram-git/bountycam (private)
+**Repo:** https://github.com/umairakram-git/bountycam (public)
 **Local path:** `/Users/umairakram/Developer/hackathon202609`
 
 ---
@@ -1815,6 +1820,138 @@ the record.
 
 **Still open.** BACKLOG.md's Session 23 section.
 
+## Session 24 — S3, hackathon submission, dApp Store reviews to v1.0.5 (7–25 October)
+
+Commits, in order: `e68543a` README for judges; `1c2e366` v1.0.1 UX pass; `6a57130` v1.0.2
+(store icon and permissions); `cb655f2` verify the demo on chain, trust model (`ops/tools/
+txproof.py`); `0bf7fbf` AUDIT-RESPONSE.md; `4789b28`, `441f393` the business model
+(`docs/business-model/model.py`); `a6ef51b` D167 devnet faucet and v1.0.3; `e24f156` clear the
+test-funds notice on account change; `0cce331` Turn on Location; `8129c99` docs for v1.0.3;
+`38a69ae` v1.0.4 version bump; `cc84fae` docs for v1.0.4; `3f86095` website demo video;
+`0d672a6` v1.0.5 version bump; then this records commit (D168, README and DEPLOY for v1.0.5).
+
+**What landed.**
+
+- **Hackathon (S3).** Demo video (2:58, two real phones, https://youtu.be/aFJEaaxlAPQ), 17-slide
+  deck, writeup, README for judges, on-chain proof of the demo (`ops/tools/txproof.py`), the
+  response to the Radiants advisory audit, the five-year business model. Submitted 12 October,
+  reference F433A4AE; the event's AI coach scored the final draft 84/100.
+- **The devnet faucet (D167).** `POST /faucet` on the server, faucet key
+  `7hzH9VDTMDgCt5KHDUXZ9iuL241Rrs2GnRT64uRYdi8d` holds the test mint's authority (handover
+  transaction `3Qm2BiQK…`); "Get test USDC and SOL" on Home and on the funding screen.
+- **Store fixes after review** (D168): the leftover faucet message cleared on account change;
+  "Turn on Location" opens Android's Location switch; the version bump for resubmission.
+- **Website.** The demo video under "How it works" on `bountycam.app`, click to play; a
+  privacy-policy line for it.
+- **Publisher website.** Support changed it to `https://bountycam.app/` (ticket through
+  Discord, 25 October). A GitHub profile README (repo `umairakram-git/umairakram-git`) was
+  tried first and did not satisfy review.
+
+**The store reviews, in order.**
+
+| Version | Result | Fix |
+|---|---|---|
+| v1.0.0 (vc 1) | rejected: store icon (PKG-007), permissions (PER-001) | v1.0.2 |
+| v1.0.2 (vc 3) | rejected: TXN-001 a new wallet cannot fund; PER-001 location lookups failed | v1.0.3, D167 |
+| v1.0.3 (vc 4) | rejected 16 Oct: LEG-001 publisher website (a GitHub profile) | profile README; v1.0.4 |
+| v1.0.4 (vc 5) | rejected 17 Oct: LEG-001 again | support set the website to bountycam.app; v1.0.5 |
+| v1.0.5 (vc 6) | submitted 25 October, in review | — |
+
+v1.0.3 was tested on both phones before submission: the faucet from an empty wallet, the
+24-hour refusal, funding from the empty wallet (the wallet opens), Location off, a fresh sign-in
+showing no leftover message, and the full loop to `PAID` with the Scout's balance read from the
+chain (20 from the faucet plus the 1 USDC payout, no fee). v1.0.4 and v1.0.5 are the same code;
+v1.0.5 was installed on both phones and signed in on the A30 (25 October).
+
+**Lessons — read before the next release.**
+
+1. **Every store submission needs a new versionCode**, even after a rejection and even with
+   no code change ("A release with version code 4 already exists"). Plan the bump with the fix.
+2. **A version bump is a checklist, not one file.** `app.json` → build → bundle checks → sign →
+   verify → sha256 → install and test → GitHub release → README APK and dApp Store rows →
+   DEPLOY.md fingerprint → portal submission. The v1.0.4 plan missed the README rows until
+   Umair caught it; the full list is in "Release checklist" below.
+3. **Reviewers use a fresh wallet with nothing in it.** Anything that needs funds from outside
+   the app fails review; the app must get a new user to the first transaction on its own.
+4. **Android has two location switches.** The app permission ("Allow while in use") and the
+   phone's Location tile. `Linking.openSettings()` opens only the first; the second needs the
+   `android.settings.LOCATION_SOURCE_SETTINGS` intent (`openLocationSettings()` in
+   `apps/mobile/src/scout/location.ts`).
+5. **The publisher website is set at verification and only support can change it.** It must
+   be a real site about the app or the publisher: a GitHub profile failed twice (LEG-001), even
+   with a profile README. Support changed it to `https://bountycam.app` within hours of a
+   ticket. Set the website right at verification next time.
+6. **The portal has no field for reviewer notes**, and rejection mail comes from a no-reply
+   address. The only channel is Discord: discord.gg/solanamobile → Verify in `#verify-here`
+   (the bot timed out from 12 to 17 October and worked on 25 October) → **Get Role** in
+   `#developer` → in `#dev-answers` the Seeker Dev Wizard buttons; **Publishing Portal Issue**
+   opens a form (issue, what you tried, what happened, portal email, submission ticket #, the
+   release number on the portal's release page). So the app must explain itself in-app.
+   Scam accounts ("Solana Live Support") DM anyone who asks publicly; staff only answer in the
+   ticket.
+7. **Screen state carries across accounts** unless cleared at sign-in and sign-out (the
+   faucet notice). Check any new per-user message for this.
+8. **Find hides a bounty while a Scout holds it.** Testing once looked like a lost bounty: it
+   was reserved by the other phone until its capture deadline. Not a bug; a labelling gap
+   (BACKLOG).
+9. **zsh stops a whole command when a wildcard matches nothing.** The old cache step
+   `rm -rf …/metro-cache …/metro-file-map-*` printed "no matches found" and deleted nothing;
+   the checklist now clears `metro-cache` on its own. "Bundler cache is empty, rebuilding" in
+   the Gradle output confirms it.
+10. **Testing the keystore password:** `keytool -list -keystore ~/bountycam-keys/bountycam-release.p12
+   -storetype PKCS12` before signing; a wrong password fails safely and writes nothing.
+
+**Release checklist** (from repo root unless stated):
+
+1. Bump `version` and `versionCode` in `apps/mobile/app.json` (script), commit, push.
+2. `cd apps/mobile && npx expo prebuild --platform android --clean`;
+   `rm -rf "${TMPDIR%/}"/metro-cache` (alone: see lesson 9);
+   `cd android && EXPO_PUBLIC_API_BASE_URL=https://api.bountycam.app ./gradlew assembleRelease`.
+3. Bundle checks on `assets/index.android.bundle`: `api.bountycam.app` 1, `127.0.0.1:3000` 0, any
+   new UI string at least 1.
+4. Sign with `apksigner` (`--ks ~/bountycam-keys/bountycam-release.p12 --ks-key-alias bountycam`)
+   to `~/bountycam-release/bountycam-<v>.apk`; `apksigner verify --print-certs` shows
+   `cb6d8678…fa38`; `aapt2 dump badging | head -1` shows the new versionCode; `aapt2 dump
+   permissions` shows only location, camera, internet, vibrate, network state.
+5. `shasum -a 256`; install on both phones (`adb -s SM02G4061942168` Seeker,
+   `adb -s RZ8M600KMLD` A30 — the A30 refuses incremental install and falls back, harmless).
+6. Test on the phones, including a fresh empty wallet.
+7. `gh release create v<v> <apk> --target main` with notes, certificate and APK sha256.
+8. README APK and dApp Store rows; DEPLOY.md section 10 fingerprint line; commit, push.
+9. Portal: New Version → APK URL
+   `https://github.com/umairakram-git/bountycam/releases/download/v<v>/bountycam-<v>.apk` →
+   "What's new" → Submit; check the portal shows the new versionCode and `cb6d8678…`.
+
+**Facts worth not rediscovering.**
+
+- Faucet logs: `ssh ubuntu@51.161.153.97 "docker compose --project-directory /opt/bountycam -f
+  /opt/bountycam/src/ops/deploy/compose.yaml logs api | grep -i faucet"`; the startup line reads
+  `faucet: on, authority 7hzH9VDT…`. The response line has no "faucet" in it: grep its `reqId`.
+- Relayer `6Wv1pzq7nizyvrkXuGc91PFK9mbskLRULiwWEpaSaGED` pays faucet SOL and fees: 4.548 SOL on
+  12 October, about 0.02 SOL per grant. Top it up from the devnet faucet when it runs low.
+- A wallet's test-USDC balance from the chain (wallet apps lag or show another account):
+  `curl -s https://api.devnet.solana.com -H 'Content-Type: application/json' -d
+  '{"jsonrpc":"2.0","id":1,"method":"getTokenAccountsByOwner","params":["<WALLET>",{"mint":"ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR"},{"encoding":"jsonParsed"}]}'`
+  — one line, with `<WALLET>` replaced; the balance is `tokenAmount.uiAmountString`.
+- `support@bountycam.app` is Cloudflare Email Routing to Umair's Gmail. Gmail sends as it via
+  `smtp.gmail.com:587` with an app password; SPF is
+  `v=spf1 include:_spf.mx.cloudflare.net include:_spf.google.com ~all`. Cloudflare suggests a
+  DMARC record; not added (BACKLOG).
+- The website is the Cloudflare static Worker `weathered-brook-6939`: Workers & Pages → it →
+  Deployments → upload the `ops/site` folder → Deploy. Preview first with
+  `python3 -m http.server 8000` in `ops/site`.
+- The dApp Store app page: publish.solanamobile.com → BountyCam → Releases. Results arrive by
+  email in 3–5 business days; after 5 with no answer, an "App Review Inquiry" in `#dev-answers`.
+
+**Next actions.**
+
+1. **Wait for the v1.0.5 review** (release `v1.0.5`, APK sha256 `3416bfcd…5c13`). If approved:
+   README dApp Store row to "live" with the store link; the website's "Get it" line; deck slide
+   7. If rejected: read the codes, fix, and follow the release checklist with versionCode 7.
+   After 5 business days with no answer: "App Review Timeline" in `#dev-answers`.
+2. **Post-hackathon** (Umair's call on order): BACKLOG.md "Session 24" items, then the remaining
+   plan toward a mainnet pilot.
+
 ---
 
 ## Working rules
@@ -1867,6 +2004,8 @@ Rewritten 28 September for the script-first workflow adopted in Session 15.
 - Check `tail -c1` before appending to any env file.
 - Never `git stash`. Read a committed file with `git show HEAD:<path>`.
 - Downloads land in `~/Downloads`; scripts remove their own files once they have succeeded.
+- Never paste the contents of any file in `~/bountycam-keys/`; public addresses, signatures and
+  log lines are fine.
 
 **Chain**
 
@@ -1881,3 +2020,5 @@ Rewritten 28 September for the script-first workflow adopted in Session 15.
   compaction loses specification detail.
 - A small edit that will not land after a long reading pass is a signal to end the session, not
   to rephrase it.
+- A store release follows the release checklist in Session 24 end to end, the README rows and
+  the DEPLOY.md fingerprint included.

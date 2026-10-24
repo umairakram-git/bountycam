@@ -16,8 +16,8 @@ real money moves.**
 |---|---|
 | Website | https://bountycam.app |
 | API | https://api.bountycam.app (live, devnet) |
-| APK | [v1.0.4 release](https://github.com/umairakram-git/bountycam/releases/tag/v1.0.4) (`bountycam-1.0.4.apk`, package `app.bountycam`) |
-| dApp Store | v1.0.4 submitted, in review (in-app test funds and clearer Location handling, from the v1.0.2 review) |
+| APK | [v1.0.5 release](https://github.com/umairakram-git/bountycam/releases/tag/v1.0.5) (`bountycam-1.0.5.apk`, package `app.bountycam`) |
+| dApp Store | v1.0.5 submitted, in review (in-app test funds and clearer Location handling, from the v1.0.2 review) |
 | Demo video | https://youtu.be/aFJEaaxlAPQ (2:58, two real phones) |
 | Escrow program (devnet) | [`6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS`](https://explorer.solana.com/address/6c1ouGTmWPhUCnpo5WrcH4R68m3183QpcgKU8TRGEnWS?cluster=devnet) |
 | Test USDC mint (devnet) | [`ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR`](https://explorer.solana.com/address/ADhRyy71DJJ7QWW3jbBNWPsHZqkWdxRdL9Y75JgYBUcR?cluster=devnet) |

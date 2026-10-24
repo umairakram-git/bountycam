@@ -106,7 +106,8 @@ The procedure that produced v1.0.0, from the repo root on the laptop:
    valid to 2054. Every update must be signed with this key.
 2. `cd apps/mobile && npx expo prebuild --platform android --clean` (namespace and applicationId
    `app.bountycam`).
-3. Clear Metro's cache: `rm -rf "${TMPDIR%/}"/metro-cache "${TMPDIR%/}"/metro-file-map-*`.
+3. Clear Metro's cache: `rm -rf "${TMPDIR%/}"/metro-cache` — on its own: in zsh a
+   `metro-file-map-*` that matches nothing cancels the whole command.
 4. `cd apps/mobile/android && EXPO_PUBLIC_API_BASE_URL=https://api.bountycam.app ./gradlew
    assembleRelease` (2 m 54 s on first run; build tools 36.0.0).
 5. Check the bundle: `assets/index.android.bundle` holds `api.bountycam.app` once and
@@ -124,6 +125,9 @@ v1.0.3: versionCode 4, sha256
 
 v1.0.4: versionCode 5, the same code as v1.0.3 (the store refuses a repeated versionCode),
 sha256 `0ce0feb1bc999f5952b897ea8519a99cb8865fa1d108f29deeb194ac33d053c1`.
+
+v1.0.5: versionCode 6, the same code again, after support changed the publisher website,
+sha256 `3416bfcdffe0ac55d2df7ef5a5a999890b51a4911e60a1a08c91b13d48cd5c13`.
 
 ## 11. The devnet faucet (D167)
 
