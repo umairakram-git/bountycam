@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.bountycam",
+      "sha256_cert_fingerprints": [
+        "CB:6D:86:78:D4:85:C9:D1:A8:12:FA:13:8C:F3:91:09:03:3A:4F:85:C4:68:4F:8B:D8:46:3D:4B:6F:04:FA:38"
+      ]
+    }
+  }
+]

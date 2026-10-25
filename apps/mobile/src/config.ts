@@ -9,25 +9,13 @@
 export const API_BASE_URL: string =
   process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:3000';
 
-// AUTH.md 14.2 is an OPEN item: the SIWS spec says the wallet "must determine
-// the domain" when the dapp supplies none, and says nothing about a native app;
-// the MWA spec delegates `sign_in_payload` to SIWS and never states whether a
-// wallet honours a dapp-supplied `domain` or substitutes its own identity host.
-//
-// So this `uri` is chosen to make the answer unambiguous when we read the
-// message back off the device:
-//
-//   - `bountycam.invalid` is a reserved, permanently non-resolving domain
-//     (RFC 6761), so nothing here can accidentally succeed against a real host;
-//   - it is deliberately DIFFERENT from the server's configured SIWS_DOMAIN.
-//
-// The returned message must therefore name its own source. If the `Domain:`
-// line carries SIWS_DOMAIN, the wallet honoured the supplied payload. If it
-// carries this identity host — or if a `URI:` line appears at all — the wallet
-// substituted its identity, and verify answers with DOMAIN_MISMATCH or
-// UNEXPECTED_FIELD (AUTH.md 7). Either outcome is the measurement this session
-// exists to take. A 401 here is data, not a defect.
-export const APP_IDENTITY = { name: 'BountyCam', uri: 'https://bountycam.invalid' };
+// D170: the app's identity is its real site. Wallets show the name, the host and the
+// icon (resolved against `uri`, so https://bountycam.app/icon.png), and may verify the
+// host through https://bountycam.app/.well-known/assetlinks.json, which names this
+// package and its signing certificate (ops/site). The SIWS domain is separate: the
+// wallet echoes whatever the server issues (D106), and the server issues SIWS_DOMAIN.
+// Until v1.0.6 this was the reserved `bountycam.invalid`, chosen for the D106 test.
+export const APP_IDENTITY = { name: 'BountyCam', uri: 'https://bountycam.app', icon: 'icon.png' };
 
 // There are TWO chain values in this flow and they are deliberately different.
 // They must never be unified into one constant:
