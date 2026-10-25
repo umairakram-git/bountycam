@@ -10,6 +10,7 @@ import { PublicKey, Transaction } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 
 import { APP_IDENTITY, MWA_CHAIN } from '../config';
+import { reasonOf } from './reason';
 import type {
   SiwsInput,
   WalletAddress,
@@ -31,6 +32,12 @@ function fail(
   return detail === undefined
     ? { ok: false, kind, message }
     : { ok: false, kind, message, detail };
+}
+
+/** WALLET_ERROR with the reason the wallet gave (D169). */
+function thrown(prefix: string, error: unknown): WalletFailure {
+  return { ok: false, kind: 'WALLET_ERROR', message: prefix + describeThrown(error),
+    reason: reasonOf(error) };
 }
 
 function describeThrown(error: unknown): string {
@@ -111,7 +118,7 @@ export function createMwaWalletProvider(): WalletProvider {
           wallet.authorize({ identity: APP_IDENTITY, chain: MWA_CHAIN }),
         );
       } catch (error: unknown) {
-        return fail('WALLET_ERROR', 'authorize threw: ' + describeThrown(error));
+        return thrown('authorize threw: ', error);
       }
 
       // `noUncheckedIndexedAccess` is on, so this really is possibly undefined.
@@ -170,10 +177,7 @@ export function createMwaWalletProvider(): WalletProvider {
           }),
         );
       } catch (error: unknown) {
-        return fail(
-          'WALLET_ERROR',
-          'authorize with sign_in_payload threw: ' + describeThrown(error),
-        );
+        return thrown('authorize with sign_in_payload threw: ', error);
       }
 
       authToken = result.auth_token;
@@ -232,7 +236,7 @@ export function createMwaWalletProvider(): WalletProvider {
           return fail('ACCOUNT_CHANGED', 'wallet returned a different account; nothing sent',
             'raw base64: ' + error.address);
         }
-        return fail('WALLET_ERROR', 'signAndSendTransactions threw: ' + describeThrown(error));
+        return thrown('signAndSendTransactions threw: ', error);
       }
       const signature = signatures[0];
       if (signature === undefined) {
@@ -273,7 +277,7 @@ export function createMwaWalletProvider(): WalletProvider {
           return fail('ACCOUNT_CHANGED', 'wallet returned a different account; nothing signed',
             'raw base64: ' + error.address);
         }
-        return fail('WALLET_ERROR', 'signMessages threw: ' + describeThrown(error));
+        return thrown('signMessages threw: ', error);
       }
       if (signed === undefined) {
         return fail('NO_SIGNATURE', 'wallet returned no signed payload for the message');

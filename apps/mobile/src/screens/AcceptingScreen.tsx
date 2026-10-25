@@ -12,7 +12,8 @@ export function describeAccept(outcome: AcceptOutcome): string {
     case 'ACCEPTED':
       return 'Accepted.';
     case 'PENDING':
-      return 'Not confirmed yet. It will show in My missions once it lands.';
+      return 'Sent to Solana, but not confirmed yet. Check My missions in a minute. If it is ' +
+        "not there, it didn't go through; you can accept again while the bounty is open.";
     case 'NOT_SENT':
     case 'RETRY':
     case 'HOLD_ENDED':
@@ -37,7 +38,13 @@ export function AcceptingScreen(props: {
   return (
     <View style={styles.screen}>
       <Text style={styles.title}>{running ? 'Accepting…' : 'Accept'}</Text>
-      {text === undefined ? null : <Text style={styles.notice}>{text}</Text>}
+      {text === undefined ? (
+        <Text style={styles.muted}>
+          {'Approve the transaction in your wallet. After that, confirming with Solana can take up to a minute.'}
+        </Text>
+      ) : (
+        <Text style={styles.notice}>{text}</Text>
+      )}
       <TechnicalDetails lines={props.lines} />
       <View style={styles.buttons}>
         {again ? (

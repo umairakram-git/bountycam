@@ -12,7 +12,8 @@ export function describeOutcome(outcome: FundOutcome): string {
     case 'FUNDED':
       return 'Reward secured in escrow. Your bounty is live for Scouts.';
     case 'PENDING':
-      return 'Not confirmed yet. It will show in My bounties once it lands.';
+      return 'Sent to Solana, but not confirmed yet. Check My bounties in a minute. If it is ' +
+        "not funded by then, it didn't go through and the reward is still in your wallet.";
     case 'NOT_FUNDED':
     case 'NOT_SENT':
     case 'MISMATCH':
@@ -39,7 +40,11 @@ export function FundingScreen(props: {
   return (
     <View style={styles.screen}>
       <Text style={styles.title}>{running ? 'Funding…' : 'Funding'}</Text>
-      {props.outcome === undefined ? null : (
+      {props.outcome === undefined ? (
+        <Text style={styles.muted}>
+          {'Approve the transaction in your wallet. After that, confirming with Solana can take up to a minute.'}
+        </Text>
+      ) : (
         <Text style={styles.notice}>{describeOutcome(props.outcome)}</Text>
       )}
       {needsFunds ? (

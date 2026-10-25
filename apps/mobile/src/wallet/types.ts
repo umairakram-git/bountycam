@@ -6,6 +6,8 @@
 // signature here mentions one. Chain-specific encoding stays inside the
 // adapters that implement `WalletProvider`.
 
+import type { WalletReason } from './reason';
+
 /**
  * The SIWS input exactly as `POST /auth/siws/challenge` issued it
  * (AUTH.md 5.1).
@@ -72,6 +74,8 @@ export interface WalletFailure {
   readonly message: string;
   /** Whatever the wallet did return, when that is the evidence. */
   readonly detail?: string;
+  /** For WALLET_ERROR: why the wallet stopped, read from what it threw (D169). */
+  readonly reason?: WalletReason;
 }
 
 export interface WalletAuthorizeSuccess extends WalletAddress {

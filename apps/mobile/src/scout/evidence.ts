@@ -15,6 +15,7 @@ import {
 
 import { apiPost, errorCodeOf } from '../api/client';
 import { DEPLOYMENT_ID } from '../config';
+import { walletFailureText } from '../wallet/messages';
 import type { WalletProvider } from '../wallet/types';
 
 export interface Requirement {
@@ -194,7 +195,7 @@ export function buildManifest(
 
 export type SubmitOutcome =
   | { readonly kind: 'SUBMITTED' }
-  | { readonly kind: 'NOT_SIGNED'; readonly detail: string }
+  | { readonly kind: 'NOT_SIGNED'; readonly detail: string; readonly text: string }
   | { readonly kind: 'NOT_UPLOADED' }
   | { readonly kind: 'EXPIRED' }
   | { readonly kind: 'RELOAD' }
@@ -239,7 +240,14 @@ export async function submitEvidence(
   let signature = signed.get(rootHex);
   if (signature === undefined) {
     const result = await provider.signMessage(evidenceStatement(manifest.header.bounty_id, root));
-    if (!result.ok) return { kind: 'NOT_SIGNED', detail: result.kind + ': ' + result.message };
+    if (!result.ok) {
+      return {
+        kind: 'NOT_SIGNED',
+        detail: result.kind + ': ' + result.message,
+        // D169: what happened and what to do, in place of a fixed line.
+        text: walletFailureText(result, 'SIGN', 'Try again') + ' Your photos are still here.',
+      };
+    }
     signature = '';
     for (const b of result.signature) signature += b.toString(16).padStart(2, '0');
     signed.set(rootHex, signature);

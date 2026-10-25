@@ -5,7 +5,15 @@
 import { Buffer } from 'buffer';
 
 import { API_BASE_URL } from '../config';
+import { walletFailureText } from '../wallet/messages';
 import type { SiwsInput, WalletProvider } from '../wallet/types';
+
+// D169: the screen text for a sign-in that stopped; the technical cause is logged.
+const RETRY = 'Sign in with wallet';
+const UNREACHABLE = "Couldn't reach BountyCam. You're not signed in. Check your internet " +
+  'connection, then tap ' + RETRY + '.';
+const REFUSED = "BountyCam couldn't sign you in. Tap " + RETRY + ' to try again. If it keeps ' +
+  'happening, email support@bountycam.app.';
 
 export interface SiwsUser {
   readonly id: string;
@@ -126,7 +134,8 @@ export async function runSiwsSignIn(
   if (!authorized.ok) {
     log('wallet authorize failed [' + authorized.kind + ']: ' + authorized.message);
     if (authorized.detail !== undefined) log('  wallet returned: ' + authorized.detail);
-    return failure('AUTHORIZE', undefined, undefined, authorized.message);
+    return failure('AUTHORIZE', undefined, undefined,
+      walletFailureText(authorized, 'SIGN_IN', RETRY));
   }
   log('address (base64, as the wallet returned it): ' + authorized.addressBase64);
   log('address (base58, decoded, 32 bytes): ' + authorized.addressBase58);
@@ -146,20 +155,14 @@ export async function runSiwsSignIn(
       JSON.stringify({ address: authorized.addressBase58 }),
     );
   } catch (error: unknown) {
-    const message = 'challenge request failed: ' + describeThrown(error);
-    log(message);
-    return failure('CHALLENGE', undefined, undefined, message);
+    log('challenge request failed: ' + describeThrown(error));
+    return failure('CHALLENGE', undefined, undefined, UNREACHABLE);
   }
 
   if (challenge.status !== 200) {
     const code = errorCodeOf(challenge.body);
     log('challenge HTTP ' + String(challenge.status) + ' error=' + String(code));
-    return failure(
-      'CHALLENGE',
-      challenge.status,
-      code,
-      'challenge returned HTTP ' + String(challenge.status),
-    );
+    return failure('CHALLENGE', challenge.status, code, REFUSED);
   }
 
   // Parsed once, above. `input` below is that parse's own object, and it is the
@@ -168,7 +171,7 @@ export async function runSiwsSignIn(
   if (!isSiwsInput(input)) {
     const message = 'challenge input is missing a required field or it is not a string';
     log(message + '; body was: ' + challenge.raw);
-    return failure('CHALLENGE', challenge.status, undefined, message);
+    return failure('CHALLENGE', challenge.status, undefined, REFUSED);
   }
   log('challenge input the server issued: ' + JSON.stringify(input, null, 2));
 
@@ -177,7 +180,8 @@ export async function runSiwsSignIn(
   if (!signed.ok) {
     log('wallet sign-in failed [' + signed.kind + ']: ' + signed.message);
     if (signed.detail !== undefined) log('  wallet returned: ' + signed.detail);
-    return failure('WALLET_SIGN_IN', undefined, undefined, signed.message);
+    return failure('WALLET_SIGN_IN', undefined, undefined,
+      walletFailureText(signed, 'SIGN_IN', RETRY));
   }
   log('sign_in_result: present');
   log('signed_message (base64): ' + signed.signedMessageBase64);
@@ -209,21 +213,15 @@ export async function runSiwsSignIn(
   try {
     verify = await postJson('/auth/siws/verify', JSON.stringify(verifyBody));
   } catch (error: unknown) {
-    const message = 'verify request failed: ' + describeThrown(error);
-    log(message);
-    return failure('VERIFY', undefined, undefined, message);
+    log('verify request failed: ' + describeThrown(error));
+    return failure('VERIFY', undefined, undefined, UNREACHABLE);
   }
 
   if (verify.status !== 200) {
     const code = errorCodeOf(verify.body);
     log('verify HTTP ' + String(verify.status) + ' error=' + String(code));
     if (code === undefined) log('  body was: ' + verify.raw);
-    return failure(
-      'VERIFY',
-      verify.status,
-      code,
-      'verify returned HTTP ' + String(verify.status),
-    );
+    return failure('VERIFY', verify.status, code, REFUSED);
   }
 
   const token = readProperty(verify.body, 'token');
@@ -240,7 +238,7 @@ export async function runSiwsSignIn(
     const message = 'verify returned 200 with an unexpected body shape';
     // `verify.raw` holds the token on this path, so it is not logged.
     log(message);
-    return failure('VERIFY', verify.status, undefined, message);
+    return failure('VERIFY', verify.status, undefined, REFUSED);
   }
 
   log('verify HTTP 200 — success');

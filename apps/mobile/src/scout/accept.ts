@@ -30,6 +30,7 @@ import {
   MIN_LAMPORTS_FOR_ACCEPT,
   SOLANA_RPC_URL,
 } from '../config';
+import { definitelyNotSent, walletFailureText } from '../wallet/messages';
 import type { WalletProvider } from '../wallet/types';
 import { hexToBytes, type PublicBounty } from './views';
 
@@ -53,6 +54,11 @@ const REPORT_INTERVAL_MS = 2_000;
 const REPORT_GRACE_MS = 60_000;
 const WALLET_FAILED_ATTEMPTS = 3;
 const NOT_SENT_PREPARING = 'Something went wrong preparing this transaction. Nothing was sent.';
+// D169: after the wallet did not send, what happened and what to do.
+const RETRY_UNCONFIRMED = "Your wallet didn't confirm the transaction, and the bounty is not " +
+  'accepted, so no money moved. Tap Accept again.';
+const HOLD_ENDED = 'Your hold on this bounty ended before the acceptance went through, so it is ' +
+  'not accepted and no money moved. It may still be available: tap Try again.';
 
 const VOUCHER_MESSAGES: Readonly<Record<string, string>> = {
   BOUNTY_RESERVED: 'Another Scout is accepting this bounty. Try again in a few minutes.',
@@ -265,6 +271,12 @@ export async function acceptBounty(
   } else {
     log('wallet returned failure [' + sent.kind + ']: ' + sent.message);
     if (sent.detail !== undefined) log('  ' + sent.detail);
+    // D169: a refusal or a closed wallet proves nothing went out; say so now.
+    if (definitelyNotSent(sent)) {
+      return Date.now() < Number(voucher.expiresAt) * 1000
+        ? { kind: 'RETRY', message: walletFailureText(sent, 'SEND', 'Accept again') }
+        : { kind: 'HOLD_ENDED', message: HOLD_ENDED };
+    }
   }
 
   // Step 8: report, whatever step 7 said.
@@ -299,12 +311,12 @@ export async function acceptBounty(
       // Section 3.3: after a wallet failure, Accept is offered again while the
       // voucher is valid, and the hold-ended message once it is not.
       return Date.now() < Number(voucher.expiresAt) * 1000
-        ? { kind: 'RETRY', message: "The wallet didn't send it. You can accept again." }
-        : { kind: 'HOLD_ENDED', message: 'Your hold ended. The bounty may still be available.' };
+        ? { kind: 'RETRY', message: RETRY_UNCONFIRMED }
+        : { kind: 'HOLD_ENDED', message: HOLD_ENDED };
     }
     if (Date.now() >= stopAtMs) break;
     await sleep(REPORT_INTERVAL_MS);
   }
   if (signature !== undefined) return { kind: 'PENDING', signature };
-  return { kind: 'HOLD_ENDED', message: 'Your hold ended. The bounty may still be available.' };
+  return { kind: 'HOLD_ENDED', message: HOLD_ENDED };
 }

@@ -26,6 +26,7 @@ import {
   SETTLEMENT_MINT,
   SOLANA_RPC_URL,
 } from '../config';
+import { definitelyNotSent, walletFailureText } from '../wallet/messages';
 import type { WalletProvider } from '../wallet/types';
 
 export type LogLine = (line: string) => void;
@@ -149,6 +150,7 @@ async function sendAndReport(
   bountyId: string,
   wire: Uint8Array,
   log: LogLine,
+  retry: string,
 ): Promise<SettleOutcome> {
   const sent = await provider.signAndSendTransaction(wire);
   let signature: string | undefined;
@@ -157,6 +159,10 @@ async function sendAndReport(
     log('signature: ' + signature);
   } else {
     log('wallet returned failure [' + sent.kind + ']: ' + sent.message);
+    // D169: a refusal or a closed wallet proves nothing went out; say so now.
+    if (definitelyNotSent(sent)) {
+      return { kind: 'CANCELLED', message: walletFailureText(sent, 'SEND', retry) };
+    }
   }
   for (let attempt = 1; attempt <= REPORT_ATTEMPTS; attempt++) {
     try {
@@ -164,7 +170,11 @@ async function sendAndReport(
       const state = get(result.body, 'state');
       if (result.status === 200 && state !== 'SUBMITTED') return { kind: 'DONE', view: result.body };
       if (result.status === 200 && !sent.ok) {
-        return { kind: 'CANCELLED', message: 'Cancelled. Nothing was sent.' };
+        return {
+          kind: 'CANCELLED',
+          message: "Your wallet didn't confirm the transaction, and the bounty hasn't changed, " +
+            'so no money moved. Tap ' + retry + ' to try again.',
+        };
       }
       if (result.status !== 200 && result.status !== 503) {
         log('report: HTTP ' + String(result.status) + ' ' + String(errorCodeOf(result.body)));
@@ -238,7 +248,7 @@ export async function approveBounty(
     return { kind: 'NOT_SENT', message: PREPARE_FAILED, detail: describeThrown(error) };
   }
   log('approve checked: two instructions, ' + String(wire.length) + ' bytes');
-  return sendAndReport(provider, token, String(get(view, 'id')), wire, log);
+  return sendAndReport(provider, token, String(get(view, 'id')), wire, log, 'Approve');
 }
 
 /** REVIEW.md section 4. `requirementId` is one of the verified policy's requirement ids. */
@@ -284,5 +294,5 @@ export async function rejectBounty(
     return { kind: 'NOT_SENT', message: PREPARE_FAILED, detail: describeThrown(error) };
   }
   log('reject checked: one instruction, ' + String(wire.length) + ' bytes');
-  return sendAndReport(provider, token, String(get(view, 'id')), wire, log);
+  return sendAndReport(provider, token, String(get(view, 'id')), wire, log, 'Reject');
 }

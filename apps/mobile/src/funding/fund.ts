@@ -31,6 +31,7 @@ import {
   SOLANA_RPC_URL,
 } from '../config';
 import { formatUsdc } from '../create/createBounty';
+import { definitelyNotSent, walletFailureText } from '../wallet/messages';
 import type { WalletProvider } from '../wallet/types';
 
 export type LogLine = (line: string) => void;
@@ -258,6 +259,11 @@ export async function fundBounty(
   } else {
     log('wallet returned failure [' + sent.kind + ']: ' + sent.message);
     if (sent.detail !== undefined) log('  ' + sent.detail);
+    // D169: a refusal or a closed wallet proves nothing went out; say so now
+    // rather than after the report's full wait.
+    if (definitelyNotSent(sent)) {
+      return { kind: 'NOT_SENT', message: walletFailureText(sent, 'SEND', 'Fund again') };
+    }
   }
 
   // Step 8: report, whatever step 6 said.
@@ -290,5 +296,10 @@ export async function fundBounty(
     await sleep(REPORT_INTERVAL_MS);
   }
   if (signature !== undefined) return { kind: 'PENDING', signature };
-  return { kind: 'NOT_FUNDED', message: 'Funding did not go through.' };
+  return {
+    kind: 'NOT_FUNDED',
+    message: "Funding didn't go through. Your wallet didn't confirm the transaction, and the " +
+      'bounty is not funded, so the reward is still in your wallet. Tap Fund again; if your ' +
+      'wallet keeps failing, close and reopen it first.',
+  };
 }

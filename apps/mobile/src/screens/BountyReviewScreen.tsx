@@ -107,7 +107,8 @@ export function BountyReviewScreen(props: {
     (result: SettleOutcome) => {
       if (result.kind === 'DONE') setView(result.view);
       else if (result.kind === 'PENDING') {
-        setNotice('Sent. Waiting for the network to confirm; refresh in a moment.');
+        setNotice('Sent to Solana, but not confirmed yet. Refresh in a minute. If nothing has ' +
+          "changed by then, it didn't go through, no money moved, and you can try again.");
       } else setNotice(result.message);
       if (result.kind === 'NOT_SENT' && result.detail !== undefined) log(result.detail);
     },

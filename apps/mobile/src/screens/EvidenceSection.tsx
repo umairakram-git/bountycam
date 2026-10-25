@@ -56,7 +56,6 @@ const TEXT = {
   tooLarge: 'This photo is too large to upload.',
   camera: 'BountyCam needs camera access to take mission photos. Open Settings to allow it.',
   confirm: "Submitting is final. You won't be able to retake photos after this.",
-  notSigned: "Your wallet didn't sign. Nothing was submitted.",
   notUploaded: "Some photos didn't finish uploading. Uploading them again…",
   unreachable: "Couldn't reach BountyCam. Check your connection and try again.",
   missing: 'Capture time has ended and some required photos are missing. Start again to ' +
@@ -275,7 +274,7 @@ export function EvidenceSection(props: {
           await props.onReload();
           return;
         case 'NOT_SIGNED':
-          setMessage({ text: TEXT.notSigned, detail: outcome.detail });
+          setMessage({ text: outcome.text, detail: outcome.detail });
           return;
         case 'NOT_UPLOADED':
           setMessage({ text: TEXT.notUploaded });
