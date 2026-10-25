@@ -56,12 +56,18 @@ function decodeBase58Key(address: string): Uint8Array | null {
   return bytes.length === 32 ? bytes : null;
 }
 
-// RFC 4648 section 4 alphabet with padding; re-encode comparison rejects
-// non-canonical input Buffer.from would silently accept.
-function decodeBase64Strict(text: string): Buffer | null {
-  if (text.length % 4 !== 0 || !BASE64.test(text)) return null;
-  const bytes = Buffer.from(text, "base64");
-  return bytes.toString("base64") === text ? bytes : null;
+// RFC 4648 section 4 alphabet; re-encode comparison rejects non-canonical
+// input Buffer.from would silently accept. D171: the padding may be absent —
+// Seed Vault Wallet returns unpadded base64 when the length needs it (seen when
+// SIWS_DOMAIN became bountycam.app and the message became 331 bytes); the
+// canonical padding is restored before the same strict comparison.
+export function decodeBase64Strict(text: string): Buffer | null {
+  const rem = text.length % 4;
+  if (rem === 1) return null;
+  const padded = rem === 0 ? text : text + "=".repeat(4 - rem);
+  if (!BASE64.test(padded)) return null;
+  const bytes = Buffer.from(padded, "base64");
+  return bytes.toString("base64") === padded ? bytes : null;
 }
 
 export function registerAuthRoutes(

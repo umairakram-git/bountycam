@@ -8,6 +8,7 @@ import { base58 } from "@scure/base";
 import { createSignInMessageText } from "@solana/wallet-standard-util";
 import { SignJWT, jwtVerify, base64url } from "jose";
 import { buildApp } from "../src/app.ts";
+import { decodeBase64Strict } from "../src/auth/routes.ts";
 import { loadCaptureConfig, type Config } from "../src/config.ts";
 import type { Clock } from "../src/clock.ts";
 
@@ -589,4 +590,28 @@ test("38 two concurrent verifies with one nonce: exactly one succeeds", async ()
   assert.deepEqual(statuses, [200, 401]);
   const loser = first.statusCode === 401 ? first : second;
   assert.equal(loser.json().error, "NONCE_CONSUMED");
+});
+
+// --- base64 padding (D171) ---
+
+test("39 unpadded base64 decodes to the same bytes as padded; one stray char is refused", () => {
+  for (const length of [1, 2, 3, 64, 331, 333]) {
+    const bytes = randomBytes(length);
+    const padded = Buffer.from(bytes).toString("base64");
+    const unpadded = padded.replace(/=+$/, "");
+    assert.deepEqual(decodeBase64Strict(padded), Buffer.from(bytes));
+    assert.deepEqual(decodeBase64Strict(unpadded), Buffer.from(bytes));
+  }
+  assert.equal(decodeBase64Strict("QUJD="), null); // wrong padding for the length
+  assert.equal(decodeBase64Strict("QUJDR"), null); // length mod 4 = 1
+  assert.equal(decodeBase64Strict("QR"), null); // non-canonical trailing bits
+});
+
+test("40 round trip with an unpadded signature, as Seed Vault Wallet returns it", async () => {
+  const input = await challengeInput(VECTOR_ADDRESS);
+  const { message, signature } = signMessage(input, VECTOR_SEED);
+  const unpadded = b64(signature).replace(/=+$/, "");
+  assert.notEqual(unpadded, b64(signature));
+  const res = await injectVerify({ signed_message: b64(message), signature: unpadded });
+  assert.equal(res.statusCode, 200);
 });
