@@ -1,6 +1,6 @@
 # BountyCam — Handoff
 
-**Date:** 25 October 2026
+**Date:** 28 October 2026
 **Sessions complete:** 1–6 (6 as 6a, 6b part 1, 6b part 2), 7a, 7b; Session 8 rulings;
 spec session steps 1 to 3; Session 8 build parts 1 and 2; Session 9 specification and build;
 Session 10; Session 11 escrow initialisation; Session 12 mobile sign-in; Session 13
@@ -10,13 +10,12 @@ discovery, accept from the device, the acceptance projection; Session 19 P3 — 
 Session 20 P4 — evidence capture, upload and signed submission; Session 21 P5 — the verifier
 and the attestation; Session 22 P6 — review, approve, reject, dispute and settlement;
 Session 23 S0 — public backend, release build, dApp Store submission; Session 24 — S3,
-hackathon submission, store reviews to v1.0.5
+hackathon submission, store reviews to v1.0.5; Session 25 — TXN-004, app identity, v1.0.6
 **Status:** CLOCK IN hackathon **submitted** 12 October (reference F433A4AE). dApp Store:
-**v1.0.5 (versionCode 6) submitted 25 October**, awaiting review — the fifth submission.
-Every review point is fixed; the last (LEG-001, publisher website) by Solana Mobile support
-setting the publisher website to `https://bountycam.app` (Session 24).
-**Next session:** act on the v1.0.5 review result (Session 24, "Next actions"); then the
-post-hackathon plan (BACKLOG.md "Remaining plan").
+**live since 28 October** — v1.0.6 (versionCode 7), approved on the sixth submission. Store
+link (phone only): `solanadappstore://details?id=app.bountycam`.
+**Next session:** the post-hackathon plan (BACKLOG.md "Session 24", "Session 25", then
+"Remaining plan"); Umair sets the order.
 **Live:** `https://api.bountycam.app`, `https://store.bountycam.app`, `https://bountycam.app`;
 the server is `ubuntu@51.161.153.97` (key login); redeploy with `ops/deploy/deploy.sh`.
 **Deadline:** the hackathon deadline (13 October) has passed; no deadline is open.
@@ -1855,7 +1854,8 @@ test-funds notice on account change; `0cce331` Turn on Location; `8129c99` docs 
 | v1.0.2 (vc 3) | rejected: TXN-001 a new wallet cannot fund; PER-001 location lookups failed | v1.0.3, D167 |
 | v1.0.3 (vc 4) | rejected 16 Oct: LEG-001 publisher website (a GitHub profile) | profile README; v1.0.4 |
 | v1.0.4 (vc 5) | rejected 17 Oct: LEG-001 again | support set the website to bountycam.app; v1.0.5 |
-| v1.0.5 (vc 6) | submitted 25 October, in review | — |
+| v1.0.5 (vc 6) | rejected: TXN-004 wallet error, rejection and cancel messages | v1.0.6, D169 |
+| v1.0.6 (vc 7) | **approved; live 28 October** | — |
 
 v1.0.3 was tested on both phones before submission: the faucet from an empty wallet, the
 24-hour refusal, funding from the empty wallet (the wallet opens), Location off, a fresh sign-in
@@ -1945,12 +1945,52 @@ v1.0.5 was installed on both phones and signed in on the A30 (25 October).
 
 **Next actions.**
 
-1. **Wait for the v1.0.5 review** (release `v1.0.5`, APK sha256 `3416bfcd…5c13`). If approved:
-   README dApp Store row to "live" with the store link; the website's "Get it" line; deck slide
-   7. If rejected: read the codes, fix, and follow the release checklist with versionCode 7.
-   After 5 business days with no answer: "App Review Timeline" in `#dev-answers`.
+1. Done: v1.0.5 was rejected (TXN-004); see Session 25.
 2. **Post-hackathon** (Umair's call on order): BACKLOG.md "Session 24" items, then the remaining
    plan toward a mainnet pilot.
+
+## Session 25 — TXN-004, app identity bountycam.app, v1.0.6 (26 October)
+
+Commits, in order: `f99f441` wallet error messages and v1.0.6 (D169); `e4b38c3` app identity
+`bountycam.app` and `assetlinks.json` (D170); `5a9c8e2` verify accepts unpadded base64 (D171);
+then this records commit. Server deployed at `e4b38c3` and `5a9c8e2`; `SIWS_DOMAIN` set to
+`bountycam.app` in `~/bountycam-env/api.env`; the website re-uploaded with
+`.well-known/assetlinks.json`.
+
+**What landed.**
+
+- **Wallet errors (D169).** Every wallet failure says what happened, whether anything was sent,
+  and what to tap next; a declined or closed wallet is reported at once.
+- **Identity (D170).** Wallets see "bountycam.app" with the icon; asset links are live and
+  verified by Google's API. Seed Vault Wallet still shows "We don't recognize this domain".
+- **Unpadded base64 (D171).** Found by the domain change; 305 API tests pass.
+- **v1.0.6** (versionCode 7), release `v1.0.6`, APK sha256 `c9cf6b5e…7fde`, certificate
+  `cb6d8678…fa38`. Submitted 26 October; the portal shows 1.0.6 (7), In Review.
+
+Tested on the phones before submission: sign-in, fund and accept closed in the wallet (each
+shows "The wallet was closed before you approved…"), a funding approved, and sign-in on the
+Seeker with the new domain.
+
+**Lessons.**
+
+1. **Wallets may return base64 without padding.** Decode both forms. A change in message length
+   (here the SIWS domain) can expose it; sign in on a phone after any SIWS change.
+2. **Asset links do not clear Seed Vault Wallet's domain warning.** Google's API confirms the
+   file; the wallet still warns. Do not promise a reviewer the warning is gone.
+3. **"Network mismatch" means the wallet account is on the wrong cluster.** The Seeker's
+   Dev account was on mainnet; switch it to devnet.
+4. **An accept that is started and abandoned holds the bounty for 300 seconds**, hidden from
+   Find for everyone. Wait it out, or test with a different bounty.
+
+**Next actions.**
+
+1. **Done 28 October: v1.0.6 approved and live.** The listing was checked on the Seeker. README
+   row, website "Get it" line and LISTING.md updated (Script Y). Still open: deck slide 7 and the
+   GitHub profile README's "(in review)" line. The dApp Store has no web page for a listing; the
+   only link is `solanadappstore://details?id=app.bountycam`, which works on a phone with the store.
+2. **Optional:** ask Solana Mobile in `#dev-answers` how Seed Vault Wallet recognises a site.
+3. **Post-hackathon** (Umair's call on order): BACKLOG.md "Session 24" and "Session 25" items,
+   then the remaining plan toward a mainnet pilot.
 
 ---
 

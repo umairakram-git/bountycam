@@ -11,7 +11,9 @@
 | Package | `app.bountycam` (permanent) |
 | Publisher | individual; wallet `FsrzwgGWQJYtdEmPhcLQw5qAoS5cSZDBe5pPvxYfU7DC` (Phantom) |
 | App collection | `7crpBZ2b…jZviA9i5` (minted 6 October, about 0.0176 SOL) |
-| Release v1.0.0 (1) | mint `F12A21WK…x4YwtnkB`, submitted 6 October, in review |
+| Release v1.0.0 (1) | mint `F12A21WK…x4YwtnkB`, submitted 6 October, rejected (PKG-007, PER-001) |
+| Release v1.0.6 (7) | mint `27kfYChn…XQC9ykah`, submitted 26 October, **approved and live 28 October** |
+| Store link | `solanadappstore://details?id=app.bountycam` (opens the listing on a phone; there is no web page) |
 
 ## Text
 

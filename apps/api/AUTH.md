@@ -599,6 +599,11 @@ verify. The placeholder `app.example.com` stands until a real host is chosen; th
 configuration change plus a smoke test, and it is the same question as the app identity
 `uri` and the Digital Asset Links file. Owed by Session 24's packaging.
 
+**Done 26 October (D170, D171).** The app identity `uri` is `https://bountycam.app`, the server
+issues `SIWS_DOMAIN=bountycam.app`, and `https://bountycam.app/.well-known/assetlinks.json` is
+live. Seed Vault Wallet returned the signed message and signature as base64 without `=`
+padding; verify now accepts unpadded base64 (still canonical only).
+
 Still OPEN — the fallback signing path. The `sign_messages` fallback of section 2 is
 unimplemented and unmeasured. Whether a signature obtained that way verifies over the exact
 message bytes with no prefix is untested for the SIWS message specifically; the September

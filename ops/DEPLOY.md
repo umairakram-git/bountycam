@@ -77,8 +77,11 @@ unsigned request; the certificate issuer; ports 3000, 5432 and 7070 closed from 
 - Metro caches inlined `EXPO_PUBLIC_*` values: switching between a release build and the
   development server needs `--clear` (`npx expo start --dev-client --clear`), or the dev
   client keeps the other address. Seen in the architect's sandbox.
-- The SIWS domain and the app identity are unchanged (AUTH.md 14.2); `SIWS_DOMAIN` on the
-  server is the laptop's value.
+- The app identity `uri` is `https://bountycam.app` (`apps/mobile/src/config.ts`, D170) and
+  `SIWS_DOMAIN` in `~/bountycam-env/api.env` is `bountycam.app` (set 26 October; was
+  `app.example.com`). `ops/site/.well-known/assetlinks.json` links `app.bountycam` to the release
+  certificate and goes up with the website. Changing either value means a redeploy and a
+  sign-in test on both phones (AUTH.md 14.2, D171).
 - The signing key and the build procedure are section 10; the listing is `ops/LISTING.md`.
 
 ## 8. The arbiter from the laptop
@@ -128,6 +131,9 @@ sha256 `0ce0feb1bc999f5952b897ea8519a99cb8865fa1d108f29deeb194ac33d053c1`.
 
 v1.0.5: versionCode 6, the same code again, after support changed the publisher website,
 sha256 `3416bfcdffe0ac55d2df7ef5a5a999890b51a4911e60a1a08c91b13d48cd5c13`.
+
+v1.0.6: versionCode 7, clear wallet error messages (D169) and the bountycam.app identity
+(D170), sha256 `c9cf6b5e1af7a76be005cf51ef1906bec81f9147d389e078fad59149841d7fde`.
 
 ## 11. The devnet faucet (D167)
 

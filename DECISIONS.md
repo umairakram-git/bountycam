@@ -3290,3 +3290,44 @@ version bump, the publisher page, the site video (Umair and the architect, 12–
    click-to-play card under "How it works": nothing loads from YouTube until play, then
    `youtube-nocookie.com` plays in place. The privacy policy says so (updated 16 October).
 
+**D169 — Wallet errors say what happened (TXN-004); v1.0.6 (architect, 26 October).**
+
+v1.0.5 was rejected for TXN-004: unclear messaging after a wallet error, rejection or
+cancellation. A declined funding showed "Funding…" for about 90 seconds and then a vague
+message; sign-in showed raw errors.
+
+1. **One classifier.** `apps/mobile/src/wallet/reason.ts` maps a thrown wallet error to
+   `DECLINED`, `CLOSED`, `TIMEOUT`, `NO_WALLET`, `NOT_SUBMITTED` or `OTHER`: MWA protocol codes
+   -1 and -3 are declined, -4 is not submitted; `ERROR_WALLET_NOT_FOUND`; "cancelled" and
+   "timed out" messages.
+2. **One message builder.** `apps/mobile/src/wallet/messages.ts`: every message says what
+   happened, whether anything was sent or signed, and which button to tap next. Sign-in, fund,
+   accept, approve, reject and evidence signing use it.
+3. **Stop at once when nothing was sent.** Declined, closed, no wallet and not submitted return
+   immediately instead of watching the chain; only an unknown outcome waits, and then says how
+   to check.
+4. **While the wallet is open,** Fund and Accept say "Approve the transaction in your wallet.
+   After that, confirming with Solana can take up to a minute."
+
+Tested on the Seeker and the A30: sign-in, fund and accept closed in the wallet, and a funding
+approved. v1.0.6, versionCode 7.
+
+**D170 — App identity `bountycam.app` and Digital Asset Links (Umair; architect, 26 October).**
+
+1. `APP_IDENTITY.uri` is `https://bountycam.app` (was the D106 placeholder
+   `https://bountycam.invalid`); the server's `SIWS_DOMAIN` is `bountycam.app` (was
+   `app.example.com`). The wallet now shows "bountycam.app" with the app icon.
+2. `ops/site/.well-known/assetlinks.json` links `app.bountycam` to the release certificate
+   (`CB:6D:86:78…FA:38`); live, and confirmed by Google's Digital Asset Links API.
+3. **Seed Vault Wallet still says "We don't recognize this domain."** Asset links did not
+   change it; the wallet appears to use its own list. Accepted for the v1.0.6 submission; the
+   question to Solana Mobile is in BACKLOG.
+
+**D171 — Verify accepts unpadded base64 (architect, 26 October).**
+
+After the domain change, sign-in failed with 400 `INVALID_REQUEST`. Seed Vault Wallet returns
+base64 without `=` padding: the old 333-byte message needed none, the new 331-byte one needs
+`==`. `decodeBase64Strict` in `apps/api/src/auth/routes.ts` adds missing padding, still refuses
+a length of 1 mod 4 and any non-canonical encoding. Tests 39 and 40 in
+`apps/api/test/auth.test.ts`, both red before the fix; 305 pass. Deployed `5a9c8e2`.
+

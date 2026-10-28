@@ -1,6 +1,6 @@
 # BountyCam — Backlog
 
-**As at:** 25 October 2026 · hackathon submitted · dApp Store v1.0.5 in review
+**As at:** 28 October 2026 · hackathon submitted · BountyCam live on the dApp Store (v1.0.6)
 
 ---
 
@@ -932,8 +932,8 @@ open.
 
 - **The release APK is 91 MB** — four processor architectures; an arm64-only build
   (`-PreactNativeArchitectures=arm64-v8a`) would be about a third, for the next release.
-- **The app identity URI is still `https://bountycam.invalid`** — AUTH.md 14.2; changing it
-  touches the SIWS domain, so it waits for a session that can retest sign-in.
+- **The app identity URI** — done 26 October: `https://bountycam.app` with Digital Asset Links
+  (D170).
 - **The website is uploaded by hand** — no Wrangler configuration; a scripted deploy must carry
   the custom domain or it would drop it.
 - **The terms and privacy pages are not legal advice** — enough for a devnet test release; real
@@ -956,7 +956,8 @@ changed by support to bountycam.app on 25 October (D167, D168).
   "Failed to update balances" and BountyCam's sign-in failed with an MWA `authorize`
   timeout; the A30 signed in at once. The wallet side, not ours; if it recurs, a friendlier
   message than the raw error ("The wallet didn't respond. Open it, then try again").
-- **After store approval:** README dApp Store row, the website's "Get it" line, deck slide 7.
+- **After store approval:** README dApp Store row and the website's "Get it" line done 28
+  October (Script Y); deck slide 7 still open.
 - **The GitHub profile README** (`umairakram-git/umairakram-git`) stays; update its "(in
   review)" line on approval.
 - **Faucet capacity.** 200 grants a day at 0.02 SOL is up to 4 SOL a day against a 4.5 SOL
@@ -964,8 +965,25 @@ changed by support to bountycam.app on 25 October (D167, D168).
 - **DMARC.** Cloudflare recommends a DMARC record for `bountycam.app`; start with `p=none`
   and a reporting address so the Gmail send-as path is not blocked.
 - **`docs/business-model/model.py` docstring** says "slide 14"; the deck slide is 15.
-- Still open from Session 23: arm64-only APK; the app identity URI `bountycam.invalid`; a
-  scripted website deploy; legal review before real money; image digests.
+- Still open from Session 23: arm64-only APK; a scripted website deploy; legal review before
+  real money; image digests. (The app identity URI: done in Session 25, D170.)
+
+## Session 25 (26 October)
+
+**Closed.** TXN-004, wallet error messages (D169); the app identity URI and Digital Asset Links
+(D170); unpadded base64 at verify (D171); the Seeker sign-in timeout now gets the friendly
+"didn't respond" message (D169).
+
+**New.**
+
+- **Seed Vault Wallet: "We don't recognize this domain"** for bountycam.app, even with
+  `assetlinks.json` live and verified. Ask Solana Mobile in `#dev-answers` how a site becomes
+  recognised.
+- **Find hides a bounty from the Scout who holds it.** Requesting an accept voucher reserves the
+  bounty for 300 seconds, and Find hides it from everyone, the holder included. Show it to the
+  holder as "Held by you" with the time left.
+- **The A30 has an early v1.0.6 build** (before the identity change). Reinstall the release APK
+  before the next test there.
 
 ---
 
